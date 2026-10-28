@@ -23,7 +23,7 @@ async function loadAvailability() {
   const following = shiftMonth(state.base.y, state.base.m, 2);
   const end = ymd(following.y, following.m, 1);
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000);
+  const timeout = setTimeout(() => controller.abort(), 18000);
   try {
     const query = new URLSearchParams({ start, end });
     const response = await fetch(`/api/availability?${query}`, {
