@@ -1,5 +1,11 @@
-const AIRBNB_ICAL_URL = 'https://www.airbnb.com/calendar/ical/42379787.ics?s=KLISTRA_IN_NYCKELN_FRAN_AIRBNB';
-const CORS_PROXY = 'https://api.allorigins.win/raw?url=';
+const AIRBNB_ICAL_URL = 'https://www.airbnb.se/calendar/ical/42379787.ics?t=21aca5b4efbe43c88f3307ffbcd96ed0';
+const CORS_PROXIES = [
+  { url: (target) => `https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`, json: false },
+  { url: (target) => `https://api.allorigins.win/get?url=${encodeURIComponent(target)}`, json: true },
+  { url: (target) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(target)}`, json: false },
+  { url: (target) => `https://corsproxy.io/?url=${encodeURIComponent(target)}`, json: false },
+  { url: (target) => target, json: false }
+];
 
 const MONTH_NAMES = ['Januari', 'Februari', 'Mars', 'April', 'Maj', 'Juni', 'Juli', 'Augusti', 'September', 'Oktober', 'November', 'December'];
 const WEEKDAYS = ['Mån', 'Tis', 'Ons', 'Tor', 'Fre', 'Lör', 'Sön'];
@@ -39,13 +45,19 @@ async function loadAvailability() {
     render();
     return;
   }
-  try {
-    const response = await fetch(CORS_PROXY + encodeURIComponent(AIRBNB_ICAL_URL));
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    state.blocked = parseICal(await response.text());
-    state.status = 'ok';
-  } catch (err) {
-    state.status = 'error';
+  for (const proxy of CORS_PROXIES) {
+    try {
+      const response = await fetch(proxy.url(AIRBNB_ICAL_URL));
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      let text = await response.text();
+      if (proxy.json) text = JSON.parse(text).contents || '';
+      if (!text.includes('VCALENDAR')) throw new Error('Ogiltigt kalenderflöde');
+      state.blocked = parseICal(text);
+      state.status = 'ok';
+      break;
+    } catch (err) {
+      state.status = 'error';
+    }
   }
   render();
 }
