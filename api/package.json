@@ -1,0 +1,16 @@
+{
+  "name": "skadevi-calendar-api",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/functions/*.js",
+  "engines": {
+    "node": "22.x"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@azure/functions": "4.17.0",
+    "ical.js": "2.2.1"
+  }
+}

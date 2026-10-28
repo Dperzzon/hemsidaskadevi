@@ -1,12 +1,3 @@
-const AIRBNB_ICAL_URL = 'https://www.airbnb.se/calendar/ical/42379787.ics?t=21aca5b4efbe43c88f3307ffbcd96ed0';
-const CORS_PROXIES = [
-  { url: (target) => `https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`, json: false },
-  { url: (target) => `https://api.allorigins.win/get?url=${encodeURIComponent(target)}`, json: true },
-  { url: (target) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(target)}`, json: false },
-  { url: (target) => `https://corsproxy.io/?url=${encodeURIComponent(target)}`, json: false },
-  { url: (target) => target, json: false }
-];
-
 const MONTH_NAMES = ['Januari', 'Februari', 'Mars', 'April', 'Maj', 'Juni', 'Juli', 'Augusti', 'September', 'Oktober', 'November', 'December'];
 const WEEKDAYS = ['Mån', 'Tis', 'Ons', 'Tor', 'Fre', 'Lör', 'Sön'];
 
@@ -20,44 +11,43 @@ function ymd(y, m, d) {
   return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 }
 
-function parseICal(text) {
-  const blocked = new Set();
-  const events = text.match(/BEGIN:VEVENT[\s\S]*?END:VEVENT/g) || [];
-  events.forEach((event) => {
-    const startMatch = event.match(/DTSTART(?:;[^:\n]*)?:\s*(\d{8})/);
-    const endMatch = event.match(/DTEND(?:;[^:\n]*)?:\s*(\d{8})/);
-    if (!startMatch) return;
-    const start = startMatch[1];
-    const end = endMatch ? endMatch[1] : start;
-    const cursor = new Date(`${start.slice(0, 4)}-${start.slice(4, 6)}-${start.slice(6, 8)}T00:00:00Z`);
-    const endDate = new Date(`${end.slice(0, 4)}-${end.slice(4, 6)}-${end.slice(6, 8)}T00:00:00Z`);
-    while (cursor < endDate) {
-      blocked.add(ymd(cursor.getUTCFullYear(), cursor.getUTCMonth(), cursor.getUTCDate()));
-      cursor.setUTCDate(cursor.getUTCDate() + 1);
-    }
-  });
-  return blocked;
+function shiftMonth(y, m, offset) {
+  const date = new Date(y, m + offset, 1);
+  return { y: date.getFullYear(), m: date.getMonth() };
 }
 
 async function loadAvailability() {
-  if (AIRBNB_ICAL_URL.includes('KLISTRA_IN')) {
-    state.status = 'unconfigured';
-    render();
-    return;
-  }
-  for (const proxy of CORS_PROXIES) {
-    try {
-      const response = await fetch(proxy.url(AIRBNB_ICAL_URL));
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      let text = await response.text();
-      if (proxy.json) text = JSON.parse(text).contents || '';
-      if (!text.includes('VCALENDAR')) throw new Error('Ogiltigt kalenderflöde');
-      state.blocked = parseICal(text);
-      state.status = 'ok';
-      break;
-    } catch (err) {
-      state.status = 'error';
+  state.status = 'loading';
+  render();
+  const start = ymd(state.base.y, state.base.m, 1);
+  const following = shiftMonth(state.base.y, state.base.m, 2);
+  const end = ymd(following.y, following.m, 1);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  try {
+    const query = new URLSearchParams({ start, end });
+    const response = await fetch(`/api/availability?${query}`, {
+      cache: 'no-store',
+      signal: controller.signal
+    });
+    if (!response.ok) throw new Error('Kalender-API svarade med fel');
+    const data = await response.json();
+    if (!data || !Array.isArray(data.blocked) || !data.blocked.every((date) =>
+      typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date) &&
+      date >= start && date < end &&
+      !Number.isNaN(Date.parse(`${date}T00:00:00Z`)) &&
+      new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) === date
+    )) {
+      throw new Error('Kalender-API returnerade ett ogiltigt svar');
     }
+    state.blocked = new Set(data.blocked);
+    state.status = 'ok';
+  } catch (error) {
+    state.blocked.clear();
+    state.status = 'error';
+    console.error('Kalenderns tillgänglighet kunde inte hämtas.');
+  } finally {
+    clearTimeout(timeout);
   }
   render();
 }
@@ -84,8 +74,7 @@ function monthGrid(y, m) {
 
 function renderMonth(y, m) {
   const title = `${MONTH_NAMES[m]} ${y}`;
-  const cells = monthGrid(y, m);
-  const days = cells.map((cell) => {
+  const days = monthGrid(y, m).map((cell) => {
     if (cell.blank) return '<span class="cal-day cal-blank"></span>';
     const classes = ['cal-day'];
     if (cell.blocked) classes.push('cal-booked');
@@ -103,17 +92,22 @@ function renderMonth(y, m) {
 function render() {
   const container = document.getElementById('availability-calendar');
   if (!container) return;
+  const description = document.getElementById('calendar-description');
+  if (description) description.hidden = state.status !== 'ok';
+  container.setAttribute('aria-busy', String(state.status === 'loading'));
   const notice = {
     loading: 'Kalendern hämtas …',
-    unconfigured: 'Kalendern visar för tillfället alla datum som tillgängliga. Kontakta oss för bekräftad tillgänglighet.',
-    error: 'Kalendern kunde inte läsas just nu. Kontakta oss så bekräftar vi tillgängligheten.',
+    error: 'Kalendern kunde inte läsas just nu. Tillgängligheten är okänd. Kontakta oss så bekräftar vi tillgängligheten.',
     ok: 'Gröna datum är bokade eller ej tillgängliga.'
   }[state.status];
-  const y = state.base.y;
-  const m = state.base.m;
-  const next = { y: m === 11 ? y + 1 : y, m: (m + 1) % 12 };
+  if (state.status !== 'ok') {
+    container.innerHTML = `<p class="cal-notice cal-notice-${state.status}">${notice}</p>`;
+    return;
+  }
+  const { y, m } = state.base;
+  const next = shiftMonth(y, m, 1);
   container.innerHTML = `
-    <p class="cal-notice cal-notice-${state.status}">${notice}</p>
+    <p class="cal-notice cal-notice-ok">${notice}</p>
     <div class="cal-nav">
       <button type="button" class="cal-nav-btn" id="cal-prev" aria-label="Föregående månader">&#8592;</button>
       <button type="button" class="cal-nav-btn" id="cal-next" aria-label="Nästa månader">&#8594;</button>
@@ -121,18 +115,16 @@ function render() {
     <div class="cal-months">
       ${renderMonth(y, m)}
       ${renderMonth(next.y, next.m)}
-    </div>`;
+    </div>
+    <div class="cal-legend"><span class="cal-legend-item"><span class="cal-legend-dot cal-legend-free"></span>Ledigt</span><span class="cal-legend-item"><span class="cal-legend-dot cal-legend-booked"></span>Bokat / ej tillgängligt</span></div>`;
   document.getElementById('cal-prev').addEventListener('click', () => {
-    state.base = state.base.m === 0 ? { y: y - 1, m: 11 } : { y, m: m - 1 };
-    render();
+    state.base = shiftMonth(y, m, -1);
+    loadAvailability();
   });
   document.getElementById('cal-next').addEventListener('click', () => {
-    state.base = state.base.m === 11 ? { y: y + 1, m: 0 } : { y, m: m + 1 };
-    render();
+    state.base = shiftMonth(y, m, 1);
+    loadAvailability();
   });
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-  render();
-  loadAvailability();
-});
+document.addEventListener('DOMContentLoaded', loadAvailability);
