@@ -8,7 +8,7 @@
     /* ---- Hero ---- */
     'hero': {
       remote: WIX + 'c4c03c_6fe34c498ef043949b95eb01baa8bb03~mv2.jpg/v1/crop/x_0,y_80,w_3000,h_1789/fill/w_2111,h_1252,al_c,q_90,usm_0.66_1.00_0.01,enc_avif,quality_auto/Skadevi%20G%C3%A5rd%20Foto_edited.jpg',
-      local: BASE + 'startsida.jpeg'
+      local: BASE + 'Startsida.jpeg'
     },
 
     /* ---- Gallery ---- */
