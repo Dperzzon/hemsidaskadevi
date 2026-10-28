@@ -126,7 +126,7 @@
     /* ---- OG / meta ---- */
     'og-image': {
       remote: WIX + 'c4c03c_6fe34c498ef043949b95eb01baa8bb03~mv2.jpg',
-      local: BASE + 'og-image.jpg'
+      local: BASE + 'Startsida.jpeg'
     },
 
     /* ---- Hero strip cards ---- */
