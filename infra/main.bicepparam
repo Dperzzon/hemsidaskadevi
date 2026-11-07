@@ -1,14 +1,18 @@
 using './main.bicep'
 
-// Ändra värden här för att styra namn, region och taggar.
+// Ändra värden här för att styra resursgrupp, Static Web App, regioner och taggar.
+param resourceGroupName = 'rg-skadevi-prod'
+
+param resourceGroupLocation = 'swedencentral'
+
 param staticWebAppName = 'hemsida-skadevi-prod'
 
-param location = 'westeurope'
+param staticWebAppLocation = 'westeurope'
 
-param skuTier = 'Free'
+param environment = 'prod'
 
-param tags = {
-  Owner: 'Skadevi Herrgård'
-  Environment: 'prod'
-  ManagedBy: 'GitHub Actions'
-}
+param owner = 'Skadevi Herrgård'
+
+param sku = 'Free'
+
+param customDomain = 'www.skadeviherrgard.com'

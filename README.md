@@ -72,25 +72,32 @@ garanteras.
 
 ## Azure-infrastruktur
 
-`infra/main.bicep` skapar en Azure Static Web App på Free-nivån (0 kr/månad)
-med ett hanterat API. Ingen separat Function App, lagring eller databas
-behövs för denna arkitektur. Mallen kopplar inte GitHub, driftsätter inte kod
-och ändrar inte domäner eller DNS. `staticwebapp.config.json` anger Node.js 22
-för API:et, rena URL:er enligt sitemap.xml och säkerhetsrubriker.
-Free saknar SLA; kontrollera aktuell tillgänglighet, kvoter och kostnader för
-din prenumeration och region innan du skapar resurser.
+Hela infrastrukturen hanteras via Bicep, inklusive resursgruppen. En enda
+subscription-scope-deployment skapar allt (0 kr/månad):
 
-Namn, region och taggar styrs i `infra/main.bicepparam`. Static Web Apps
-stöds inte i alla regioner; providerns metadata listar Central US, East
-US 2, West US 2, West Europe och East Asia, och `westeurope` är därför
-närmast lämpliga region. Granska först vad som skulle skapas:
+- `infra/main.bicep` — targetScope `subscription`; skapar resursgruppen
+  `rg-skadevi-prod` deklarativt och anropar modulen i `infra/modules/`.
+- `infra/modules/staticwebapp.bicep` — targetScope `resourceGroup`; skapar
+  Static Web App `hemsida-skadevi-prod` på Free-nivån med hanterat API för
+  kalender-API:et. Ingen separat Function App, lagring eller databas behövs.
+- `infra/main.bicepparam` — alla namn, regioner, SKU, domän och taggar.
+  Resursgruppen ligger i `swedencentral`; Static Web Apps finns bara i vissa
+  regioner, så SWA:en ligger i `westeurope`.
+- Mallen kopplar inte GitHub, driftsätter inte kod och ändrar inte domäner
+  eller DNS. `staticwebapp.config.json` anger Node.js 22 för API:et, rena
+  URL:er enligt sitemap.xml och säkerhetsrubriker.
+- Free saknar SLA; kontrollera aktuell tillgänglighet, kvoter och kostnader
+  för din prenumeration och region innan du skapar resurser.
+
+Granska först vad som skulle skapas (deploymenten är idempotent och fungerar
+även när resursgruppen redan finns):
 
 ```powershell
-az deployment group what-if --resource-group <resursgrupp> --template-file .\infra\main.bicep --parameters .\infra\main.bicepparam
+az deployment sub what-if --location swedencentral --template-file .\infra\main.bicep --parameters .\infra\main.bicepparam
 ```
 
 Efter separat godkännande av resursskapande kan samma parametrar användas med
-`az deployment group create` i stället för `what-if`. Skapa inte en resurs
+`az deployment sub create` i stället för `what-if`. Skapa inte en resurs
 förrän prenumeration, region, kvoter och kostnader har kontrollerats.
 Mallen ändrar inte appinställningar vid senare körningar. Ställ in den nya,
 roterade kalenderadressen som `AIRBNB_ICAL_URL` i Static Web Apps

@@ -8,9 +8,17 @@ Inga hemligheter finns i repot.
 
 | Resurs | Tjänst | Nivå | Kostnad/månad |
 |---|---|---|---|
-| `hemsida-skadevi-prod` | Azure Static Web Apps | Free | 0 kr |
+| `rg-skadevi-prod` | Resource Group (via Bicep) | — | 0 kr |
+| `hemsida-skadevi-prod` | Azure Static Web Apps (westeurope) | Free | 0 kr |
 | Hanterat API (`api/`) | Azure Functions (ingår i SWA) | Ingår i Free | 0 kr |
 
+- **Hela infrastrukturen hanteras via Bicep**: en enda subscription-scope-
+  deployment skapar resursgruppen och Static Web App. Inga resurser skapas
+  manuellt, vare sig i portalen eller med `az group create`.
+- `infra/main.bicep` (subscription-scope) skapar resursgruppen och anropar
+  modulen `infra/modules/staticwebapp.bicep` (resourceGroup-scope) som skapar
+  Static Web App. Alla namn, regioner och taggar styrs från
+  `infra/main.bicepparam` — inget är hårdkodat i mallarna.
 - Static Web Apps Free innehåller både statisk frontend och det hanterade
   kalender-API:et. Ingen Function App, SQL, lagring eller App Service behövs.
 - Free-nivån saknar SLA och har kvoter (t.ex. 100 GB bandbredd/månad och
@@ -18,59 +26,74 @@ Inga hemligheter finns i repot.
   Kontrollera aktuella kvoter på Microsofts sida för Static Web Apps.
 - Innehållet betjänas globalt via Static Web Apps; regionen styr bara var
   API:et och staging-miljöer körs.
-- Region: Azure-providern `Microsoft.Web/staticSites` registrerar endast
-  regionerna Central US, East US 2, West US 2, West Europe och East Asia.
-  **Sweden Central stöds inte** för Static Web Apps och rekommendationen är
-  därför `westeurope` (Nederländerna), som är närmast befintliga region i
-  Europa. Det är dock enbart ägaren som avgör slutligt val — ändra
-  `location` i `infra/main.bicepparam` innan driftsättning.
+- Regioner: resursgruppen ligger i `swedencentral` (valfritt, oberoende av
+  SWA). Static Web Apps finns bara i vissa regioner (providern registrerar
+  Central US, East US 2, West US 2, West Europe och East Asia), så SWA:en
+  placeras i `westeurope`, närmast befintliga region i Europa. Båda kan
+  ändras i `infra/main.bicepparam`.
+- **Obs (verifierat 2026-11):** prenumerationens Azure-policy avvisar
+  `westeurope` för nya resurser ("The selected region is currently not
+  accepting new customers"). Validering via `az deployment sub validate`
+  lyckades för `eastus2`, `westus2`, `centralus` och `eastasia`. Sålänge
+  `staticWebAppLocation` är `westeurope` misslyckas därför deploymenten i
+  steget för resursskapande; ändra parametern till en av de validerade
+  regionerna (rekommenderas: `eastus2`) när du vill driftsätta.
 
 ## Steg 1: Skapa resurserna i Azure (en gång)
 
 Förutsättningar: Azure CLI inloggad (`az login`) med en prenumeration vald
 (`az account set --subscription <namn>`), och Node.js 22 installerat.
+Resursgruppen skapas av mallen — kör inte `az group create` manuellt.
 
-1. Skapa resursgruppen (om den inte finns):
-
-   ```powershell
-   az group create --name rg-skadevi-prod --location swedencentral
-   ```
-
-2. Granska vad som skulle skapas (read-only, skapar ingenting):
+1. Granska vad som skulle skapas (read-only, skapar ingenting):
 
    ```powershell
-   az deployment group what-if `
-     --resource-group rg-skadevi-prod `
+   az deployment sub what-if `
+     --location swedencentral `
+     --name skadevi-prod `
      --template-file .\infra\main.bicep `
      --parameters .\infra\main.bicepparam
    ```
 
-3. Skapa resurserna:
+   (`--location` gäller endast deploymentens metadata; `swedencentral`
+   är den valda platsen för resursgruppen.)
+
+2. Skapa resurserna — resursgruppen och Static Web App i en enda
+   deployment. Deploymenten är idempotent och kan köras om även när
+   resursgruppen redan finns:
 
    ```powershell
-   az deployment group create `
-     --resource-group rg-skadevi-prod `
+   az deployment sub create `
+     --location swedencentral `
+     --name skadevi-prod `
      --template-file .\infra\main.bicep `
      --parameters .\infra\main.bicepparam
    ```
 
-Namn, region och taggar styrs i `infra/main.bicepparam`. Eftersom Static
-Web Apps inte stöds i `swedencentral`, ändra `location` till `westeurope`
-i `infra/main.bicepparam` innan du kör — inget annat behöver ändras.
-(`swedencentral` kan behållas som plats för resursgruppen, som är oberoende
-av Static Web App-resursens region.)
+Alla namn, regioner, SKU och taggar styrs i `infra/main.bicepparam`
+(resourceGroupName, resourceGroupLocation, staticWebAppName,
+staticWebAppLocation, environment, owner, sku, customDomain). De nya
+utdatavärdena `staticWebAppId` och `staticWebAppDefaultHostname` kan
+hämtas med:
+
+```powershell
+az deployment sub show --name skadevi-prod `
+  --query "properties.outputs.staticWebAppDefaultHostname.value" -o tsv
+```
 
 ## Steg 2: Aktivera deployment-flödet (en gång)
 
 1. Hämta deployment-token från Azure-portalen:
    - Öppna Static Web App **hemsida-skadevi-prod** → **Översikt** →
      **Hantera deployment-token** → kopiera token.
-   - Alternativ via CLI (ersätt `<id>` med utdatan `staticWebAppId` från
-     steg 1):
+   - Alternativ via CLI (ersätt `<id>` med utdatavärdet `staticWebAppId`
+     från steg 1):
 
      ```powershell
+     $id = az deployment sub show --name skadevi-prod `
+       --query "properties.outputs.staticWebAppId.value" -o tsv
      az rest --method POST `
-       --url "https://management.azure.com/<id>/listSecrets?api-version=2024-11-01"
+       --url "https://management.azure.com/$id/listSecrets?api-version=2024-11-01"
      ```
 
 2. Lägg till hemligheten i GitHub (öppna endast din egen terminal/webbläsare):
@@ -133,8 +156,9 @@ nu — det krävs för att validera domänen):
 
 - Ändra filer → commit → push till `main`. Workflown bygger, testar och
   publicerar automatiskt.
-- Ändra resursnamn, region eller taggar i `infra/main.bicepparam` och kör
-  `az deployment group what-if` + `create` igen.
+- Ändra namn, regioner, SKU eller taggar i `infra/main.bicepparam` och kör
+  `az deployment sub what-if` + `az deployment sub create` igen (idempotent,
+  påverkar inte webbinnehåll som driftsätts av GitHub Actions).
 - Kör tester lokalt innan push:
 
   ```powershell
@@ -155,7 +179,7 @@ nu — det krävs för att validera domänen):
 | `/priser` m.fl. ger 404 | Kontrollera att `staticwebapp.config.json` innehåller routen och att den driftsatts. |
 | Domänvalideringen fastnar | Kontrollera CNAME-posten med `nslookup www.skadeviherrgard.com` och vänta på DNS-propagering. |
 | Sajten visar gammalt innehåll | Tvinga uppdatering (Ctrl+F5); SWA cachar assets kortvarigt. |
-| Fel om region/location vid skapande | Static Web Apps stöder inte alla regioner — sätt `location` till `westeurope` i `infra/main.bicepparam`. |
+| Fel om region/location vid skapande | Static Web Apps stöder bara vissa regioner och prenumerationens policy avvisar `westeurope` för nya resurser — byt `staticWebAppLocation` till `eastus2`, `westus2`, `centralus` eller `eastasia` i `infra/main.bicepparam` (alla validerade 2026-11). |
 
 Användbara kommandon:
 
@@ -171,5 +195,8 @@ az staticwebapp appsettings list --name hemsida-skadevi-prod --resource-group rg
 - `AIRBNB_ICAL_URL` lagras endast i Azure-appinställningar, aldrig i Git.
 - Workflown har `permissions: contents: read` och kör testerna innan
   driftsättning.
-- Inga DNS-poster eller Azure-resurser skapas av denna mall utöver den
-  enskilda Static Web App-resursen.
+- Inga DNS-poster skapas av mallen. Den enda Azure-infrastrukturen är
+  resursgruppen och Static Web App-resursen, båda hanterade via Bicep.
+  Domänkopplingen (customDomain) används hittills bara som tagg; den
+  verkliga kopplingen görs enligt steg 4 och kräver DNS-ändring hos
+  domänleverantören.
