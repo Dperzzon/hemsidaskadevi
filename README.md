@@ -72,18 +72,21 @@ garanteras.
 
 ## Azure-infrastruktur
 
-`infra/main.bicep` skapar en Azure Static Web App på Free-nivån med ett
-hanterat API. Ingen separat Function App, lagring eller databas behövs för
-denna arkitektur. Mallen kopplar inte GitHub, driftsätter inte kod och ändrar
-inte domäner eller DNS. `staticwebapp.config.json` anger Node.js 22 för API:et.
+`infra/main.bicep` skapar en Azure Static Web App på Free-nivån (0 kr/månad)
+med ett hanterat API. Ingen separat Function App, lagring eller databas
+behövs för denna arkitektur. Mallen kopplar inte GitHub, driftsätter inte kod
+och ändrar inte domäner eller DNS. `staticwebapp.config.json` anger Node.js 22
+för API:et, rena URL:er enligt sitemap.xml och säkerhetsrubriker.
 Free saknar SLA; kontrollera aktuell tillgänglighet, kvoter och kostnader för
 din prenumeration och region innan du skapar resurser.
 
-Förutsättningar är Azure CLI med Bicep, vald prenumeration och en befintlig
-resursgrupp. Granska först vad som skulle skapas:
+Namn, region och taggar styrs i `infra/main.bicepparam`. Static Web Apps
+stöds inte i alla regioner; providerns metadata listar Central US, East
+US 2, West US 2, West Europe och East Asia, och `westeurope` är därför
+närmast lämpliga region. Granska först vad som skulle skapas:
 
 ```powershell
-az deployment group what-if --resource-group <resursgrupp> --template-file .\infra\main.bicep --parameters staticWebAppName=<resursnamn> location=westeurope
+az deployment group what-if --resource-group <resursgrupp> --template-file .\infra\main.bicep --parameters .\infra\main.bicepparam
 ```
 
 Efter separat godkännande av resursskapande kan samma parametrar användas med
@@ -95,13 +98,16 @@ roterade kalenderadressen som `AIRBNB_ICAL_URL` i Static Web Apps
 parameterfiler, terminalkommandon, loggar eller versionshantering. API:et
 visar okänd tillgänglighet tills inställningen och appkoden är på plats.
 
-Applikationskod måste driftsättas separat. Paketera endast publika webbassets
-och `staticwebapp.config.json` som frontend; inkludera inte `api`, tester,
-infrastruktur, Git-filer, beroenden eller lokala inställningar där. Skicka
-`api` separat som hanterat API med Azure Static Web Apps CLI eller en
-granskad distributionspipeline. Testa först en separat miljö och kontrollera
-API, sidor, länkar och felhantering innan domänen flyttas. Mall, paketering,
-driftsättning och verkligt kalenderflöde är ännu inte verifierade i Azure.
+Driftsättning av kod sker med `.github/workflows/deploy.yml`, som vid push
+till `main` kör testerna och publicerar frontend plus `api/` som hanterat API
+till Static Web Apps. Workflow kräver GitHub-hemligheten
+`AZURE_STATIC_WEB_APPS_API_TOKEN` med deployment-token från Azure-portalen;
+den sätts enligt `docs/driftsattning.md`. Den tidigare GitHub
+Pages-workflowen är ersatt och Pages bör stängas av i repo-inställningarna.
+Mall, paketering, driftsättning och verkligt kalenderflöde är ännu inte
+verifierade i Azure. Fullständig steg-för-steg-guide för driftsättning,
+uppdatering, domänkoppling och felsökning finns i
+`docs/driftsattning.md`.
 
 Microsofts referenser: [Bicep-resursen](https://learn.microsoft.com/en-us/azure/templates/microsoft.web/2024-11-01/staticsites),
 [API-inställningar](https://learn.microsoft.com/en-us/azure/static-web-apps/application-settings),

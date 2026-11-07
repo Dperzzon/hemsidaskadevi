@@ -1,31 +1,77 @@
-name: Deploy till GitHub Pages
+name: Deploy till Azure Static Web Apps
 
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
-  group: pages
+  group: swa-deploy-main
   cancel-in-progress: true
 
+env:
+  NODE_VERSION: '22'
+  # Frontend paketeras i en ren build-mapp; infra, .github, docs, tester och
+  # api-källkod publiceras aldrig som webbfil.
+  APP_LOCATION: 'build'
+  API_LOCATION: 'api'
+  OUTPUT_LOCATION: ''
+  # Lägg till hemligheten i repo-inställningarna enligt docs/driftsattning.md.
+  # Namnet på hemligheten kan behöva anpassas om du byter namn i dokumentet.
+  SWA_TOKEN_NAME: 'AZURE_STATIC_WEB_APPS_API_TOKEN'
+
 jobs:
-  deploy:
+  test:
+    name: Tester
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/configure-pages@v5
+      - uses: actions/setup-node@v4
         with:
-          enablement: true
-      - uses: actions/upload-pages-artifact@v3
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+      - name: Installera API-beroenden
+        run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: api
+      - name: Kör API-tester
+        run: npm test
+        working-directory: api
+      - name: Kör kalenderklienttester
+        run: node --test tests/calendar-client.test.js
+
+  build_and_deploy:
+    name: Bygg och driftsätt
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Kontrollera deployment-token
+        env:
+          SWA_TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+        run: |
+          if [ -z "$SWA_TOKEN" ]; then
+            echo "::error::GitHub-hemligheten AZURE_STATIC_WEB_APPS_API_TOKEN saknas. Kopiera deployment-token från Static Web App i Azure-portalen (Översikt -> Hantera deployment-token) och lägg till den i repo-inställningarna enligt docs/driftsattning.md."
+            exit 1
+          fi
+      - name: Paketera frontend
+        run: |
+          mkdir build
+          cp index.html 404.html robots.txt sitemap.xml staticwebapp.config.json build/
+          cp -r css js pages images build/
+          ls -la build/
+      - name: Bygg API och driftsätt till Azure Static Web Apps
+        id: deploy
+        uses: azure/static-web-apps-deploy@v1
         with:
-          path: .
-      - id: deployment
-        uses: actions/deploy-pages@v4
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: 'upload'
+          app_location: ${{ env.APP_LOCATION }}
+          api_location: ${{ env.API_LOCATION }}
+          output_location: ${{ env.OUTPUT_LOCATION }}
+          skip_app_build: true
+          skip_api_build: false
