@@ -3,7 +3,7 @@ using './main.bicep'
 // Ändra värden här för att styra namn, region och taggar.
 param staticWebAppName = 'hemsida-skadevi-prod'
 
-param location = 'swedencentral'
+param location = 'westeurope'
 
 param skuTier = 'Free'
 
