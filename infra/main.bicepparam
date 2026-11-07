@@ -33,7 +33,7 @@ param keyVaultSecretName = 'airbnb-ical-url'
 //   'tlsBinding'   – TLS-bindning med SNI + thumbprint
 param customDomainStage = 'disabled'
 
-// Valfritt: objekt-ID för din användare så att du får rollen
-// "Key Vault Secrets Officer" och kan registrera kalenderhemligheten.
-// Hitta ditt ID med: az ad signed-in-user show --query id -o tsv
-param secretAdminPrincipalId = ''
+// Objekt-ID för din användare så att du får rollen "Key Vault Secrets
+// Officer" på kv-skadevi-prod och kan registrera/rotera kalenderhemligheten.
+// (Hittade ditt ID med: az ad signed-in-user show --query id -o tsv)
+param secretAdminPrincipalId = '3e197323-a929-40b0-a164-c8cb5b33b521'

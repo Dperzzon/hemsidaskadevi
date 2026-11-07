@@ -48,8 +48,8 @@ param customDomain string
 ])
 param customDomainStage string = 'disabled'
 
-@description('Objekt-ID för användare som ska få rollen Key Vault Secrets Officer (registrera/rotera kalenderhemligheten). Tomt = ingen rolltilldelning.')
-@secure()
+@description('Objekt-ID för användare som ska få rollen Key Vault Secrets Officer (registrera/rotera kalenderhemligheten). Tomt = ingen rolltilldelning. (Ett Entra-objekt-ID är ingen hemlighet; @secure() förhindrar utvärdering i what-if.)')
+#disable-next-line secure-secrets-in-params
 param secretAdminPrincipalId string = ''
 
 var tags = {
