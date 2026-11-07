@@ -2,31 +2,33 @@
 
 ## Status
 
-Azure-versionen är under utveckling och är inte verifierad i Azure.
-GitHub Pages kan inte köra kalender-API:et. När denna version publiceras där
-visar kalendern därför okänd tillgänglighet tills webbplatsen körs med API:et
-i Azure. Den tidigare publicerade kalenderadressen är exponerad och behöver
-roteras hos leverantören; gamla versioner kan fortfarande finnas i historik
-och cache.
+Azure-versionen (App Service, Sweden Central) är förberedd men ännu inte
+verifierad i Azure. Den tidigare publicerade kalenderadressen är exponerad
+och behöver roteras hos leverantören; gamla versioner kan fortfarande finnas
+i historik och cache.
 
 ## Lokala tester
 
-Förutsättningen är Node.js 22 och npm. Installera de låsta API-beroendena från
+Förutsättningen är Node.js 22 och npm. Installera de låsta beroendena från
 repositoryts rot:
 
 ```powershell
-Set-Location .\api
 npm ci --ignore-scripts --no-audit --no-fund
-Set-Location ..
+npm ci --ignore-scripts --no-audit --no-fund --prefix api
 ```
 
 Kör testerna:
 
 ```powershell
 node --test .\tests\calendar-client.test.js
-Set-Location .\api
-npm test
-Set-Location ..
+node --test .\tests\server.test.js
+```
+
+Kör webbappen lokalt:
+
+```powershell
+$env:PORT = '8080'
+npm start
 ```
 
 Starta en lokal testserver med en syntetisk kalender:
@@ -38,8 +40,8 @@ node .\tests\calendar-mock-server.js success 18743
 Öppna `http://127.0.0.1:18743/pages/lediga-datum.html`. Servern används
 endast för lokala tester och hämtar inte någon riktig kalender. Avsluta den med
 Ctrl+C. Andra scenarier är `empty`, `invalid`, `network`, `timeout` och
-`unconfigured`; ange ett av dem i stället för `success`. Testservern är inte en
-Azure Static Web Apps- eller Azure Functions-emulator.
+`unconfigured`; ange ett av dem i stället för `success`. Testservern är inte
+en Azure-emulator.
 
 ## Kalenderfunktion
 
@@ -73,21 +75,24 @@ garanteras.
 ## Azure-infrastruktur
 
 Hela infrastrukturen hanteras via Bicep, inklusive resursgruppen. En enda
-subscription-scope-deployment skapar allt (0 kr/månad):
+subscription-scope-deployment skapar allt i **swedencentral**:
 
 - `infra/main.bicep` — targetScope `subscription`; skapar resursgruppen
   `rg-skadevi-prod` deklarativt och anropar modulen i `infra/modules/`.
-- `infra/modules/staticwebapp.bicep` — targetScope `resourceGroup`; skapar
-  Static Web App `hemsida-skadevi-prod` på Free-nivån med hanterat API för
-  kalender-API:et. Ingen separat Function App, lagring eller databas behövs.
-- `infra/main.bicepparam` — alla namn, regioner, SKU, domän och taggar.
-  Resursgruppen ligger i `swedencentral`; Static Web Apps finns bara i vissa
-  regioner, så SWA:en ligger i `westeurope`.
-- Mallen kopplar inte GitHub, driftsätter inte kod och ändrar inte domäner
-  eller DNS. `staticwebapp.config.json` anger Node.js 22 för API:et, rena
-  URL:er enligt sitemap.xml och säkerhetsrubriker.
-- Free saknar SLA; kontrollera aktuell tillgänglighet, kvoter och kostnader
-  för din prenumeration och region innan du skapar resurser.
+- `infra/modules/webapp.bicep` — targetScope `resourceGroup`; skapar
+  App Service-planen `asp-skadevi-prod` (Linux, **Basic B1**, ≈ 130 kr/månad)
+  och webbappen `hemsida-skadevi-prod` (Node.js 22) som serverar både den
+  statiska webbplatsen och kalender-API:et via `server.js`. Ingen SQL,
+  ingen separat Function App, ingen lagring.
+- `infra/main.bicepparam` — alla namn, regioner, SKU, Node-version, domän
+  och taggar. `AIRBNB_ICAL_URL` är en Key Vault-referens: hemliga värdet
+  sätts en gång i valvet (`kv-skadevi-prod`) och förekommer aldrig i Git,
+  Bicep eller dokumentation, och nollställs aldrig av upprepade deployments.
+- `server.js` (utan extra npm-beroenden) serverar statiska filer med whitelist
+  och path-traversal-skydd, rena URL:er enligt sitemap.xml, säkerhetsrubriker
+  och `/api/availability` via oförändrad kalenderlogik i `api/src/`.
+- B1 saknar deployment slots och har ingen SLA-förbindelse i detta val.
+  Data lagras och processas i Sverige.
 
 Granska först vad som skulle skapas (deploymenten är idempotent och fungerar
 även när resursgruppen redan finns):
@@ -99,18 +104,18 @@ az deployment sub what-if --location swedencentral --template-file .\infra\main.
 Efter separat godkännande av resursskapande kan samma parametrar användas med
 `az deployment sub create` i stället för `what-if`. Skapa inte en resurs
 förrän prenumeration, region, kvoter och kostnader har kontrollerats.
-Mallen ändrar inte appinställningar vid senare körningar. Ställ in den nya,
-roterade kalenderadressen som `AIRBNB_ICAL_URL` i Static Web Apps
-**Environment variables** i Azure-portalen. Den ska inte anges i Bicep,
-parameterfiler, terminalkommandon, loggar eller versionshantering. API:et
-visar okänd tillgänglighet tills inställningen och appkoden är på plats.
+Kalenderadressen (roterad, hemlig) ställs in som `AIRBNB_ICAL_URL` enligt
+`docs/driftsattning.md` — den ska aldrig anges i Git, klientkod, loggar eller
+i `infra/main.bicepparam`. API:et visar okänd tillgänglighet tills
+inställningen och appkoden är på plats.
 
 Driftsättning av kod sker med `.github/workflows/deploy.yml`, som vid push
-till `main` kör testerna och publicerar frontend plus `api/` som hanterat API
-till Static Web Apps. Workflow kräver GitHub-hemligheten
-`AZURE_STATIC_WEB_APPS_API_TOKEN` med deployment-token från Azure-portalen;
-den sätts enligt `docs/driftsattning.md`. Den tidigare GitHub
-Pages-workflowen är ersatt och Pages bör stängas av i repo-inställningarna.
+till `main` kör testerna (API, server, kalenderklient), paketerar endast
+publika filer plus `server.js` och beroenden, och zip-driftsätter till
+App Service. Workflow kräver GitHub-hemligheten
+`AZURE_WEBAPP_PUBLISH_PROFILE` med publiceringsprofilen från Azure-portalen;
+den sätts enligt `docs/driftsattning.md`. GitHub Pages och gamla
+Static Web Apps-sekreter/hemligheter är föråldrade och bör tas bort.
 Mall, paketering, driftsättning och verkligt kalenderflöde är ännu inte
 verifierade i Azure. Fullständig steg-för-steg-guide för driftsättning,
 uppdatering, domänkoppling och felsökning finns i

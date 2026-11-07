@@ -1,7 +1,7 @@
-# Driftsättning av hemsidaskadevi på Azure Static Web Apps
+# Driftsättning av hemsidaskadevi på Azure App Service (Sweden Central)
 
 Denna guide beskriver hur du publicerar, uppdaterar och felsöker webbplatsen.
-Alla Azure-resurser skapas via Bicep och all kod driftsätts via GitHub Actions.
+Hela infrastrukturen hanteras via Bicep; all kod driftsätts via GitHub Actions.
 Inga hemligheter finns i repot.
 
 ## Arkitektur och kostnad
@@ -9,40 +9,22 @@ Inga hemligheter finns i repot.
 | Resurs | Tjänst | Nivå | Kostnad/månad |
 |---|---|---|---|
 | `rg-skadevi-prod` | Resource Group (via Bicep) | — | 0 kr |
-| `hemsida-skadevi-prod` | Azure Static Web Apps (westeurope) | Free | 0 kr |
-| Hanterat API (`api/`) | Azure Functions (ingår i SWA) | Ingår i Free | 0 kr |
+| `asp-skadevi-prod` | App Service-plan (Linux, Node 22) | Basic B1 | ≈ 130 kr |
+| `hemsida-skadevi-prod` | Web App: statisk webbplats + kalender-API | Ingår i planen | 0 kr (extra) |
 
-- **Hela infrastrukturen hanteras via Bicep**: en enda subscription-scope-
-  deployment skapar resursgruppen och Static Web App. Inga resurser skapas
-  manuellt, vare sig i portalen eller med `az group create`.
-- `infra/main.bicep` (subscription-scope) skapar resursgruppen och anropar
-  modulen `infra/modules/staticwebapp.bicep` (resourceGroup-scope) som skapar
-  Static Web App. Alla namn, regioner och taggar styrs från
-  `infra/main.bicepparam` — inget är hårdkodat i mallarna.
-- Static Web Apps Free innehåller både statisk frontend och det hanterade
-  kalender-API:et. Ingen Function App, SQL, lagring eller App Service behövs.
-- Free-nivån saknar SLA och har kvoter (t.ex. 100 GB bandbredd/månad och
-  0,5 GB API-storlekskvot), vilket är mer än tillräckligt för denna sajt.
-  Kontrollera aktuella kvoter på Microsofts sida för Static Web Apps.
-- Innehållet betjänas globalt via Static Web Apps; regionen styr bara var
-  API:et och staging-miljöer körs.
-- Regioner: resursgruppen ligger i `swedencentral` (valfritt, oberoende av
-  SWA). Static Web Apps finns bara i vissa regioner (providern registrerar
-  Central US, East US 2, West US 2, West Europe och East Asia), så SWA:en
-  placeras i `westeurope`, närmast befintliga region i Europa. Båda kan
-  ändras i `infra/main.bicepparam`.
-- **Obs (verifierat 2026-11):** prenumerationens Azure-policy avvisar
-  `westeurope` för nya resurser ("The selected region is currently not
-  accepting new customers"). Validering via `az deployment sub validate`
-  lyckades för `eastus2`, `westus2`, `centralus` och `eastasia`. Sålänge
-  `staticWebAppLocation` är `westeurope` misslyckas därför deploymenten i
-  steget för resursskapande; ändra parametern till en av de validerade
-  regionerna (rekommenderas: `eastus2`) när du vill driftsätta.
+- **Allt körs i swedencentral** — data lagras och processas i Sverige.
+- En enda Node.js-server (`server.js`, inga extra npm-beroenden) serverar
+  både statiska filer och `/api/availability`, och återanvänder befintlig
+  kalenderlogik i `api/src/` oförändrad.
+- B1 saknar deployment slots och har ingen SLA-förbindelse i det
+  arkitekturval vi gjort; planen är always-on och kostar enligt
+  0,178628 SEK/tim (≈ 130 kr/månad vid 730 h, Azure Retail Prices API).
+- Inga extra resurser: ingen SQL, ingen separat Function App, ingen lagring.
 
 ## Steg 1: Skapa resurserna i Azure (en gång)
 
-Förutsättningar: Azure CLI inloggad (`az login`) med en prenumeration vald
-(`az account set --subscription <namn>`), och Node.js 22 installerat.
+Förutsättningar: Azure CLI inloggad (`az login`) med rätt prenumeration vald
+(`az account set --subscription <id>`), och Node.js 22 installerat.
 Resursgruppen skapas av mallen — kör inte `az group create` manuellt.
 
 1. Granska vad som skulle skapas (read-only, skapar ingenting):
@@ -55,12 +37,7 @@ Resursgruppen skapas av mallen — kör inte `az group create` manuellt.
      --parameters .\infra\main.bicepparam
    ```
 
-   (`--location` gäller endast deploymentens metadata; `swedencentral`
-   är den valda platsen för resursgruppen.)
-
-2. Skapa resurserna — resursgruppen och Static Web App i en enda
-   deployment. Deploymenten är idempotent och kan köras om även när
-   resursgruppen redan finns:
+2. Skapa resurserna — deploymenten är idempotent och kan köras om:
 
    ```powershell
    az deployment sub create `
@@ -70,102 +47,153 @@ Resursgruppen skapas av mallen — kör inte `az group create` manuellt.
      --parameters .\infra\main.bicepparam
    ```
 
-Alla namn, regioner, SKU och taggar styrs i `infra/main.bicepparam`
-(resourceGroupName, resourceGroupLocation, staticWebAppName,
-staticWebAppLocation, environment, owner, sku, customDomain). De nya
-utdatavärdena `staticWebAppId` och `staticWebAppDefaultHostname` kan
-hämtas med:
-
-```powershell
-az deployment sub show --name skadevi-prod `
-  --query "properties.outputs.staticWebAppDefaultHostname.value" -o tsv
-```
+Alla namn (RG, plan, webbapp), regioner, SKU, Node-version, taggar och
+domänvärden styrs i `infra/main.bicepparam` — inget är hårdkodat i mallarna.
 
 ## Steg 2: Aktivera deployment-flödet (en gång)
 
-1. Hämta deployment-token från Azure-portalen:
-   - Öppna Static Web App **hemsida-skadevi-prod** → **Översikt** →
-     **Hantera deployment-token** → kopiera token.
-   - Alternativ via CLI (ersätt `<id>` med utdatavärdet `staticWebAppId`
-     från steg 1):
-
-     ```powershell
-     $id = az deployment sub show --name skadevi-prod `
-       --query "properties.outputs.staticWebAppId.value" -o tsv
-     az rest --method POST `
-       --url "https://management.azure.com/$id/listSecrets?api-version=2024-11-01"
-     ```
-
-2. Lägg till hemligheten i GitHub (öppna endast din egen terminal/webbläsare):
-   - Öppna `https://github.com/Dperzzon/hemsidaskadevi` → **Settings** →
+1. Ladda ner publiceringsprofilen:
+   - Azure-portalen: Web App **hemsida-skadevi-prod** → **Översikt** →
+     **Hämta publiceringsprofil** (filen innehåller hemligheter — hantera den
+     säkert och radera den efteråt).
+2. Lägg till hemligheten i GitHub:
+   - `https://github.com/Dperzzon/hemsidaskadevi` → **Settings** →
      **Secrets and variables** → **Actions** → **New repository secret**.
-   - Name: `AZURE_STATIC_WEB_APPS_API_TOKEN`
-   - Secret: den kopierade tokenen.
-
-3. Pusha sedan till `main` (eller kör workflown manuellt: **Actions** →
-   **Deploy till Azure Static Web Apps** → **Run workflow**). Workflown
-   kör först testerna, paketerar sedan endast publika webbfiler
-   (index.html, 404.html, css, js, pages, images, robots.txt, sitemap.xml,
-   staticwebapp.config.json) i en `build/`-mapp och driftsätter den tillsammans
-   med API:et:
-   - Frontend: endast publika filer — `infra/`, `.github/`, `docs/`, `tests/`,
-     README och api-källkod publiceras aldrig.
-   - API: `api/`-mappen som hanterad Functions-miljö (Node.js 22).
-
-4. Kontrollera att workflown blir grön och att `defaultHostname`
-   (t.ex. `https://hemsida-skadevi-prod.azurestaticapps.net`) svarar.
+   - Name: `AZURE_WEBAPP_PUBLISH_PROFILE`
+   - Secret: hela innehållet i `.PublishSettings`-filen.
+   - Ta bort den gamla hemligheten `AZURE_STATIC_WEB_APPS_API_TOKEN` om den
+     finns kvar (Static Web Apps används inte längre).
+3. Pusha till `main` (eller **Actions** → **Deploy till Azure App Service** →
+   **Run workflow**). Workflown kör tester (API, server, kalenderklient),
+   paketerar endast publika filer + `server.js` + beroenden i en `build/`
+   -mapp och zip-driftsätter till webbappen.
+4. Kontrollera `https://hemsida-skadevi-prod.azurewebsites.net`.
 
 ## Steg 3: Ställ in kalenderhemligheten (en gång)
 
 Kalender-API:et kräver miljövariabeln `AIRBNB_ICAL_URL` — en hemlig
-iCal-adress som aldrig får hamna i Git, klientkod eller loggar.
+iCal-adress som aldrig får hamna i Git.
 
-1. Roterar du adressen, gör det först hos kalenderleverantören.
-2. I Azure-portalen: Static Web App → **Environment variables** → lägg till:
-   - Name: `AIRBNB_ICAL_URL`
-   - Value: kalenderadressen
-   - Markera som hemlig (Secret) om portalen erbjuder det.
-3. Deploya om (push till `main` eller **Run workflow**) och verifiera
-   att kalendern på `/lediga-datum` visar rätt tillgänglighet.
+Mallen skapar en Key Vault (`kv-skadevi-prod`, standardnivå, RBAC) och
+webbappens appinställning `AIRBNB_ICAL_URL` är en **Key Vault-referens** som
+läser sekretens `airbnb-ical-url` (utan versionsnummer). Därför:
+
+- Själva hemliga värdet sätts **aldrig** via Bicep, Git eller parameterfiler.
+- Upprepade infra-deployments nollställer aldrig hemligheten — referensen är
+  statisk och sekretens värde kan roteras utan ny deployment.
+- Webappens systemidentitet har rollen "Key Vault Secrets User" på valvet
+  (skapas av mallen).
+
+**1a. Ge dig själv skrivbehörighet i valvet.** Med RBAC-aktiverat valvet räcker
+inte Contributor — du behöver "Key Vault Secrets Officer". Ange ditt
+objekt-ID som parametern `secretAdminPrincipalId` i
+`infra/main.bicepparam` (hitta det med
+`az ad signed-in-user show --query id -o tsv`) och kör en infra-deployment,
+eller tilldela rollen direkt:
+
+```powershell
+az role assignment create `
+  --assignee <ditt-objekt-id> `
+  --role "Key Vault Secrets Officer" `
+  --scope "$(az keyvault show --name kv-skadevi-prod --query id -o tsv)"
+```
+
+1. Sätt sekretensvärdet (adressen roteras hos leverantören först):
+
+   ```powershell
+   az keyvault secret set `
+     --vault-name kv-skadevi-prod `
+     --name airbnb-ical-url `
+     --value '<din hemliga kalenderadress>'
+   ```
+
+   Alternativ: Azure-portalen → Key Vault → **Secrets** → **Generate/Import**.
+   Värdet ska inte anges i terminalhistorik om du undviker det — portalmetoden
+   exponerar det aldrig i skalloggar.
+
+2. RBAC kan ta några minuter att propagera; första hämtningen kan ge
+   "okänd tillgänglighet" en kort stund.
+3. Verifiera att `/lediga-datum` visar rätt tillgänglighet.
+
+**Obs:** Bicep-appinställningarna ersätter ALLA befintliga appinställningar
+vid varje infra-deploy. Lägg därför aldrig till inställningar manuellt i
+portalens Environment variables — lägg dem i
+`infra/modules/webapp.bicep` (`appSettings`-listan) i stället.
+Kod-deployments via GitHub Actions påverkar aldrig appinställningar.
 
 ## Steg 4: Koppla domänen www.skadeviherrgard.com
 
-Följ först steg 1–3 och verifiera sajten på `*.azurestaticapps.net`
-**innan** DNS ändras. Gör därefter så här (ändra inga DNS-poster förrän
-nu — det krävs för att validera domänen):
+Domänkopplingen är IaC och styrs av parametern `customDomainStage` i
+`infra/main.bicepparam` (default `disabled`) — kräver DNS-ändringar hos
+domänleverantören, inget ändras automatiskt. Certifikatet är en **egen
+Bicep-resurs** (`Microsoft.Web/certificates`) med valideringsmetod
+`dns-txt-token`, och bindningen (SNI + thumbprint) skapar TLS-kopplingen.
+Microsoft kräver att hostname:t är verifierat och registrerat på App Service
+**innan** certifikatet skapas — därför genomförs aktiveringen i separata
+deployment-steg:
 
-1. Azure-portalen: Static Web App → **Custom domains** → **Add** →
-   `www.skadeviherrgard.com`.
-2. Portalen visar vilken CNAME-post som krävs. Skapa i ditt
-   domänleverantörs-panelen en CNAME:
+| Steg | `customDomainStage` | Vad skapas/ändras | Kräver DNS |
+|---|---|---|---|
+| 1 | `binding` | Hostname-binding **utan SSL** — verifierar och registrerar domänen på webbappen | CNAME |
+| 2 | `certificate` | Gratis App Service Managed Certificate (`dns-txt-token`) | TXT `asuid.www` |
+| 3 | `tlsBinding` | TLS-bindning med SNI + certifikatets thumbprint | (uppfyllt) |
+
+Sekvens:
+
+1. Verifiera sajten på `*.azurewebsites.net` först (steg 1–3).
+2. **DNS-steg 1 — CNAME** hos domänleverantören:
 
    ```
-   www  CNAME  <defaultHostname>.azurestaticapps.net
+   www  CNAME  hemsida-skadevi-prod.azurewebsites.net
    ```
 
-3. Vänta tills domänen valideras (minuter till timmar). TLS-certifikat
-   utfärdas automatiskt kostnadsfritt.
-4. Valfritt: lägg till en redirect från apex-domänen
-   `skadeviherrgard.com` till `www` (SWA Free hanterar www bäst; apex
-   kan kräva ALIAS/ANAME hos leverantören).
-5. Se till att GitHub Pages stängs av i repo-inställningarna
-   (**Settings** → **Pages** → Source: None) så att domänen inte pekar
-   mot två publiceringar.
+3. **Deployment A** — sätt `customDomainStage = 'binding'` i
+   `infra/main.bicepparam` och kör what-if + create (kommandon nedan).
+   Kontrollera i portalen att domänen visas och är verifierad.
+4. **DNS-steg 2 — TXT.** Hämta valideringsvärdet i portalen (Web App →
+   **Custom domains** → domänen → `asuid.www = <token>`) eller med
+   `az webapp config hostname list`, och lägg till TXT-posten hos
+   domänleverantören.
+5. **Deployment B** — sätt `customDomainStage = 'certificate'` och kör igen.
+   Certifikatet valideras och utfärdas (gratis, SNI).
+6. **Deployment C** — sätt `customDomainStage = 'tlsBinding'` och kör igen.
+   Kontrollera i portalen att domänen är "Ready" och SNI-bindningen grön.
+7. Stäng av GitHub Pages i repo-inställningarna (**Settings** → **Pages** →
+   Source: None) så att domänen inte pekar mot två publiceringar.
+
+Deployment-kommando för varje steg (samma mall, ändra bara
+`customDomainStage`):
+
+```powershell
+az deployment sub what-if `
+  --location swedencentral `
+  --name skadevi-prod `
+  --template-file .\infra\main.bicep `
+  --parameters .\infra\main.bicepparam
+
+az deployment sub create `
+  --location swedencentral `
+  --name skadevi-prod `
+  --template-file .\infra\main.bicep `
+  --parameters .\infra\main.bicepparam
+```
+
+Hoppa inte från `disabled` direkt till `certificate`/`tlsBinding` —
+hostname:t måste vara verifierat först (stegordningen ovan).
 
 ## Uppdatera webbplatsen
 
-- Ändra filer → commit → push till `main`. Workflown bygger, testar och
+- Ändra filer → commit → push till `main`. Workflown testar, paketerar och
   publicerar automatiskt.
-- Ändra namn, regioner, SKU eller taggar i `infra/main.bicepparam` och kör
-  `az deployment sub what-if` + `az deployment sub create` igen (idempotent,
-  påverkar inte webbinnehåll som driftsätts av GitHub Actions).
+- Ändra infrastruktur i `infra/main.bicepparam` och kör `az deployment sub
+  what-if` + `create` igen (idempotent).
 - Kör tester lokalt innan push:
 
   ```powershell
-  Set-Location .\api
   npm ci --ignore-scripts --no-audit --no-fund
-  npm test
-  Set-Location ..
+  npm ci --ignore-scripts --no-audit --no-fund --prefix api
+  npm test --prefix api
+  node --test .\tests\server.test.js
   node --test .\tests\calendar-client.test.js
   ```
 
@@ -173,30 +201,34 @@ nu — det krävs för att validera domänen):
 
 | Symptom | Åtgärd |
 |---|---|
-| Workflow visar "deployment-token saknas" | Steg 2: lägg till GitHub-hemligheten `AZURE_STATIC_WEB_APPS_API_TOKEN`. |
-| Deploy fastnar/failar i build | Kontrollera Node-version 22 i `api/package.json` och att `staticwebapp.config.json` är giltig JSON. |
-| Kalendern visar "okänd tillgänglighet" | `AIRBNB_ICAL_URL` saknas eller är ogiltig — kontrollera Environment variables och verifiera adressen hos leverantören (utan att exponera den). |
-| `/priser` m.fl. ger 404 | Kontrollera att `staticwebapp.config.json` innehåller routen och att den driftsatts. |
-| Domänvalideringen fastnar | Kontrollera CNAME-posten med `nslookup www.skadeviherrgard.com` och vänta på DNS-propagering. |
-| Sajten visar gammalt innehåll | Tvinga uppdatering (Ctrl+F5); SWA cachar assets kortvarigt. |
-| Fel om region/location vid skapande | Static Web Apps stöder bara vissa regioner och prenumerationens policy avvisar `westeurope` för nya resurser — byt `staticWebAppLocation` till `eastus2`, `westus2`, `centralus` eller `eastasia` i `infra/main.bicepparam` (alla validerade 2026-11). |
+| Workflow visar "publish profile saknas" | Steg 2: lägg till `AZURE_WEBAPP_PUBLISH_PROFILE`. |
+| Kalendern visar "okänd tillgänglighet" | `AIRBNB_ICAL_URL` saknas/ogiltig — se steg 3. Kontrollera att KV-sekretens `airbnb-ical-url` finns och att webbappens systemidentitet har "Key Vault Secrets User" (kan ta minuter att propagera). |
+| Deployment policy-avvisas | Din prenumeration har system-policyn `sys.blockwesteurope`; swedencentral är validerad och fungerar. |
+| 404 på `/priser` m.fl. | Kontrollera att `server.js` är med i paketet och att PAGE_ROUTES innehåller sidan. |
+| Sajten visar gammalt innehåll | Driftsätt igen via **Run workflow**; B1-cachen är kortlivad. |
+| Domänvalideringen fastnar | Kontrollera CNAME + TXT (`asuid.www`) med `nslookup` och vänta på propagering. |
+| Appen startar inte | Kudu → Log stream; kontrollera att `PORT`-miljövariabeln respekteras (server.js gör det). |
 
 Användbara kommandon:
 
 ```powershell
-az staticwebapp show --name hemsida-skadevi-prod --resource-group rg-skadevi-prod
-az staticwebapp environment list --name hemsida-skadevi-prod --resource-group rg-skadevi-prod
-az staticwebapp appsettings list --name hemsida-skadevi-prod --resource-group rg-skadevi-prod
+az webapp show --name hemsida-skadevi-prod --resource-group rg-skadevi-prod
+az webapp config appsettings list --name hemsida-skadevi-prod --resource-group rg-skadevi-prod
+az webapp log tail --name hemsida-skadevi-prod --resource-group rg-skadevi-prod
 ```
 
 ## Säkerhet
 
-- Deployment-token lagras endast i GitHub-hemligheter.
-- `AIRBNB_ICAL_URL` lagras endast i Azure-appinställningar, aldrig i Git.
-- Workflown har `permissions: contents: read` och kör testerna innan
-  driftsättning.
-- Inga DNS-poster skapas av mallen. Den enda Azure-infrastrukturen är
-  resursgruppen och Static Web App-resursen, båda hanterade via Bicep.
-  Domänkopplingen (customDomain) används hittills bara som tagg; den
-  verkliga kopplingen görs enligt steg 4 och kräver DNS-ändring hos
+- Publiceringsprofilen lagras endast som GitHub-hemlighet; FTPS är avstängt.
+- `AIRBNB_ICAL_URL` lagras i Key Vault och refereras med en statisk
+  Key Vault-referens; värdet förekommer aldrig i Git, Bicep, parameterfiler,
+  dokumentation eller loggar och kan roteras utan ny deployment.
+- Appinställningar hanteras endast av Bicep (`appSettings`-listan); manuella
+  portaländringar skrivs över vid nästa infra-deploy.
+- Webbappen har httpsOnly, TLS 1.2 minimum, HTTP/2, always-on, health check
+  och systemidentitet.
+- Servern tillåter endast GET/HEAD, whitelistar tillåtna kataloger och
+  blockerar path traversal; säkerhetsrubriker sätts på alla svar.
+- Inga DNS-poster skapas av mallen; certifikat + bindning styrs av
+  `customDomainStage` (stegvis aktivering) och kräver CNAME + TXT hos
   domänleverantören.
