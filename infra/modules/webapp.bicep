@@ -136,7 +136,7 @@ resource keyVaultSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01
   name: guid(keyVault.id, 'key-vault-secrets-user')
   scope: keyVault
   properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633451b-e595-4a4f-af6c-0e6ce7e8bfc4')
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')
     principalId: webApp.identity.principalId
     principalType: 'ServicePrincipal'
   }
@@ -148,7 +148,7 @@ resource keyVaultSecretsOfficer 'Microsoft.Authorization/roleAssignments@2022-04
   name: guid(keyVault.id, 'key-vault-secrets-officer')
   scope: keyVault
   properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b86a8fee-8d4c-464c-a2b6-a8ac4e0a2f2a')
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7')
     principalId: secretAdminPrincipalId
     principalType: 'User'
   }
