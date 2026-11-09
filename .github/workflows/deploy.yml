@@ -16,6 +16,12 @@ env:
   NODE_VERSION: '22'
   # Ska matcha webAppName i infra/main.bicepparam.
   APP_NAME: 'hemsida-skadevi-prod'
+  # User-assigned managed identity, klient och prenumeration som skapats via
+  # infra/main.bicep (output githubIdentityClientId). Lägg till som
+  # repo-variabler/secrets i GitHub-inställningarna, se docs/driftsattning.md.
+  AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
 jobs:
   test:
@@ -45,16 +51,24 @@ jobs:
     name: Bygg och driftsätt
     needs: test
     runs-on: ubuntu-latest
+    # id-token: write krävs för OIDC-tokenutbytet mot Azure (federated
+    # identity credential). contents: read för checkout.
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
-      - name: Kontrollera publish profile
-        env:
-          PUBLISH_PROFILE: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+      - name: Kontrollera OIDC-konfiguration
         run: |
-          if [ -z "$PUBLISH_PROFILE" ]; then
-            echo "::error::GitHub-hemligheten AZURE_WEBAPP_PUBLISH_PROFILE saknas. Ladda ner publish profile från webbappen i Azure-portalen (Översikt -> Hämta publiceringsprofil) och lägg till den i repo-inställningarna enligt docs/driftsattning.md."
+          if [ -z "$AZURE_CLIENT_ID" ] || [ -z "$AZURE_TENANT_ID" ] || [ -z "$AZURE_SUBSCRIPTION_ID" ]; then
+            echo "::error::GitHub-variablerna AZURE_CLIENT_ID, AZURE_TENANT_ID och AZURE_SUBSCRIPTION_ID saknas. Kör infra-deploymenten (den skapar id-github-actions-skadevi via OIDC) och lägg till clientId som AZURE_CLIENT_ID samt tenant-/prenumerations-ID som AZURE_TENANT_ID/AZURE_SUBSCRIPTION_ID i repo-inställningarna, se docs/driftsattning.md."
             exit 1
           fi
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}

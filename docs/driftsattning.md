@@ -50,23 +50,40 @@ Resursgruppen skapas av mallen — kör inte `az group create` manuellt.
 Alla namn (RG, plan, webbapp), regioner, SKU, Node-version, taggar och
 domänvärden styrs i `infra/main.bicepparam` — inget är hårdkodat i mallarna.
 
-## Steg 2: Aktivera deployment-flödet (en gång)
+## Steg 2: Aktivera deployment-flödet (en gång, OIDC)
 
-1. Ladda ner publiceringsprofilen:
-   - Azure-portalen: Web App **hemsida-skadevi-prod** → **Översikt** →
-     **Hämta publiceringsprofil** (filen innehåller hemligheter — hantera den
-     säkert och radera den efteråt).
-2. Lägg till hemligheten i GitHub:
+Deployment sker med **OpenID Connect (OIDC)** — Basic Authentication/publish
+profile används inte och ska förbli avstängt. Mallen skapar en
+user-assigned managed identity (`id-gh-actions-skadevi`) med en federated
+identity credential som enbart gäller `Dperzzon/hemsidaskadevi` och branch
+`main`, samt rollen "Website Contributor" tilldelad **enbart på webbappen**.
+
+1. Kör infra-deploymenten (skapar identiteten, se steg 1). Hämta clientId:
+
+   ```powershell
+   $out = az deployment sub show `
+     --name skadevi-prod `
+     --query properties.outputs | ConvertFrom-Json
+   $out.githubIdentityClientId.value
+   ```
+
+2. Lägg till variablerna i GitHub:
    - `https://github.com/Dperzzon/hemsidaskadevi` → **Settings** →
-     **Secrets and variables** → **Actions** → **New repository secret**.
-   - Name: `AZURE_WEBAPP_PUBLISH_PROFILE`
-   - Secret: hela innehållet i `.PublishSettings`-filen.
-   - Ta bort den gamla hemligheten `AZURE_STATIC_WEB_APPS_API_TOKEN` om den
-     finns kvar (Static Web Apps används inte längre).
+     **Secrets and variables** → **Actions** → fliken **Variables** →
+     **New repository variable**.
+   - `AZURE_CLIENT_ID` = clientId från ovan.
+   - `AZURE_TENANT_ID` = ditt Entra tenant-ID
+     (`az account show --query tenantId -o tsv`).
+   - `AZURE_SUBSCRIPTION_ID` = prenumerations-ID
+     (`az account show --query id -o tsv`).
+   - Ta bort den gamla hemligheten `AZURE_WEBAPP_PUBLISH_PROFILE` (och
+     `AZURE_STATIC_WEB_APPS_API_TOKEN` om den finns kvar) — den används inte
+     längre.
 3. Pusha till `main` (eller **Actions** → **Deploy till Azure App Service** →
    **Run workflow**). Workflown kör tester (API, server, kalenderklient),
-   paketerar endast publika filer + `server.js` + beroenden i en `build/`
-   -mapp och zip-driftsätter till webbappen.
+   loggar in med `azure/login` + OIDC (`id-token: write`), paketerar endast
+   publika filer + `server.js` + beroenden i en `build/`-mapp och
+   zip-driftsätter med `azure/webapps-deploy@v3`.
 4. Kontrollera `https://hemsida-skadevi-prod.azurewebsites.net`.
 
 ## Steg 3: Ställ in kalenderhemligheten (en gång)
@@ -201,7 +218,8 @@ hostname:t måste vara verifierat först (stegordningen ovan).
 
 | Symptom | Åtgärd |
 |---|---|
-| Workflow visar "publish profile saknas" | Steg 2: lägg till `AZURE_WEBAPP_PUBLISH_PROFILE`. |
+| Workflow visar "OIDC-konfiguration saknas" | Steg 2: lägg till repo-variablerna `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`. |
+| Login-fel "AADSTS70021/AADSTS700213" | Federated credential saknas eller mismatch: subject måste vara `repo:Dperzzon/hemsidaskadevi:ref:refs/heads/main` och workflow-privilegiet `id-token: write` satt (deploy.yml gör detta). |
 | Kalendern visar "okänd tillgänglighet" | `AIRBNB_ICAL_URL` saknas/ogiltig — se steg 3. Kontrollera att KV-sekretens `airbnb-ical-url` finns och att webbappens systemidentitet har "Key Vault Secrets User" (kan ta minuter att propagera). |
 | Deployment policy-avvisas | Din prenumeration har system-policyn `sys.blockwesteurope`; swedencentral är validerad och fungerar. |
 | 404 på `/priser` m.fl. | Kontrollera att `server.js` är med i paketet och att PAGE_ROUTES innehåller sidan. |
@@ -219,7 +237,10 @@ az webapp log tail --name hemsida-skadevi-prod --resource-group rg-skadevi-prod
 
 ## Säkerhet
 
-- Publiceringsprofilen lagras endast som GitHub-hemlighet; FTPS är avstängt.
+- Basic Authentication är avstängt på webbappen; deployment sker via OIDC
+  (federated identity credential kopplad till repo + branch) utan några
+  hemligheter i GitHub. Identiteten har "Website Contributor" endast på
+  webbappens scope — inte på resursgruppen eller prenumerationen.
 - `AIRBNB_ICAL_URL` lagras i Key Vault och refereras med en statisk
   Key Vault-referens; värdet förekommer aldrig i Git, Bicep, parameterfiler,
   dokumentation eller loggar och kan roteras utan ny deployment.

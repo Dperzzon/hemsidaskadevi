@@ -51,6 +51,17 @@ param keyVaultSecretName string
 ])
 param customDomainStage string = 'disabled'
 
+@description('Namn på den user-assigned managed identity som GitHub Actions använder för OIDC-deployment.')
+@minLength(3)
+@maxLength(24)
+param githubIdentityName string
+
+@description('GitHub-repo (owner/repo) som OIDC-identifieringen begränsas till.')
+param githubRepository string
+
+@description('GitHub-branch som OIDC-identifieringen begränsas till.')
+param githubBranch string
+
 @description('Objekt-ID för den användare som ska registrera kalenderhemligheten i Key Vault; får rollen Key Vault Secrets Officer. Tomt = ingen tilldelning. (Ett Entra-objekt-ID är ingen hemlighet och ska därför inte vara @secure() — what-if och ARM kan annars inte utvärdera rollvillkoret.)')
 #disable-next-line secure-secrets-in-params
 param secretAdminPrincipalId string = ''
@@ -88,6 +99,21 @@ module webapp 'modules/webapp.bicep' = {
   }
 }
 
+module githubOidc 'modules/github-oidc.bicep' = {
+  name: 'github-oidc'
+  scope: rg
+  params: {
+    identityName: githubIdentityName
+    githubRepository: githubRepository
+    githubBranch: githubBranch
+    webAppId: webapp.outputs.webAppId
+    environment: environment
+    owner: owner
+  }
+}
+
 output resourceGroupName string = rg.name
+output githubIdentityClientId string = githubOidc.outputs.clientId
+output githubIdentityPrincipalId string = githubOidc.outputs.principalId
 output webAppId string = webapp.outputs.webAppId
 output webAppDefaultHostname string = webapp.outputs.defaultHostname

@@ -33,6 +33,13 @@ param keyVaultSecretName = 'airbnb-ical-url'
 //   'tlsBinding'   – TLS-bindning med SNI + thumbprint
 param customDomainStage = 'disabled'
 
+// User-assigned managed identity för GitHub Actions OIDC-deployment.
+param githubIdentityName = 'id-gh-actions-skadevi'
+
+// OIDC-identifieringen gäller enbart detta repo och denna branch.
+param githubRepository = 'Dperzzon/hemsidaskadevi'
+param githubBranch = 'main'
+
 // Objekt-ID för din användare så att du får rollen "Key Vault Secrets
 // Officer" på kv-skadevi-prod och kan registrera/rotera kalenderhemligheten.
 // (Hittade ditt ID med: az ad signed-in-user show --query id -o tsv)
