@@ -55,8 +55,20 @@ domänvärden styrs i `infra/main.bicepparam` — inget är hårdkodat i mallarn
 Deployment sker med **OpenID Connect (OIDC)** — Basic Authentication/publish
 profile används inte och ska förbli avstängt. Mallen skapar en
 user-assigned managed identity (`id-gh-actions-skadevi`) med en federated
-identity credential som enbart gäller `Dperzzon/hemsidaskadevi` och branch
-`main`, samt rollen "Website Contributor" tilldelad **enbart på webbappen**.
+identity credential vars subject gäller enbart `Dperzzon/hemsidaskadevi`
+och branch `main`. Subject anges i GitHubs **immutable-format** med
+owner- och repo-ID (verifierade via GitHub API: owner = 33748032,
+repo = 1436769162):
+
+```
+repo:Dperzzon@33748032/hemsidaskadevi@1436769162:ref:refs/heads/main
+```
+
+Värdet styrs av parametern `githubOidcSubject` i `infra/main.bicepparam`.
+Omf id-numren ändras (de gör det normalt aldrig) eller branchen byts,
+hämtar du aktuella värden med `https://api.github.com/users/<owner>` respektive
+`https://api.github.com/repos/<owner>/<repo>` — eller läser subject-claim ur
+en misslyckad GitHub Actions-körning — och uppdaterar parametern.
 
 1. Kör infra-deploymenten (skapar identiteten, se steg 1). Hämta clientId:
 
@@ -219,7 +231,7 @@ hostname:t måste vara verifierat först (stegordningen ovan).
 | Symptom | Åtgärd |
 |---|---|
 | Workflow visar "OIDC-konfiguration saknas" | Steg 2: lägg till repo-variablerna `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`. |
-| Login-fel "AADSTS70021/AADSTS700213" | Federated credential saknas eller mismatch: subject måste vara `repo:Dperzzon/hemsidaskadevi:ref:refs/heads/main` och workflow-privilegiet `id-token: write` satt (deploy.yml gör detta). |
+| Login-fel "AADSTS70021/AADSTS700213" | Federated credential saknas eller subject mismatch: subject i Bicep (`githubOidcSubject`) ska vara GitHubs immutable-format, t.ex. `repo:Dperzzon@33748032/hemsidaskadevi@1436769162:ref:refs/heads/main`, och workflow-privilegiet `id-token: write` satt (deploy.yml gör detta). Läs den exakta claimen i felmeddelandet från den misslyckade körningen. |
 | Kalendern visar "okänd tillgänglighet" | `AIRBNB_ICAL_URL` saknas/ogiltig — se steg 3. Kontrollera att KV-sekretens `airbnb-ical-url` finns och att webbappens systemidentitet har "Key Vault Secrets User" (kan ta minuter att propagera). |
 | Deployment policy-avvisas | Din prenumeration har system-policyn `sys.blockwesteurope`; swedencentral är validerad och fungerar. |
 | 404 på `/priser` m.fl. | Kontrollera att `server.js` är med i paketet och att PAGE_ROUTES innehåller sidan. |

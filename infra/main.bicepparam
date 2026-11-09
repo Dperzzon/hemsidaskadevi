@@ -36,9 +36,10 @@ param customDomainStage = 'disabled'
 // User-assigned managed identity för GitHub Actions OIDC-deployment.
 param githubIdentityName = 'id-gh-actions-skadevi'
 
-// OIDC-identifieringen gäller enbart detta repo och denna branch.
-param githubRepository = 'Dperzzon/hemsidaskadevi'
-param githubBranch = 'main'
+// OIDC-subject i GitHubs immutable-format (verifierat via GitHub API:
+// owner Dperzzon = 33748032, repo hemsidaskadevi = 1436769162). Gäller
+// enbart detta repo och denna branch.
+param githubOidcSubject = 'repo:Dperzzon@33748032/hemsidaskadevi@1436769162:ref:refs/heads/main'
 
 // Objekt-ID för din användare så att du får rollen "Key Vault Secrets
 // Officer" på kv-skadevi-prod och kan registrera/rotera kalenderhemligheten.

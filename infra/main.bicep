@@ -56,11 +56,8 @@ param customDomainStage string = 'disabled'
 @maxLength(24)
 param githubIdentityName string
 
-@description('GitHub-repo (owner/repo) som OIDC-identifieringen begränsas till.')
-param githubRepository string
-
-@description('GitHub-branch som OIDC-identifieringen begränsas till.')
-param githubBranch string
+@description('Exakt OIDC-subject som GitHub skickar (immutable-format med owner-/repo-ID).')
+param githubOidcSubject string
 
 @description('Objekt-ID för den användare som ska registrera kalenderhemligheten i Key Vault; får rollen Key Vault Secrets Officer. Tomt = ingen tilldelning. (Ett Entra-objekt-ID är ingen hemlighet och ska därför inte vara @secure() — what-if och ARM kan annars inte utvärdera rollvillkoret.)')
 #disable-next-line secure-secrets-in-params
@@ -104,8 +101,7 @@ module githubOidc 'modules/github-oidc.bicep' = {
   scope: rg
   params: {
     identityName: githubIdentityName
-    githubRepository: githubRepository
-    githubBranch: githubBranch
+    githubOidcSubject: githubOidcSubject
     webAppId: webapp.outputs.webAppId
     environment: environment
     owner: owner

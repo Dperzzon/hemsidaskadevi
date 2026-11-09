@@ -44,11 +44,8 @@
     "githubIdentityName": {
       "value": "id-gh-actions-skadevi"
     },
-    "githubRepository": {
-      "value": "Dperzzon/hemsidaskadevi"
-    },
-    "githubBranch": {
-      "value": "main"
+    "githubOidcSubject": {
+      "value": "repo:Dperzzon@33748032/hemsidaskadevi@1436769162:ref:refs/heads/main"
     },
     "secretAdminPrincipalId": {
       "value": "3e197323-a929-40b0-a164-c8cb5b33b521"

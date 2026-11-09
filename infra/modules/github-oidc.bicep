@@ -5,11 +5,8 @@ targetScope = 'resourceGroup'
 @maxLength(24)
 param identityName string
 
-@description('GitHub-repo som identiteten ska gälla, t.ex. Dperzzon/hemsidaskadevi.')
-param githubRepository string
-
-@description('GitHub-branch som identiteten ska gälla, t.ex. main.')
-param githubBranch string
+@description('Exakt OIDC-subject som GitHub skickar i token-utbytet, t.ex. "repo:owner@<ownerId>/repo@<repoId>:ref:refs/heads/main" (immutable-format).')
+param githubOidcSubject string
 
 @description('Fullständigt resurs-ID för webbappen som deploymenten ska gälla (från webapp-modulen).')
 param webAppId string
@@ -41,7 +38,7 @@ resource federatedCredential 'Microsoft.ManagedIdentity/userAssignedIdentities/f
   name: 'github-actions-deploy-main'
   properties: {
     issuer: 'https://token.actions.githubusercontent.com'
-    subject: 'repo:${githubRepository}:ref:refs/heads/${githubBranch}'
+    subject: githubOidcSubject
     audiences: [
       'api://AzureADTokenExchange'
     ]
