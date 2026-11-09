@@ -60,7 +60,7 @@ resource websiteContributor 'Microsoft.Authorization/roleAssignments@2022-04-01'
   name: guid(webAppId, 'github-actions-website-contributor')
   scope: webApp
   properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'de139f84-2a0f-47da-9568-0b16bc8e7c43')
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'de139f84-1756-47ae-9be6-808fbbe84772')
     principalId: identity.properties.principalId
     principalType: 'ServicePrincipal'
   }
