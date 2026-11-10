@@ -2,16 +2,32 @@
   "name": "skadevi-webapp",
   "version": "1.0.0",
   "private": true,
-  "main": "server.js",
+  "description": "Skadevi Gård — statisk webbplats (Vite MPA) + Node-server med kalender-API",
+  "main": "server/index.js",
   "engines": {
     "node": "22.x"
   },
   "scripts": {
-    "start": "node server.js",
-    "test": "node --test tests/server.test.js"
+    "dev": "vite",
+    "build": "vite build && node scripts/finalize-dist.mjs && node scripts/compress.mjs",
+    "preview": "node server/index.js",
+    "start": "node server/index.js",
+    "test": "node --test",
+    "test:e2e": "playwright test --grep-invert @visual",
+    "test:visual": "playwright test --grep @visual",
+    "lint": "eslint .",
+    "optimize-images": "node scripts/optimize-images.mjs",
+    "fetch-fonts": "node scripts/fetch-fonts.mjs"
   },
   "dependencies": {
     "node-ical": "0.27.3",
     "temporal-polyfill": "1.0.6"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.0",
+    "eslint": "^9.39.5",
+    "lighthouse": "13.6.0",
+    "sharp": "0.35.5",
+    "vite": "8.3.7"
   }
 }

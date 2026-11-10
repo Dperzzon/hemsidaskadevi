@@ -13,9 +13,10 @@ Inga hemligheter finns i repot.
 | `hemsida-skadevi-prod` | Web App: statisk webbplats + kalender-API | Ingår i planen | 0 kr (extra) |
 
 - **Allt körs i swedencentral** — data lagras och processas i Sverige.
-- En enda Node.js-server (`server.js`, inga extra npm-beroenden) serverar
-  både statiska filer och `/api/availability`, och återanvänder befintlig
-  kalenderlogik i `api/src/` oförändrad.
+- En enda Node.js-server (`server/index.js`) serverar det Vite-byggda
+  frontendpaketet i `dist/` (hashade resurser, förkomprimerade .br/.gz) samt
+  `/api/availability`, och återanvänder befintlig kalenderlogik i
+  `server/calendar/` oförändrad.
 - B1 saknar deployment slots och har ingen SLA-förbindelse i det
   arkitekturval vi gjort; planen är always-on och kostar enligt
   0,178628 SEK/tim (≈ 130 kr/månad vid 730 h, Azure Retail Prices API).
@@ -92,10 +93,12 @@ en misslyckad GitHub Actions-körning — och uppdaterar parametern.
      `AZURE_STATIC_WEB_APPS_API_TOKEN` om den finns kvar) — den används inte
      längre.
 3. Pusha till `main` (eller **Actions** → **Deploy till Azure App Service** →
-   **Run workflow**). Workflown kör tester (API, server, kalenderklient),
-   loggar in med `azure/login` + OIDC (`id-token: write`), paketerar endast
-   publika filer + `server.js` + beroenden i en `build/`-mapp och
-   zip-driftsätter med `azure/webapps-deploy@v3`.
+   **Run workflow**). Workflown kör statisk analys (ESLint), enhetstester,
+   bygger frontend med Vite, kör funktionella E2E-tester mot den byggda
+   applikationen, verifierar bygget, loggar in med `azure/login` + OIDC
+   (`id-token: write`), paketerar `dist/` + `server/` + produktionsberoenden
+   i en `package/`-mapp, smoke-testar paketet och zip-driftsätter med
+   `azure/webapps-deploy@v3`.
 4. Kontrollera `https://hemsida-skadevi-prod.azurewebsites.net`.
 
 ## Steg 3: Ställ in kalenderhemligheten (en gång)
@@ -220,10 +223,12 @@ hostname:t måste vara verifierat först (stegordningen ovan).
 
   ```powershell
   npm ci --ignore-scripts --no-audit --no-fund
-  npm ci --ignore-scripts --no-audit --no-fund --prefix api
-  npm test --prefix api
-  node --test .\tests\server.test.js
-  node --test .\tests\calendar-client.test.js
+  npm run lint
+  npm test
+  npm run build
+  npx playwright test --grep-invert "@visual" --project=desktop
+  node scripts/verify-dist.mjs
+  node scripts/smoke-test.mjs
   ```
 
 ## Felsökning
@@ -234,10 +239,10 @@ hostname:t måste vara verifierat först (stegordningen ovan).
 | Login-fel "AADSTS70021/AADSTS700213" | Federated credential saknas eller subject mismatch: subject i Bicep (`githubOidcSubject`) ska vara GitHubs immutable-format, t.ex. `repo:Dperzzon@33748032/hemsidaskadevi@1436769162:ref:refs/heads/main`, och workflow-privilegiet `id-token: write` satt (deploy.yml gör detta). Läs den exakta claimen i felmeddelandet från den misslyckade körningen. |
 | Kalendern visar "okänd tillgänglighet" | `AIRBNB_ICAL_URL` saknas/ogiltig — se steg 3. Kontrollera att KV-sekretens `airbnb-ical-url` finns och att webbappens systemidentitet har "Key Vault Secrets User" (kan ta minuter att propagera). |
 | Deployment policy-avvisas | Din prenumeration har system-policyn `sys.blockwesteurope`; swedencentral är validerad och fungerar. |
-| 404 på `/priser` m.fl. | Kontrollera att `server.js` är med i paketet och att PAGE_ROUTES innehåller sidan. |
+| 404 på `/priser` m.fl. | Kontrollera att `server/index.js` och `dist/pages/` är med i paketet och att PAGE_ROUTES innehåller sidan. |
 | Sajten visar gammalt innehåll | Driftsätt igen via **Run workflow**; B1-cachen är kortlivad. |
 | Domänvalideringen fastnar | Kontrollera CNAME + TXT (`asuid.www`) med `nslookup` och vänta på propagering. |
-| Appen startar inte | Kudu → Log stream; kontrollera att `PORT`-miljövariabeln respekteras (server.js gör det). |
+| Appen startar inte | Kudu → Log stream; kontrollera att `PORT`-miljövariabeln respekteras (`server/index.js` gör det). |
 
 Användbara kommandon:
 

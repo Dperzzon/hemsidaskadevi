@@ -1,127 +1,103 @@
-# Skadevi Gård
+# Skadevi Gård — hemsida
 
-## Status
+Statisk webbplats (Vanilla HTML/CSS/JS) byggd med **Vite som multi-page
+app (MPA)**, serverad i produktion av en egen Node.js-server med
+kalender-API:et `/api/availability`.
 
-Azure-versionen (App Service, Sweden Central) är förberedd men ännu inte
-verifierad i Azure. Den tidigare publicerade kalenderadressen är exponerad
-och behöver roteras hos leverantören; gamla versioner kan fortfarande finnas
-i historik och cache.
+Inga ramverk, inget annat runtime-beroende än kalenderlogikens
+(`node-ical`, `temporal-polyfill`).
 
-## Lokala tester
-
-Förutsättningen är Node.js 22 och npm. Installera de låsta beroendena från
-repositoryts rot:
+## Kom igång
 
 ```powershell
-npm ci --ignore-scripts --no-audit --no-fund
-npm ci --ignore-scripts --no-audit --no-fund --prefix api
+npm ci --no-audit --no-fund   # installerar beroenden reproducerbart
+npm run dev                   # Vite dev-server på http://localhost:5173
 ```
 
-Kör testerna:
+`npm run dev` startar Vite och ersätter Live Server. Dev-servern serverar
+samtidigt kalender-API:et på `/api/availability`:
 
-```powershell
-node --test .\tests\calendar-client.test.js
-node --test .\tests\server.test.js
+- Sätt `AIRBNB_ICAL_URL` (https-adress) i miljön för riktig kalenderdata.
+- Utan variabeln används automatiskt en syntetisk kalender (en blockad
+  period tolv dagar fram i tiden) så att kalendern går att testa lokalt.
+
+## Npm-skript
+
+| Kommando | Vad det gör |
+|---|---|
+| `npm run dev` | Vite dev-server (MPA, rena URL:er, kalender-API med mock) |
+| `npm run build` | Bygger `dist/` (hashade resurser) + förkomprimerar (.br/.gz) |
+| `npm run preview` | Serverar `dist/` med produktionsservern (samma kod som Azure) |
+| `npm run start` | Samma som `preview` — startar `server/index.js` på `$PORT` |
+| `npm test` | Enhetstester (node:test): server, kalender-API, kalenderklient |
+| `npm run test:e2e` | Playwright: funktionella E2E-tester mot `dist/` |
+| `npm run test:visual` | Playwright: visuella regressionstester (se docs/regressionstester.md) |
+| `npm run lint` | ESLint |
+| `npm run optimize-images` | Regenererar optimerade bilder i `public/images/` |
+| `npm run fetch-fonts` | Hämtar/selfhostar typsnitt från Google Fonts |
+
+## Katalogstruktur
+
+```
+src/                 Webbplatsens källkod (Vite root)
+  index.html         Startsidan
+  404.html           Fel-sida (serveras av produktionsservern)
+  pages/             Alla undersidor (rena URL:er: /priser → pages/priser.html)
+  css/               style.css + fonts.css (selfhostade typsnitt)
+  js/                main.js, images.js, calendar.js (ES-moduler, ingen bundling konfig)
+public/              Kopieras oförändrat till dist/ (bilder, typsnitt, robots.txt, sitemap.xml)
+server/              Produktionsserver
+  index.js           HTTP-server: rena URL:er, 301-redirects, cache/säkerhetsrubriker, brotli/gzip
+  calendar/          Kalenderlogik (availability.js, calendar-worker.js) — oförändrad
+dist/                Byggresultat (skapas av npm run build)
+scripts/             Bygg- och verktygsskript (fonts, bilder, verifiering, smoke-test)
+tests/               Enheterstester (unit/) och Playwright-tester (e2e/)
+infra/               Bicep-mallar (Azure App Service, Key Vault, managed identity)
+docs/                Driftsättningsguide m.m.
+.github/workflows/   CI/CD: test → Vite-build → smoke-test → Azure-deployment (OIDC)
+assets/originals/    Originalbilder (källmaterial; webbplatsen använder public/images/)
 ```
 
-Kör webbappen lokalt:
+### De fyra föråldrade mallsidorna
 
-```powershell
-$env:PORT = '8080'
-npm start
-```
+`priser.html`, `mat-dryck.html`, `om-oss.html` och `digital-visning.html`
+innehåller en trasig typsnittslänk (`rel="stylesheet>` utan avslutande
+citattecken) från den gamla mallen. Eftersom felet påverkar renderingen
+(pixelfallade typsnitt, avklippt sidhuvud) och en fix skulle förändra
+sidornas utseende lämnas de as-is av Vite (se `vite.config.mjs`): de
+kopieras oförändrade till `dist/` och läser `/css/style.css` samt
+`/js/main.js` som skapas av `scripts/finalize-dist.mjs`. Att rätta felet
+kräver ett separat beslut — se docs/migrering.md.
 
-Starta en lokal testserver med en syntetisk kalender:
+## Produktion
 
-```powershell
-node .\tests\calendar-mock-server.js success 18743
-```
+- `npm run start` respekterar `PORT` och serverar `dist/` — exakt samma
+  server körs i Azure App Service (`hemsida-skadevi-prod`, Sweden Central).
+- Servern gör: rena URL:er (`/priser` → `dist/pages/priser.html`),
+  301-redirects från gamla `.html`-URL:er, brotli/gzip-förkomprimerade
+  svar, cache-rubriker (immutable för hashade assets), säkerhetsrubriker
+  (CSP, HSTS, nosniff m.fl.), 404 utan SPA-fallback och path traversal-skydd.
+- Kalender-API:et läser `AIRBNB_ICAL_URL` (Key Vault-referens i Azure).
+- Se docs/driftsattning.md för infrastruktur, domän och felsökning.
 
-Öppna `http://127.0.0.1:18743/pages/lediga-datum.html`. Servern används
-endast för lokala tester och hämtar inte någon riktig kalender. Avsluta den med
-Ctrl+C. Andra scenarier är `empty`, `invalid`, `network`, `timeout` och
-`unconfigured`; ange ett av dem i stället för `success`. Testservern är inte
-en Azure-emulator.
+## CI/CD
 
-## Kalenderfunktion
+`.github/workflows/deploy.yml` kör vid push till `main`:
 
-Klienten använder `/api/availability` på samma ursprung. Funktionen hämtar
-flödet på begäran från serverinställningen `AIRBNB_ICAL_URL` och svarar endast
-med blockerade datum för det begärda intervallet. Svar cachas inte. Timeout,
-storleksbegränsning och omdirigeringar inom samma HTTPS-ursprung begränsar
-hämtningen; fel ger okänd tillgänglighet. Funktionen får aldrig konfigureras
-med en kalenderadress i klientkod, Git, testdata eller byggartefakter.
+1. `npm ci` → ESLint → enhetstester
+2. `npm run build` (Vite) → verifiering av dist/
+3. Playwright E2E (funktionella) mot den byggda applikationen
+4. Paketering: `dist/` + `server/` + produktionsberoenden (inga tester,
+   docs eller hemligheter) → startkontroll + HTTP-smoke-test
+5. `azure/login` via OIDC (`id-token: write`) + `azure/webapps-deploy`
 
-Hela dagar använder exklusivt slutdatum. Tidssatta händelser räknas till de
-datum de berör i `Europe/Stockholm`; iCalendar-tider utan tidszon behandlas som
-lokal tid där. Återkomstregler med `RRULE`, `RDATE` för datum och tid,
-`EXDATE`, `EXRULE` och `RECURRENCE-ID`, inklusive `RANGE=THISANDFUTURE`,
-testas med syntetiska data.
+## Felsökning
 
-Parsern avvisar bland annat `RDATE;VALUE=PERIOD`, `VFREEBUSY`, okända
-tidszoner, orimligt stora återkomstintervall och ofullständiga eller
-otolkbara kalenderdata. I dessa fall visas ett fel, inte en tom lista med
-lediga datum. Det är ännu inte verifierat vilka konstruktioner som förekommer
-i det verkliga flödet; detta måste kontrolleras säkert innan migreringen.
-Funktionens beteende i en hanterad Azure-miljö är inte verifierat.
-
-När en säker serverlösning är redo behöver ägaren ersätta den exponerade
-kalenderadressen hos leverantören, lägga den nya adressen i Azure som
-serverinställningen `AIRBNB_ICAL_URL` och verifiera bytet utan att publicera
-hemligheten. Den tidigare adressen kan finnas kvar i Git-historik, tidigare
-publiceringar och cache. Leverantörens uppdateringsfördröjning kan inte
-garanteras.
-
-## Azure-infrastruktur
-
-Hela infrastrukturen hanteras via Bicep, inklusive resursgruppen. En enda
-subscription-scope-deployment skapar allt i **swedencentral**:
-
-- `infra/main.bicep` — targetScope `subscription`; skapar resursgruppen
-  `rg-skadevi-prod` deklarativt och anropar modulen i `infra/modules/`.
-- `infra/modules/webapp.bicep` — targetScope `resourceGroup`; skapar
-  App Service-planen `asp-skadevi-prod` (Linux, **Basic B1**, ≈ 130 kr/månad)
-  och webbappen `hemsida-skadevi-prod` (Node.js 22) som serverar både den
-  statiska webbplatsen och kalender-API:et via `server.js`. Ingen SQL,
-  ingen separat Function App, ingen lagring.
-- `infra/main.bicepparam` — alla namn, regioner, SKU, Node-version, domän
-  och taggar. `AIRBNB_ICAL_URL` är en Key Vault-referens: hemliga värdet
-  sätts en gång i valvet (`kv-skadevi-prod`) och förekommer aldrig i Git,
-  Bicep eller dokumentation, och nollställs aldrig av upprepade deployments.
-- `server.js` (utan extra npm-beroenden) serverar statiska filer med whitelist
-  och path-traversal-skydd, rena URL:er enligt sitemap.xml, säkerhetsrubriker
-  och `/api/availability` via oförändrad kalenderlogik i `api/src/`.
-- B1 saknar deployment slots och har ingen SLA-förbindelse i detta val.
-  Data lagras och processas i Sverige.
-
-Granska först vad som skulle skapas (deploymenten är idempotent och fungerar
-även när resursgruppen redan finns):
-
-```powershell
-az deployment sub what-if --location swedencentral --template-file .\infra\main.bicep --parameters .\infra\main.bicepparam
-```
-
-Efter separat godkännande av resursskapande kan samma parametrar användas med
-`az deployment sub create` i stället för `what-if`. Skapa inte en resurs
-förrän prenumeration, region, kvoter och kostnader har kontrollerats.
-Kalenderadressen (roterad, hemlig) ställs in som `AIRBNB_ICAL_URL` enligt
-`docs/driftsattning.md` — den ska aldrig anges i Git, klientkod, loggar eller
-i `infra/main.bicepparam`. API:et visar okänd tillgänglighet tills
-inställningen och appkoden är på plats.
-
-Driftsättning av kod sker med `.github/workflows/deploy.yml`, som vid push
-till `main` kör testerna (API, server, kalenderklient), paketerar endast
-publika filer plus `server.js` och beroenden, och zip-driftsätter till
-App Service. Workflow kräver GitHub-hemligheten
-`AZURE_WEBAPP_PUBLISH_PROFILE` med publiceringsprofilen från Azure-portalen;
-den sätts enligt `docs/driftsattning.md`. GitHub Pages och gamla
-Static Web Apps-sekreter/hemligheter är föråldrade och bör tas bort.
-Mall, paketering, driftsättning och verkligt kalenderflöde är ännu inte
-verifierade i Azure. Fullständig steg-för-steg-guide för driftsättning,
-uppdatering, domänkoppling och felsökning finns i
-`docs/driftsattning.md`.
-
-Microsofts referenser: [Bicep-resursen](https://learn.microsoft.com/en-us/azure/templates/microsoft.web/2024-11-01/staticsites),
-[API-inställningar](https://learn.microsoft.com/en-us/azure/static-web-apps/application-settings),
-[runtimes](https://learn.microsoft.com/en-us/azure/static-web-apps/languages-runtimes)
-och [SWA CLI](https://learn.microsoft.com/en-us/azure/static-web-apps/static-web-apps-cli-deploy).
+- **Konsolfel om CSP i utveckling:** dev-servern sätter inga rubriker;
+  produktionsserverns CSP gäller bara i `npm run preview`/Azure.
+- **404 på rena URL:er i preview:** kör `npm run build` först — preview
+  serverar `dist/`.
+- **Kalendern visar "okänd tillgänglighet":** `AIRBNB_ICAL_URL` saknas eller
+  är fel (i produktion: Key Vault, se docs/driftsattning.md).
+- **Visuella tester misslyckas på Linux/CI:** referensbilderna är
+  plattformsspecifika; se docs/regressionstester.md.

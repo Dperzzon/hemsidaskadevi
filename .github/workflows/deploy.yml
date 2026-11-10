@@ -25,7 +25,7 @@ env:
 
 jobs:
   test:
-    name: Tester
+    name: Test och statisk analys
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,19 +33,33 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            api/package-lock.json
-      - name: Installera beroenden (webbapp + API)
+          cache-dependency-path: package-lock.json
+      - name: Installera beroenden (reproducerbart)
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Statisk analys (ESLint)
+        run: npm run lint
+      - name: Enhetstester (server, kalender-API, kalenderklient)
+        run: npm test
+      - name: Bygg frontend med Vite
+        run: npm run build
+      - name: Installera Playwright-webbläsare
+        run: npx playwright install --with-deps chromium
+      - name: Funktionella E2E-tester mot paketerad app
+        run: npx playwright test --grep-invert "@visual" --project=desktop
+      - name: Kontrollera att alla sidor och resurser byggs
         run: |
-          npm ci --ignore-scripts --no-audit --no-fund
-          npm ci --ignore-scripts --no-audit --no-fund --prefix api
-      - name: Kör API-tester
-        run: npm test --prefix api
-      - name: Kör servertester
-        run: node --test tests/server.test.js
-      - name: Kör kalenderklienttester
-        run: node --test tests/calendar-client.test.js
+          set -e
+          for page in index 404 pages/foretag pages/fest pages/brollop pages/semester pages/boende pages/aktiviteter pages/priser pages/mat-dryck pages/om-oss pages/vanliga-fragor pages/kontakt pages/digital-visning pages/boka pages/lediga-datum; do
+            test -f "dist/${page}.html" || { echo "::error::Saknas i bygget: dist/${page}.html"; exit 1; }
+          done
+          test -f dist/robots.txt
+          test -f dist/sitemap.xml
+          test -f dist/css/style.css
+          test -f dist/js/main.js
+          test -f dist/images/logo.png
+          test -f dist/fonts/v20-UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7.woff2
+          # Alla HTML-sidor ska referera existerande hashade resurser.
+          node scripts/verify-dist.mjs
 
   build_and_deploy:
     name: Bygg och driftsätt
@@ -64,11 +78,6 @@ jobs:
             echo "::error::GitHub-variablerna AZURE_CLIENT_ID, AZURE_TENANT_ID och AZURE_SUBSCRIPTION_ID saknas. Kör infra-deploymenten (den skapar id-github-actions-skadevi via OIDC) och lägg till clientId som AZURE_CLIENT_ID samt tenant-/prenumerations-ID som AZURE_TENANT_ID/AZURE_SUBSCRIPTION_ID i repo-inställningarna, se docs/driftsattning.md."
             exit 1
           fi
-      - uses: azure/login@v2
-        with:
-          client-id: ${{ env.AZURE_CLIENT_ID }}
-          tenant-id: ${{ env.AZURE_TENANT_ID }}
-          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -76,18 +85,27 @@ jobs:
           cache-dependency-path: package-lock.json
       - name: Installera beroenden
         run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Paketera webbappen
+      - name: Bygg frontend med Vite (hashade resurser + förkomprimering)
+        run: npm run build
+      - name: Verifiera bygget
+        run: node scripts/verify-dist.mjs
+      - name: Paketera endast produktionsfilerna
         run: |
-          mkdir -p build/api
-          cp server.js package.json package-lock.json build/
-          cp -r node_modules build/
-          cp -r api/src build/api/
-          cp index.html 404.html robots.txt sitemap.xml build/
-          cp -r css js pages images build/
-          node -e "const {createRequestListener}=require('./build/server.js'); const http=require('http'); const server=http.createServer(createRequestListener({})); server.listen(0, '127.0.0.1', () => server.close(() => console.log('paketet startar: OK')));"
-          ls build/ | head -20
+          set -e
+          mkdir -p package/server/calendar package/dist
+          cp package.json package-lock.json package/
+          cp -r server/index.js package/server/
+          cp -r server/calendar package/server/
+          cp -r dist package/dist
+          # Endast produktionsberoenden (node-ical, temporal-polyfill).
+          npm ci --ignore-scripts --no-audit --no-fund --omit=dev
+          cp -r node_modules package/node_modules
+          node -e "const {createRequestListener}=require('./package/server/index.js'); const http=require('http'); const server=http.createServer(createRequestListener({root: require('path').resolve('./package/dist')})); server.listen(0, '127.0.0.1', () => server.close(() => console.log('paketet startar: OK')));"
+          echo "Paketets storlek:" && du -sh package
+      - name: Smoke-testa den paketerade applikationen
+        run: node scripts/smoke-test.mjs ./package
       - name: Driftsätt till Azure App Service
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ env.APP_NAME }}
-          package: 'build'
+          package: 'package'
