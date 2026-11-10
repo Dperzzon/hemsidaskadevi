@@ -56,6 +56,9 @@
     },
     "Om_det_finns_poster": {
       "type": "If",
+      "runAfter": {
+        "Haemta_utkorg": ["Succeeded"]
+      },
       "expression": "@greater(length(body('Haemta_utkorg')?['value']), 0)",
       "actions": {
         "Behandla_varje_post": {
@@ -104,13 +107,10 @@
                   "Body": "@{items('Behandla_varje_post')?['mailHtml']}",
                   "IsHtml": true
                 }
-              },
-              "retryPolicy": {
-                "type": "exponential",
-                "count": 4,
-                "minimumInterval": "PT30S",
-                "maximumInterval": "PT10M"
               }
+              // OBS: explicit retryPolicy stöds inte av Logic Apps-schemat
+              // för ApiConnection-actions i Foreach. Logic Apps standard-
+              // återförsökspolicy gäller (exponentiell, 4 försök, 5 s–1 h).
             },
             "Markera_som_skickad": {
               "type": "Http",

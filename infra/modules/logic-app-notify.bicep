@@ -46,7 +46,9 @@ var tags = {
   ManagedBy: 'Bicep (Skadevi)'
 }
 
-var workflowDefinition = loadTextContent('../logicapp/email-notifier.workflow.json')
+// Logic Apps kräver att definitionen är ett JSON-objekt i resource-payloaden —
+// loadTextContent() ger en sträng, json() tolkar den till objekt.
+var workflowDefinition = json(loadTextContent('../logicapp/email-notifier.workflow.json'))
 
 resource workflow 'Microsoft.Logic/workflows@2019-05-01' = {
   name: workflowName
