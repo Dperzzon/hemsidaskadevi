@@ -1,0 +1,37 @@
+name: PR-tester (utan driftsättning)
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  test:
+    name: Test och statisk analys
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Installera beroenden (reproducerbart)
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Statisk analys (ESLint)
+        run: npm run lint
+      - name: Enhetstester (endast tests/unit)
+        run: npm test
+      - name: Bygg frontend med Vite
+        run: npm run build
+      - name: Installera Playwright-webbläsare
+        run: npx playwright install --with-deps chromium
+      - name: Funktionella E2E-tester mot paketerad app
+        run: npx playwright test --grep-invert "@visual" --project=desktop
+      - name: Kontrollera att alla sidor och resurser byggs
+        run: node scripts/verify-dist.mjs
