@@ -1,0 +1,263 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.49.2.45890",
+      "templateHash": "14901013172366391805"
+    }
+  },
+  "parameters": {
+    "location": {
+      "type": "string",
+      "metadata": {
+        "description": "Plats för alla resurser."
+      }
+    },
+    "planName": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 60,
+      "metadata": {
+        "description": "Namn på App Service-planen."
+      }
+    },
+    "planSkuName": {
+      "type": "string",
+      "metadata": {
+        "description": "App Service-planens SKU-namn."
+      }
+    },
+    "planSkuTier": {
+      "type": "string",
+      "metadata": {
+        "description": "App Service-planens nivå."
+      }
+    },
+    "webAppName": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 60,
+      "metadata": {
+        "description": "Namn på webbappen."
+      }
+    },
+    "nodeFxVersion": {
+      "type": "string",
+      "metadata": {
+        "description": "Linux-runtime för Node.js."
+      }
+    },
+    "environment": {
+      "type": "string",
+      "metadata": {
+        "description": "Miljötagg."
+      }
+    },
+    "owner": {
+      "type": "string",
+      "metadata": {
+        "description": "Ägartagg."
+      }
+    },
+    "keyVaultName": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 24,
+      "metadata": {
+        "description": "Namn på Key Vault som lagrar kalenderhemligheten. Själva hemliga värdet sätts ALDRIG via Bicep."
+      }
+    },
+    "keyVaultSecretName": {
+      "type": "string",
+      "metadata": {
+        "description": "Namn på Key Vault-sekretens för kalenderadressen."
+      }
+    },
+    "customDomain": {
+      "type": "string",
+      "metadata": {
+        "description": "Domän som planeras kopplas; används som tagg och i domänstegen."
+      }
+    },
+    "customDomainStage": {
+      "type": "string",
+      "defaultValue": "disabled",
+      "allowedValues": [
+        "disabled",
+        "binding",
+        "certificate",
+        "tlsBinding"
+      ],
+      "metadata": {
+        "description": "Domänaktivering sker i separata deployment-steg: \"binding\" (hostname utan SSL), \"certificate\" (gratis hanterat certifikat, kräver verifierad binding), \"tlsBinding\" (SNI + thumbprint)."
+      }
+    },
+    "secretAdminPrincipalId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Objekt-ID för användare som ska få rollen Key Vault Secrets Officer (registrera/rotera kalenderhemligheten). Tomt = ingen rolltilldelning. (Ett Entra-objekt-ID är ingen hemlighet; @secure() förhindrar utvärdering i what-if.)"
+      }
+    },
+    "bookingStorageAccountName": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Namn på lagringskontot för bokningsförfrågningar. Tomt = ingen bokningslagring aktiverad ännu (se infra/modules/storage-tables.bicep)."
+      }
+    }
+  },
+  "variables": {
+    "tags": {
+      "Owner": "[parameters('owner')]",
+      "Environment": "[parameters('environment')]",
+      "ManagedBy": "GitHub Actions",
+      "Domain": "[parameters('customDomain')]"
+    },
+    "bookingSettings": "[if(not(empty(parameters('bookingStorageAccountName'))), createArray(createObject('name', 'AZURE_STORAGE_ACCOUNT_NAME', 'value', parameters('bookingStorageAccountName'))), createArray())]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.KeyVault/vaults",
+      "apiVersion": "2023-07-01",
+      "name": "[parameters('keyVaultName')]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "properties": {
+        "tenantId": "[subscription().tenantId]",
+        "sku": {
+          "family": "A",
+          "name": "standard"
+        },
+        "enableRbacAuthorization": true,
+        "enableSoftDelete": true,
+        "accessPolicies": []
+      }
+    },
+    {
+      "type": "Microsoft.Web/serverfarms",
+      "apiVersion": "2024-11-01",
+      "name": "[parameters('planName')]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "sku": {
+        "name": "[parameters('planSkuName')]",
+        "tier": "[parameters('planSkuTier')]",
+        "capacity": 1
+      },
+      "properties": {
+        "reserved": true,
+        "perSiteScaling": false
+      }
+    },
+    {
+      "type": "Microsoft.Web/sites",
+      "apiVersion": "2024-11-01",
+      "name": "[parameters('webAppName')]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "kind": "app,linux",
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "properties": {
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', parameters('planName'))]",
+        "httpsOnly": true,
+        "siteConfig": {
+          "linuxFxVersion": "[parameters('nodeFxVersion')]",
+          "alwaysOn": true,
+          "http20Enabled": true,
+          "minTlsVersion": "1.2",
+          "ftpsState": "Disabled",
+          "healthCheckPath": "/robots.txt",
+          "appSettings": "[concat(createArray(createObject('name', 'NODE_ENV', 'value', 'production'), createObject('name', 'AIRBNB_ICAL_URL', 'value', format('@Microsoft.KeyVault(SecretUri={0}secrets/{1})', reference(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), '2023-07-01').vaultUri, parameters('keyVaultSecretName'))), createObject('name', 'BOOKING_REQUESTS_ENABLED', 'value', '0')), variables('bookingSettings'))]"
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]",
+        "[resourceId('Microsoft.Web/serverfarms', parameters('planName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]",
+      "name": "[guid(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), 'key-vault-secrets-user')]",
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')]",
+        "principalId": "[reference(resourceId('Microsoft.Web/sites', parameters('webAppName')), '2024-11-01', 'full').identity.principalId]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]",
+        "[resourceId('Microsoft.Web/sites', parameters('webAppName'))]"
+      ]
+    },
+    {
+      "condition": "[not(empty(parameters('secretAdminPrincipalId')))]",
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]",
+      "name": "[guid(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), 'key-vault-secrets-officer')]",
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7')]",
+        "principalId": "[parameters('secretAdminPrincipalId')]",
+        "principalType": "User"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]"
+      ]
+    },
+    {
+      "condition": "[not(equals(parameters('customDomainStage'), 'disabled'))]",
+      "type": "Microsoft.Web/sites/hostNameBindings",
+      "apiVersion": "2024-11-01",
+      "name": "[format('{0}/{1}', parameters('webAppName'), parameters('customDomain'))]",
+      "properties": {
+        "hostNameType": "Verified",
+        "sslState": "[if(equals(parameters('customDomainStage'), 'tlsBinding'), 'SniEnabled', 'Disabled')]",
+        "thumbprint": "[if(equals(parameters('customDomainStage'), 'tlsBinding'), reference(resourceId('Microsoft.Web/certificates', format('{0}-managed-cert', parameters('webAppName'))), '2024-11-01').thumbprint, null())]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/certificates', format('{0}-managed-cert', parameters('webAppName')))]",
+        "[resourceId('Microsoft.Web/sites', parameters('webAppName'))]"
+      ]
+    },
+    {
+      "condition": "[or(equals(parameters('customDomainStage'), 'certificate'), equals(parameters('customDomainStage'), 'tlsBinding'))]",
+      "type": "Microsoft.Web/certificates",
+      "apiVersion": "2024-11-01",
+      "name": "[format('{0}-managed-cert', parameters('webAppName'))]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "properties": {
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', parameters('planName'))]",
+        "canonicalName": "[parameters('customDomain')]",
+        "domainValidationMethod": "dns-txt-token"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/serverfarms', parameters('planName'))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "webAppId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.Web/sites', parameters('webAppName'))]"
+    },
+    "defaultHostname": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Web/sites', parameters('webAppName')), '2024-11-01').defaultHostName]"
+    },
+    "keyVaultName": {
+      "type": "string",
+      "value": "[parameters('keyVaultName')]"
+    },
+    "webAppPrincipalId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Web/sites', parameters('webAppName')), '2024-11-01', 'full').identity.principalId]"
+    }
+  }
+}

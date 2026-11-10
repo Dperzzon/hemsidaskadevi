@@ -66,6 +66,10 @@ param secretAdminPrincipalId string = ''
 @description('Namn på lagringskontot för bokningsförfrågningar (Azure Table Storage, Sweden Central). Tomt = bokningslagring förbereds ännu inte. Sätts först efter Skadevis godkännande.')
 param bookingStorageAccountName string = ''
 
+@description('Objekt-ID (principalId) för Logic Appens system-assigned managed identity i Splat Reality-prenumerationen. Får Storage Table Data Contributor på bokningstabellen. Fylls i FÖRST efter att Logic App-flödet har deployerats i Splat Reality (tvåfas: deploya Logic App → hämta principalId → skicka hit).')
+#disable-next-line secure-secrets-in-params
+param logicAppPrincipalId string = ''
+
 var commonTags = {
   Owner: owner
   Environment: environment
@@ -114,6 +118,7 @@ module bookingStorage 'modules/storage-tables.bicep' = if (!empty(bookingStorage
     environment: environment
     owner: owner
     webAppPrincipalId: webapp.outputs.webAppPrincipalId
+    logicAppPrincipalId: logicAppPrincipalId
   }
 }
 

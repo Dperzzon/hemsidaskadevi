@@ -39,7 +39,10 @@
       "type": "Http",
       "inputs": {
         "method": "GET",
-        "uri": "@{parameters('storageEndpoint')}/@{parameters('tableName')}()?$filter=PartitionKey eq 'outbox' and (status eq 'Utkorg' and attemptCount lt @{parameters('maxAttempts')})",
+        "uri": "@{parameters('storageEndpoint')}/@{parameters('tableName')}()?$filter=PartitionKey%20eq%20%27outbox%27%20and%20(status%20ne%20%27Skickad%27%20and%20attemptCount%20lt%20@{parameters('maxAttempts')})",
+        "headers": {
+          "x-ms-version": "2019-02-02"
+        },
         "authentication": {
           "type": "ManagedServiceIdentity",
           "audience": "https://storage.azure.com/"
@@ -65,7 +68,8 @@
                 "method": "PATCH",
                 "uri": "@{parameters('storageEndpoint')}/@{parameters('tableName')}(PartitionKey='@{items('Behandla_varje_post')?['PartitionKey']}',RowKey='@{items('Behandla_varje_post')?['RowKey']}')",
                 "headers": {
-                  "If-Match": "*"
+                  "x-ms-version": "2019-02-02",
+                  "If-Match": "@{items('Behandla_varje_post')?['odata.etag']}"
                 },
                 "body": {
                   "status": "Skickar",
@@ -97,7 +101,8 @@
                 "body": {
                   "To": "@{items('Behandla_varje_post')?['mailTo']}",
                   "Subject": "@{items('Behandla_varje_post')?['mailSubject']}",
-                  "Body": "@{items('Behandla_varje_post')?['mailHtml']}"
+                  "Body": "@{items('Behandla_varje_post')?['mailHtml']}",
+                  "IsHtml": true
                 }
               },
               "retryPolicy": {
@@ -113,6 +118,7 @@
                 "method": "PATCH",
                 "uri": "@{parameters('storageEndpoint')}/@{parameters('tableName')}(PartitionKey='@{items('Behandla_varje_post')?['PartitionKey']}',RowKey='@{items('Behandla_varje_post')?['RowKey']}')",
                 "headers": {
+                  "x-ms-version": "2019-02-02",
                   "If-Match": "*"
                 },
                 "body": {
@@ -139,6 +145,7 @@
                 "method": "PATCH",
                 "uri": "@{parameters('storageEndpoint')}/@{parameters('tableName')}(PartitionKey='@{items('Behandla_varje_post')?['PartitionKey']}',RowKey='@{items('Behandla_varje_post')?['RowKey']}')",
                 "headers": {
+                  "x-ms-version": "2019-02-02",
                   "If-Match": "*"
                 },
                 "body": {

@@ -1,0 +1,172 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.49.2.45890",
+      "templateHash": "2780946466414345243"
+    }
+  },
+  "parameters": {
+    "storageAccountName": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 24,
+      "metadata": {
+        "description": "Lagringskonto för permanent lagring av bokningsförfrågningar (Azure Table Storage). Skapas i Sweden Central. OBS: modulen förbereder infrastrukturen — den körs inte förrän Skadevi godkänt (skriptet deploy_bicep är avstängt i workflow)."
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "swedencentral",
+      "metadata": {
+        "description": "Plats (fast Sverige Central enligt beslut)."
+      }
+    },
+    "tableName": {
+      "type": "string",
+      "defaultValue": "bookingrequests",
+      "metadata": {
+        "description": "Namn på tabellen för bokningsförfrågningar."
+      }
+    },
+    "environment": {
+      "type": "string",
+      "defaultValue": "prod",
+      "metadata": {
+        "description": "Miljötagg."
+      }
+    },
+    "owner": {
+      "type": "string",
+      "defaultValue": "Skadevi Herrgård",
+      "metadata": {
+        "description": "Ägartagg."
+      }
+    },
+    "webAppPrincipalId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Objekt-ID (principalId) för webbappens system-assigned managed identity — får Storage Table Data Contributor på tabellen. Ett Entra-objekt-ID är ingen hemlighet och ska därför inte vara @secure() (what-if/ARM kan annars inte utvärdera rollvillkoret)."
+      }
+    },
+    "logicAppPrincipalId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Objekt-ID (principalId) för Logic Appens system-assigned managed identity — får Storage Table Data Contributor på tabellen."
+      }
+    },
+    "retentionDays": {
+      "type": "int",
+      "defaultValue": 24,
+      "allowedValues": [
+        24,
+        36,
+        60
+      ],
+      "metadata": {
+        "description": "Dagar som bokningsförfrågningar sparas innan gallring (GDPR-minimering)."
+      }
+    }
+  },
+  "variables": {
+    "tags": {
+      "Owner": "[parameters('owner')]",
+      "Environment": "[parameters('environment')]",
+      "ManagedBy": "Bicep (Skadevi)"
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Storage/storageAccounts",
+      "apiVersion": "2023-05-01",
+      "name": "[parameters('storageAccountName')]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "sku": {
+        "name": "Standard_LRS"
+      },
+      "kind": "StorageV2",
+      "properties": {
+        "supportsHttpsTrafficOnly": true,
+        "minimumTlsVersion": "TLS1_2",
+        "allowSharedKeyAccess": false,
+        "publicNetworkAccess": "Enabled",
+        "networkAcls": {
+          "defaultAction": "Allow"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts/tableServices",
+      "apiVersion": "2023-05-01",
+      "name": "[format('{0}/{1}', parameters('storageAccountName'), 'default')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts/tableServices/tables",
+      "apiVersion": "2023-05-01",
+      "name": "[format('{0}/{1}/{2}', parameters('storageAccountName'), 'default', parameters('tableName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts/tableServices', parameters('storageAccountName'), 'default')]"
+      ]
+    },
+    {
+      "condition": "[not(empty(parameters('webAppPrincipalId')))]",
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.Storage/storageAccounts/tableServices/tables', parameters('storageAccountName'), 'default', parameters('tableName'))]",
+      "name": "[guid(resourceId('Microsoft.Storage/storageAccounts/tableServices/tables', parameters('storageAccountName'), 'default', parameters('tableName')), 'webapp-table-contributor')]",
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '0a9a7301-4a41-4b5c-82ff-4aeefea27a5a')]",
+        "principalId": "[parameters('webAppPrincipalId')]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts/tableServices/tables', parameters('storageAccountName'), 'default', parameters('tableName'))]"
+      ]
+    },
+    {
+      "condition": "[not(empty(parameters('logicAppPrincipalId')))]",
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.Storage/storageAccounts/tableServices/tables', parameters('storageAccountName'), 'default', parameters('tableName'))]",
+      "name": "[guid(resourceId('Microsoft.Storage/storageAccounts/tableServices/tables', parameters('storageAccountName'), 'default', parameters('tableName')), 'logicapp-table-contributor')]",
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '0a9a7301-4a41-4b5c-82ff-4aeefea27a5a')]",
+        "principalId": "[parameters('logicAppPrincipalId')]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts/tableServices/tables', parameters('storageAccountName'), 'default', parameters('tableName'))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "storageAccountId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+    },
+    "storageAccountName": {
+      "type": "string",
+      "value": "[parameters('storageAccountName')]"
+    },
+    "tableEndpoint": {
+      "type": "string",
+      "value": "[format('https://{0}.table.core.windows.net/{1}', parameters('storageAccountName'), parameters('tableName'))]"
+    },
+    "tableResourceId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.Storage/storageAccounts/tableServices/tables', parameters('storageAccountName'), 'default', parameters('tableName'))]"
+    },
+    "retentionDays": {
+      "type": "int",
+      "value": "[parameters('retentionDays')]"
+    }
+  }
+}

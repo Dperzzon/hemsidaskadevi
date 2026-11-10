@@ -68,7 +68,9 @@ var tags = {
 // AIRBNB_ICAL_URL är en Key Vault-referens (utan versionsnummer) så att
 // hemligheten kan roteras i Key Vault utan ny deployment, och så att
 // upprepade deployments aldrig nollställer den.
-var appSettings = [
+// Totalstängning: bokningsinskick aktiveras först när hela kedjan är
+// verifierad och godkänd — ändra till '1' via Bicep, aldrig manuellt.
+var baseAppSettings = [
   {
     name: 'NODE_ENV'
     value: 'production'
@@ -78,16 +80,23 @@ var appSettings = [
     value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/${keyVaultSecretName})'
   }
   {
-    // Totalstängning: bokningsinskick aktiveras först när hela kedjan är
-    // verifierad och godkänd — ändra till '1' via Bicep, aldrig manuellt.
     name: 'BOOKING_REQUESTS_ENABLED'
     value: '0'
   }
-  if (!empty(bookingStorageAccountName)) {
-    name: 'AZURE_STORAGE_ACCOUNT_NAME'
-    value: bookingStorageAccountName
-  }
 ]
+
+// Lagringskontots NAMN är ingen hemlighet — autentisering sker med webbappens
+// managed identity (Entra), aldrig nycklar.
+var bookingSettings = !empty(bookingStorageAccountName)
+  ? [
+      {
+        name: 'AZURE_STORAGE_ACCOUNT_NAME'
+        value: bookingStorageAccountName
+      }
+    ]
+  : []
+
+var appSettings = concat(baseAppSettings, bookingSettings)
 
 resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
   name: keyVaultName

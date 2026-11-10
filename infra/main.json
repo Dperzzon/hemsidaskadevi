@@ -1,54 +1,846 @@
 {
-  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentTemplate.json#",
   "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.49.2.45890",
+      "templateHash": "6694496081825873754"
+    }
+  },
   "parameters": {
     "resourceGroupName": {
-      "value": "rg-skadevi-prod"
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 90,
+      "metadata": {
+        "description": "Namn på resursgruppen som skapas och hanteras av mallen."
+      }
     },
     "location": {
-      "value": "swedencentral"
+      "type": "string",
+      "metadata": {
+        "description": "Plats för alla resurser."
+      }
     },
     "planName": {
-      "value": "asp-skadevi-prod"
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 60,
+      "metadata": {
+        "description": "Namn på App Service-planen."
+      }
     },
     "planSkuName": {
-      "value": "B1"
+      "type": "string",
+      "metadata": {
+        "description": "App Service-planens SKU-namn."
+      }
     },
     "planSkuTier": {
-      "value": "Basic"
+      "type": "string",
+      "metadata": {
+        "description": "App Service-planens nivå."
+      }
     },
     "webAppName": {
-      "value": "hemsida-skadevi-prod"
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 60,
+      "metadata": {
+        "description": "Namn på webbappen som serverar webbplatsen och kalender-API:et."
+      }
     },
     "nodeFxVersion": {
-      "value": "NODE|22-lts"
+      "type": "string",
+      "metadata": {
+        "description": "Linux-runtime för Node.js, t.ex. NODE|22-lts."
+      }
     },
     "environment": {
-      "value": "prod"
+      "type": "string",
+      "metadata": {
+        "description": "Miljötagg, t.ex. prod."
+      }
     },
     "owner": {
-      "value": "Skadevi Herrgård"
+      "type": "string",
+      "metadata": {
+        "description": "Ägartagg."
+      }
     },
     "customDomain": {
-      "value": "www.skadeviherrgard.com"
+      "type": "string",
+      "metadata": {
+        "description": "Domän som planeras kopplas till webbappen."
+      }
     },
     "keyVaultName": {
-      "value": "kv-skadevi-prod"
+      "type": "string",
+      "metadata": {
+        "description": "Namn på Key Vault som lagrar kalenderhemligheten. Hemliga värdet sätts aldrig via Bicep."
+      }
     },
     "keyVaultSecretName": {
-      "value": "airbnb-ical-url"
+      "type": "string",
+      "metadata": {
+        "description": "Namn på Key Vault-sekretens för kalenderadressen."
+      }
     },
     "customDomainStage": {
-      "value": "disabled"
+      "type": "string",
+      "defaultValue": "disabled",
+      "allowedValues": [
+        "disabled",
+        "binding",
+        "certificate",
+        "tlsBinding"
+      ],
+      "metadata": {
+        "description": "Domänaktivering sker i separata deployment-steg: \"binding\" (hostname-binding utan SSL), \"certificate\" (gratis hanterat certifikat), \"tlsBinding\" (SNI + thumbprint). \"disabled\" = ingen domänhantering."
+      }
     },
     "githubIdentityName": {
-      "value": "id-gh-actions-skadevi"
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 24,
+      "metadata": {
+        "description": "Namn på den user-assigned managed identity som GitHub Actions använder för OIDC-deployment."
+      }
     },
     "githubOidcSubject": {
-      "value": "repo:Dperzzon@33748032/hemsidaskadevi@1436769162:ref:refs/heads/main"
+      "type": "string",
+      "metadata": {
+        "description": "Exakt OIDC-subject som GitHub skickar (immutable-format med owner-/repo-ID)."
+      }
     },
     "secretAdminPrincipalId": {
-      "value": "3e197323-a929-40b0-a164-c8cb5b33b521"
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Objekt-ID för den användare som ska registrera kalenderhemligheten i Key Vault; får rollen Key Vault Secrets Officer. Tomt = ingen tilldelning. (Ett Entra-objekt-ID är ingen hemlighet och ska därför inte vara @secure() — what-if och ARM kan annars inte utvärdera rollvillkoret.)"
+      }
+    },
+    "bookingStorageAccountName": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Namn på lagringskontot för bokningsförfrågningar (Azure Table Storage, Sweden Central). Tomt = bokningslagring förbereds ännu inte. Sätts först efter Skadevis godkännande."
+      }
+    },
+    "logicAppPrincipalId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Objekt-ID (principalId) för Logic Appens system-assigned managed identity i Splat Reality-prenumerationen. Får Storage Table Data Contributor på bokningstabellen. Fylls i FÖRST efter att Logic App-flödet har deployerats i Splat Reality (tvåfas: deploya Logic App → hämta principalId → skicka hit)."
+      }
+    }
+  },
+  "variables": {
+    "commonTags": {
+      "Owner": "[parameters('owner')]",
+      "Environment": "[parameters('environment')]",
+      "ManagedBy": "GitHub Actions",
+      "Domain": "[parameters('customDomain')]"
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Resources/resourceGroups",
+      "apiVersion": "2024-11-01",
+      "name": "[parameters('resourceGroupName')]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('commonTags')]"
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "webapp",
+      "resourceGroup": "[parameters('resourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "planName": {
+            "value": "[parameters('planName')]"
+          },
+          "planSkuName": {
+            "value": "[parameters('planSkuName')]"
+          },
+          "planSkuTier": {
+            "value": "[parameters('planSkuTier')]"
+          },
+          "webAppName": {
+            "value": "[parameters('webAppName')]"
+          },
+          "nodeFxVersion": {
+            "value": "[parameters('nodeFxVersion')]"
+          },
+          "environment": {
+            "value": "[parameters('environment')]"
+          },
+          "owner": {
+            "value": "[parameters('owner')]"
+          },
+          "customDomain": {
+            "value": "[parameters('customDomain')]"
+          },
+          "customDomainStage": {
+            "value": "[parameters('customDomainStage')]"
+          },
+          "keyVaultName": {
+            "value": "[parameters('keyVaultName')]"
+          },
+          "keyVaultSecretName": {
+            "value": "[parameters('keyVaultSecretName')]"
+          },
+          "secretAdminPrincipalId": {
+            "value": "[parameters('secretAdminPrincipalId')]"
+          },
+          "bookingStorageAccountName": {
+            "value": "[parameters('bookingStorageAccountName')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.49.2.45890",
+              "templateHash": "14901013172366391805"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Plats för alla resurser."
+              }
+            },
+            "planName": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 60,
+              "metadata": {
+                "description": "Namn på App Service-planen."
+              }
+            },
+            "planSkuName": {
+              "type": "string",
+              "metadata": {
+                "description": "App Service-planens SKU-namn."
+              }
+            },
+            "planSkuTier": {
+              "type": "string",
+              "metadata": {
+                "description": "App Service-planens nivå."
+              }
+            },
+            "webAppName": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 60,
+              "metadata": {
+                "description": "Namn på webbappen."
+              }
+            },
+            "nodeFxVersion": {
+              "type": "string",
+              "metadata": {
+                "description": "Linux-runtime för Node.js."
+              }
+            },
+            "environment": {
+              "type": "string",
+              "metadata": {
+                "description": "Miljötagg."
+              }
+            },
+            "owner": {
+              "type": "string",
+              "metadata": {
+                "description": "Ägartagg."
+              }
+            },
+            "keyVaultName": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 24,
+              "metadata": {
+                "description": "Namn på Key Vault som lagrar kalenderhemligheten. Själva hemliga värdet sätts ALDRIG via Bicep."
+              }
+            },
+            "keyVaultSecretName": {
+              "type": "string",
+              "metadata": {
+                "description": "Namn på Key Vault-sekretens för kalenderadressen."
+              }
+            },
+            "customDomain": {
+              "type": "string",
+              "metadata": {
+                "description": "Domän som planeras kopplas; används som tagg och i domänstegen."
+              }
+            },
+            "customDomainStage": {
+              "type": "string",
+              "defaultValue": "disabled",
+              "allowedValues": [
+                "disabled",
+                "binding",
+                "certificate",
+                "tlsBinding"
+              ],
+              "metadata": {
+                "description": "Domänaktivering sker i separata deployment-steg: \"binding\" (hostname utan SSL), \"certificate\" (gratis hanterat certifikat, kräver verifierad binding), \"tlsBinding\" (SNI + thumbprint)."
+              }
+            },
+            "secretAdminPrincipalId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Objekt-ID för användare som ska få rollen Key Vault Secrets Officer (registrera/rotera kalenderhemligheten). Tomt = ingen rolltilldelning. (Ett Entra-objekt-ID är ingen hemlighet; @secure() förhindrar utvärdering i what-if.)"
+              }
+            },
+            "bookingStorageAccountName": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Namn på lagringskontot för bokningsförfrågningar. Tomt = ingen bokningslagring aktiverad ännu (se infra/modules/storage-tables.bicep)."
+              }
+            }
+          },
+          "variables": {
+            "tags": {
+              "Owner": "[parameters('owner')]",
+              "Environment": "[parameters('environment')]",
+              "ManagedBy": "GitHub Actions",
+              "Domain": "[parameters('customDomain')]"
+            },
+            "bookingSettings": "[if(not(empty(parameters('bookingStorageAccountName'))), createArray(createObject('name', 'AZURE_STORAGE_ACCOUNT_NAME', 'value', parameters('bookingStorageAccountName'))), createArray())]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.KeyVault/vaults",
+              "apiVersion": "2023-07-01",
+              "name": "[parameters('keyVaultName')]",
+              "location": "[parameters('location')]",
+              "tags": "[variables('tags')]",
+              "properties": {
+                "tenantId": "[subscription().tenantId]",
+                "sku": {
+                  "family": "A",
+                  "name": "standard"
+                },
+                "enableRbacAuthorization": true,
+                "enableSoftDelete": true,
+                "accessPolicies": []
+              }
+            },
+            {
+              "type": "Microsoft.Web/serverfarms",
+              "apiVersion": "2024-11-01",
+              "name": "[parameters('planName')]",
+              "location": "[parameters('location')]",
+              "tags": "[variables('tags')]",
+              "sku": {
+                "name": "[parameters('planSkuName')]",
+                "tier": "[parameters('planSkuTier')]",
+                "capacity": 1
+              },
+              "properties": {
+                "reserved": true,
+                "perSiteScaling": false
+              }
+            },
+            {
+              "type": "Microsoft.Web/sites",
+              "apiVersion": "2024-11-01",
+              "name": "[parameters('webAppName')]",
+              "location": "[parameters('location')]",
+              "tags": "[variables('tags')]",
+              "kind": "app,linux",
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "properties": {
+                "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', parameters('planName'))]",
+                "httpsOnly": true,
+                "siteConfig": {
+                  "linuxFxVersion": "[parameters('nodeFxVersion')]",
+                  "alwaysOn": true,
+                  "http20Enabled": true,
+                  "minTlsVersion": "1.2",
+                  "ftpsState": "Disabled",
+                  "healthCheckPath": "/robots.txt",
+                  "appSettings": "[concat(createArray(createObject('name', 'NODE_ENV', 'value', 'production'), createObject('name', 'AIRBNB_ICAL_URL', 'value', format('@Microsoft.KeyVault(SecretUri={0}secrets/{1})', reference(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), '2023-07-01').vaultUri, parameters('keyVaultSecretName'))), createObject('name', 'BOOKING_REQUESTS_ENABLED', 'value', '0')), variables('bookingSettings'))]"
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]",
+                "[resourceId('Microsoft.Web/serverfarms', parameters('planName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]",
+              "name": "[guid(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), 'key-vault-secrets-user')]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')]",
+                "principalId": "[reference(resourceId('Microsoft.Web/sites', parameters('webAppName')), '2024-11-01', 'full').identity.principalId]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]",
+                "[resourceId('Microsoft.Web/sites', parameters('webAppName'))]"
+              ]
+            },
+            {
+              "condition": "[not(empty(parameters('secretAdminPrincipalId')))]",
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]",
+              "name": "[guid(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), 'key-vault-secrets-officer')]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7')]",
+                "principalId": "[parameters('secretAdminPrincipalId')]",
+                "principalType": "User"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]"
+              ]
+            },
+            {
+              "condition": "[not(equals(parameters('customDomainStage'), 'disabled'))]",
+              "type": "Microsoft.Web/sites/hostNameBindings",
+              "apiVersion": "2024-11-01",
+              "name": "[format('{0}/{1}', parameters('webAppName'), parameters('customDomain'))]",
+              "properties": {
+                "hostNameType": "Verified",
+                "sslState": "[if(equals(parameters('customDomainStage'), 'tlsBinding'), 'SniEnabled', 'Disabled')]",
+                "thumbprint": "[if(equals(parameters('customDomainStage'), 'tlsBinding'), reference(resourceId('Microsoft.Web/certificates', format('{0}-managed-cert', parameters('webAppName'))), '2024-11-01').thumbprint, null())]"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Web/certificates', format('{0}-managed-cert', parameters('webAppName')))]",
+                "[resourceId('Microsoft.Web/sites', parameters('webAppName'))]"
+              ]
+            },
+            {
+              "condition": "[or(equals(parameters('customDomainStage'), 'certificate'), equals(parameters('customDomainStage'), 'tlsBinding'))]",
+              "type": "Microsoft.Web/certificates",
+              "apiVersion": "2024-11-01",
+              "name": "[format('{0}-managed-cert', parameters('webAppName'))]",
+              "location": "[parameters('location')]",
+              "tags": "[variables('tags')]",
+              "properties": {
+                "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', parameters('planName'))]",
+                "canonicalName": "[parameters('customDomain')]",
+                "domainValidationMethod": "dns-txt-token"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Web/serverfarms', parameters('planName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "webAppId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Web/sites', parameters('webAppName'))]"
+            },
+            "defaultHostname": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Web/sites', parameters('webAppName')), '2024-11-01').defaultHostName]"
+            },
+            "keyVaultName": {
+              "type": "string",
+              "value": "[parameters('keyVaultName')]"
+            },
+            "webAppPrincipalId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Web/sites', parameters('webAppName')), '2024-11-01', 'full').identity.principalId]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('resourceGroupName'))]"
+      ]
+    },
+    {
+      "condition": "[not(empty(parameters('bookingStorageAccountName')))]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "booking-storage",
+      "resourceGroup": "[parameters('resourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "storageAccountName": {
+            "value": "[parameters('bookingStorageAccountName')]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "environment": {
+            "value": "[parameters('environment')]"
+          },
+          "owner": {
+            "value": "[parameters('owner')]"
+          },
+          "webAppPrincipalId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'webapp'), '2025-04-01').outputs.webAppPrincipalId.value]"
+          },
+          "logicAppPrincipalId": {
+            "value": "[parameters('logicAppPrincipalId')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.49.2.45890",
+              "templateHash": "9715611041484548881"
+            }
+          },
+          "parameters": {
+            "storageAccountName": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 24,
+              "metadata": {
+                "description": "Lagringskonto för permanent lagring av bokningsförfrågningar (Azure Table Storage). Skapas i Sweden Central. OBS: modulen förbereder infrastrukturen — den körs inte förrän Skadevi godkänt (skriptet deploy_bicep är avstängt i workflow)."
+              }
+            },
+            "location": {
+              "type": "string",
+              "defaultValue": "swedencentral",
+              "metadata": {
+                "description": "Plats (fast Sverige Central enligt beslut)."
+              }
+            },
+            "tableName": {
+              "type": "string",
+              "defaultValue": "bookingrequests",
+              "metadata": {
+                "description": "Namn på tabellen för bokningsförfrågningar."
+              }
+            },
+            "environment": {
+              "type": "string",
+              "defaultValue": "prod",
+              "metadata": {
+                "description": "Miljötagg."
+              }
+            },
+            "owner": {
+              "type": "string",
+              "defaultValue": "Skadevi Herrgård",
+              "metadata": {
+                "description": "Ägartagg."
+              }
+            },
+            "webAppPrincipalId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Objekt-ID (principalId) för webbappens system-assigned managed identity — får Storage Table Data Contributor på tabellen. Ett Entra-objekt-ID är ingen hemlighet och ska därför inte vara @secure() (what-if/ARM kan annars inte utvärdera rollvillkoret)."
+              }
+            },
+            "logicAppPrincipalId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Objekt-ID (principalId) för Logic Appens system-assigned managed identity — får Storage Table Data Contributor på tabellen."
+              }
+            },
+            "retentionDays": {
+              "type": "int",
+              "defaultValue": 24,
+              "allowedValues": [
+                24,
+                36,
+                60
+              ],
+              "metadata": {
+                "description": "Dagar som bokningsförfrågningar sparas innan gallring (GDPR-minimering)."
+              }
+            }
+          },
+          "variables": {
+            "tags": {
+              "Owner": "[parameters('owner')]",
+              "Environment": "[parameters('environment')]",
+              "ManagedBy": "Bicep (Skadevi)"
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Storage/storageAccounts",
+              "apiVersion": "2023-05-01",
+              "name": "[parameters('storageAccountName')]",
+              "location": "[parameters('location')]",
+              "tags": "[variables('tags')]",
+              "sku": {
+                "name": "Standard_LRS"
+              },
+              "kind": "StorageV2",
+              "properties": {
+                "httpsTrafficOnly": true,
+                "minimumTlsVersion": "TLS1_2",
+                "allowSharedKeyAccess": false,
+                "publicNetworkAccess": "Enabled",
+                "networkAcls": {
+                  "defaultAction": "Allow"
+                }
+              }
+            },
+            {
+              "type": "Microsoft.Storage/storageAccounts/tableServices",
+              "apiVersion": "2023-05-01",
+              "name": "[format('{0}/{1}', parameters('storageAccountName'), 'default')]",
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Storage/storageAccounts/tableServices/tables",
+              "apiVersion": "2023-05-01",
+              "name": "[format('{0}/{1}/{2}', parameters('storageAccountName'), 'default', parameters('tableName'))]",
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts/tableServices', parameters('storageAccountName'), 'default')]"
+              ]
+            },
+            {
+              "condition": "[not(empty(parameters('webAppPrincipalId')))]",
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Storage/storageAccounts/tableServices/tables', parameters('storageAccountName'), 'default', parameters('tableName'))]",
+              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts/tableServices/tables', parameters('storageAccountName'), 'default', parameters('tableName')), 'webapp-table-contributor')]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '0a9a7301-4a41-4b5c-82ff-4aeefea27a5a')]",
+                "principalId": "[parameters('webAppPrincipalId')]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts/tableServices/tables', parameters('storageAccountName'), 'default', parameters('tableName'))]"
+              ]
+            },
+            {
+              "condition": "[not(empty(parameters('logicAppPrincipalId')))]",
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Storage/storageAccounts/tableServices/tables', parameters('storageAccountName'), 'default', parameters('tableName'))]",
+              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts/tableServices/tables', parameters('storageAccountName'), 'default', parameters('tableName')), 'logicapp-table-contributor')]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '0a9a7301-4a41-4b5c-82ff-4aeefea27a5a')]",
+                "principalId": "[parameters('logicAppPrincipalId')]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts/tableServices/tables', parameters('storageAccountName'), 'default', parameters('tableName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "storageAccountId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+            },
+            "storageAccountName": {
+              "type": "string",
+              "value": "[parameters('storageAccountName')]"
+            },
+            "tableEndpoint": {
+              "type": "string",
+              "value": "[format('https://{0}.table.core.windows.net/{1}', parameters('storageAccountName'), parameters('tableName'))]"
+            },
+            "tableResourceId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Storage/storageAccounts/tableServices/tables', parameters('storageAccountName'), 'default', parameters('tableName'))]"
+            },
+            "retentionDays": {
+              "type": "int",
+              "value": "[parameters('retentionDays')]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('resourceGroupName'))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'webapp')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "github-oidc",
+      "resourceGroup": "[parameters('resourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "identityName": {
+            "value": "[parameters('githubIdentityName')]"
+          },
+          "githubOidcSubject": {
+            "value": "[parameters('githubOidcSubject')]"
+          },
+          "webAppId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'webapp'), '2025-04-01').outputs.webAppId.value]"
+          },
+          "environment": {
+            "value": "[parameters('environment')]"
+          },
+          "owner": {
+            "value": "[parameters('owner')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.49.2.45890",
+              "templateHash": "14728557478480444484"
+            }
+          },
+          "parameters": {
+            "identityName": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 24,
+              "metadata": {
+                "description": "Namn på den user-assigned managed identity som GitHub Actions loggar in med via OIDC."
+              }
+            },
+            "githubOidcSubject": {
+              "type": "string",
+              "metadata": {
+                "description": "Exakt OIDC-subject som GitHub skickar i token-utbytet, t.ex. \"repo:owner@<ownerId>/repo@<repoId>:ref:refs/heads/main\" (immutable-format)."
+              }
+            },
+            "webAppId": {
+              "type": "string",
+              "metadata": {
+                "description": "Fullständigt resurs-ID för webbappen som deploymenten ska gälla (från webapp-modulen)."
+              }
+            },
+            "environment": {
+              "type": "string",
+              "metadata": {
+                "description": "Miljötagg."
+              }
+            },
+            "owner": {
+              "type": "string",
+              "metadata": {
+                "description": "Ägartagg."
+              }
+            }
+          },
+          "variables": {
+            "tags": {
+              "Owner": "[parameters('owner')]",
+              "Environment": "[parameters('environment')]",
+              "ManagedBy": "GitHub Actions"
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+              "apiVersion": "2023-01-31",
+              "name": "[parameters('identityName')]",
+              "location": "[resourceGroup().location]",
+              "tags": "[variables('tags')]"
+            },
+            {
+              "type": "Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials",
+              "apiVersion": "2023-01-31",
+              "name": "[format('{0}/{1}', parameters('identityName'), 'github-actions-deploy-main')]",
+              "properties": {
+                "issuer": "https://token.actions.githubusercontent.com",
+                "subject": "[parameters('githubOidcSubject')]",
+                "audiences": [
+                  "api://AzureADTokenExchange"
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('identityName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Web/sites', split(parameters('webAppId'), '/')[8])]",
+              "name": "[guid(parameters('webAppId'), 'github-actions-website-contributor')]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'de139f84-1756-47ae-9be6-808fbbe84772')]",
+                "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('identityName')), '2023-01-31').principalId]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('identityName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "clientId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('identityName')), '2023-01-31').clientId]"
+            },
+            "principalId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('identityName')), '2023-01-31').principalId]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('resourceGroupName'))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'webapp')]"
+      ]
+    }
+  ],
+  "outputs": {
+    "resourceGroupName": {
+      "type": "string",
+      "value": "[parameters('resourceGroupName')]"
+    },
+    "githubIdentityClientId": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'github-oidc'), '2025-04-01').outputs.clientId.value]"
+    },
+    "githubIdentityPrincipalId": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'github-oidc'), '2025-04-01').outputs.principalId.value]"
+    },
+    "webAppId": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'webapp'), '2025-04-01').outputs.webAppId.value]"
+    },
+    "webAppDefaultHostname": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'webapp'), '2025-04-01').outputs.defaultHostname.value]"
+    },
+    "webAppPrincipalId": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'webapp'), '2025-04-01').outputs.webAppPrincipalId.value]"
     }
   }
 }

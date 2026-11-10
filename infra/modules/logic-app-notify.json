@@ -1,0 +1,122 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.49.2.45890",
+      "templateHash": "6771632181329364230"
+    }
+  },
+  "parameters": {
+    "location": {
+      "type": "string",
+      "defaultValue": "swedencentral",
+      "metadata": {
+        "description": "Plats — Logic Apps och Gmail-anslutningen ligger i Sweden Central."
+      }
+    },
+    "workflowName": {
+      "type": "string",
+      "defaultValue": "logic-skadevi-bokningsnotis",
+      "metadata": {
+        "description": "Namn på Logic App-flödet."
+      }
+    },
+    "gmailConnectionId": {
+      "type": "string",
+      "metadata": {
+        "description": "Resurs-ID för den befintliga Gmail-anslutningen (Microsoft.Web/connections/gmail i rg-splatcrm-prod)."
+      }
+    },
+    "gmailApiId": {
+      "type": "string",
+      "defaultValue": "/subscriptions/e3bc1637-482a-4065-811f-ea06fb691f3f/providers/Microsoft.Web/locations/swedencentral/managedApis/gmail",
+      "metadata": {
+        "description": "API-ID för Gmail managed connector."
+      }
+    },
+    "storageEndpoint": {
+      "type": "string",
+      "metadata": {
+        "description": "Slutpunkt för Skadevis bokningstabell, t.ex. https://konto.table.core.windows.net."
+      }
+    },
+    "tableName": {
+      "type": "string",
+      "defaultValue": "bookingrequests",
+      "metadata": {
+        "description": "Namn på bokningstabellen."
+      }
+    },
+    "environment": {
+      "type": "string",
+      "defaultValue": "prod",
+      "metadata": {
+        "description": "Miljötagg."
+      }
+    },
+    "owner": {
+      "type": "string",
+      "defaultValue": "Skadevi Herrgård",
+      "metadata": {
+        "description": "Ägartagg."
+      }
+    }
+  },
+  "variables": {
+    "tags": {
+      "Owner": "[parameters('owner')]",
+      "Environment": "[parameters('environment')]",
+      "ManagedBy": "Bicep (Skadevi)"
+    },
+    "workflowDefinition": "{\n  \"$schema\": \"https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#\",\n  \"contentVersion\": \"1.0.0.0\",\n  \"parameters\": {\n    \"$connections\": {\n      \"defaultValue\": {},\n      \"type\": \"Object\"\n    },\n    \"storageEndpoint\": {\n      \"defaultValue\": \"https://SKADEVI-LAGRINGSKONTO.table.core.windows.net\",\n      \"type\": \"String\"\n    },\n    \"tableName\": {\n      \"defaultValue\": \"bookingrequests\",\n      \"type\": \"String\"\n    },\n    \"maxAttempts\": {\n      \"defaultValue\": 5,\n      \"type\": \"Int\"\n    }\n  },\n  \"triggers\": {\n    \"Recurrence\": {\n      \"recurrence\": {\n        \"frequency\": \"Minute\",\n        \"interval\": 5,\n        \"timeZone\": \"W. Europe Standard Time\"\n      },\n      \"runtimeConfiguration\": {\n        \"concurrency\": {\n          \"runs\": 1\n        }\n      },\n      \"type\": \"Recurrence\"\n    }\n  },\n  \"actions\": {\n    \"Haemta_utkorg\": {\n      \"type\": \"Http\",\n      \"inputs\": {\n        \"method\": \"GET\",\n        \"uri\": \"@{parameters('storageEndpoint')}/@{parameters('tableName')}()?$filter=PartitionKey%20eq%20%27outbox%27%20and%20(status%20ne%20%27Skickad%27%20and%20attemptCount%20lt%20@{parameters('maxAttempts')})\",\n        \"headers\": {\n          \"x-ms-version\": \"2019-02-02\"\n        },\n        \"authentication\": {\n          \"type\": \"ManagedServiceIdentity\",\n          \"audience\": \"https://storage.azure.com/\"\n        }\n      },\n      \"runtimeConfiguration\": {\n        \"secureData\": {\n          \"properties\": [\"inputs\", \"outputs\"]\n        }\n      }\n    },\n    \"Om_det_finns_poster\": {\n      \"type\": \"If\",\n      \"expression\": \"@greater(length(body('Haemta_utkorg')?['value']), 0)\",\n      \"actions\": {\n        \"Behandla_varje_post\": {\n          \"type\": \"Foreach\",\n          \"foreach\": \"@body('Haemta_utkorg')?['value']\",\n          \"actions\": {\n            \"Markera_som_under_skickning\": {\n              \"type\": \"Http\",\n              \"inputs\": {\n                \"method\": \"PATCH\",\n                \"uri\": \"@{parameters('storageEndpoint')}/@{parameters('tableName')}(PartitionKey='@{items('Behandla_varje_post')?['PartitionKey']}',RowKey='@{items('Behandla_varje_post')?['RowKey']}')\",\n                \"headers\": {\n                  \"x-ms-version\": \"2019-02-02\",\n                  \"If-Match\": \"@{items('Behandla_varje_post')?['odata.etag']}\"\n                },\n                \"body\": {\n                  \"status\": \"Skickar\",\n                  \"attemptedAt\": \"@{utcNow()}\",\n                  \"attemptCount@odata.type\": \"Edm.Int32\",\n                  \"attemptCount\": \"@add(items('Behandla_varje_post')?['attemptCount'], 1)\"\n                },\n                \"authentication\": {\n                  \"type\": \"ManagedServiceIdentity\",\n                  \"audience\": \"https://storage.azure.com/\"\n                }\n              },\n              \"runtimeConfiguration\": {\n                \"secureData\": {\n                  \"properties\": [\"inputs\", \"outputs\"]\n                }\n              }\n            },\n            \"Skicka_mejl_(V2)\": {\n              \"type\": \"ApiConnection\",\n              \"inputs\": {\n                \"host\": {\n                  \"connection\": {\n                    \"name\": \"@parameters('$connections')['gmail']['connectionId']\"\n                  }\n                },\n                \"method\": \"post\",\n                \"path\": \"/v2/Mail\",\n                \"body\": {\n                  \"To\": \"@{items('Behandla_varje_post')?['mailTo']}\",\n                  \"Subject\": \"@{items('Behandla_varje_post')?['mailSubject']}\",\n                  \"Body\": \"@{items('Behandla_varje_post')?['mailHtml']}\",\n                  \"IsHtml\": true\n                }\n              },\n              \"retryPolicy\": {\n                \"type\": \"exponential\",\n                \"count\": 4,\n                \"minimumInterval\": \"PT30S\",\n                \"maximumInterval\": \"PT10M\"\n              }\n            },\n            \"Markera_som_skickad\": {\n              \"type\": \"Http\",\n              \"inputs\": {\n                \"method\": \"PATCH\",\n                \"uri\": \"@{parameters('storageEndpoint')}/@{parameters('tableName')}(PartitionKey='@{items('Behandla_varje_post')?['PartitionKey']}',RowKey='@{items('Behandla_varje_post')?['RowKey']}')\",\n                \"headers\": {\n                  \"x-ms-version\": \"2019-02-02\",\n                  \"If-Match\": \"*\"\n                },\n                \"body\": {\n                  \"status\": \"Skickad\",\n                  \"sentAt\": \"@{utcNow()}\"\n                },\n                \"authentication\": {\n                  \"type\": \"ManagedServiceIdentity\",\n                  \"audience\": \"https://storage.azure.com/\"\n                }\n              },\n              \"runAfter\": {\n                \"Skicka_mejl_(V2)\": [\"Succeeded\"]\n              },\n              \"runtimeConfiguration\": {\n                \"secureData\": {\n                  \"properties\": [\"inputs\", \"outputs\"]\n                }\n              }\n            },\n            \"Markera_som_misslyckad\": {\n              \"type\": \"Http\",\n              \"inputs\": {\n                \"method\": \"PATCH\",\n                \"uri\": \"@{parameters('storageEndpoint')}/@{parameters('tableName')}(PartitionKey='@{items('Behandla_varje_post')?['PartitionKey']}',RowKey='@{items('Behandla_varje_post')?['RowKey']}')\",\n                \"headers\": {\n                  \"x-ms-version\": \"2019-02-02\",\n                  \"If-Match\": \"*\"\n                },\n                \"body\": {\n                  \"status\": \"Misslyckad\"\n                },\n                \"authentication\": {\n                  \"type\": \"ManagedServiceIdentity\",\n                  \"audience\": \"https://storage.azure.com/\"\n                }\n              },\n              \"runAfter\": {\n                \"Skicka_mejl_(V2)\": [\"Failed\", \"TimedOut\"]\n              },\n              \"runtimeConfiguration\": {\n                \"secureData\": {\n                  \"properties\": [\"inputs\", \"outputs\"]\n                }\n              }\n            }\n          }\n        }\n      }\n    }\n  },\n  \"outputs\": {}\n}\n"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Logic/workflows",
+      "apiVersion": "2019-05-01",
+      "name": "[parameters('workflowName')]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "properties": {
+        "state": "Disabled",
+        "definition": "[variables('workflowDefinition')]",
+        "parameters": {
+          "$connections": {
+            "value": {
+              "gmail": {
+                "connectionId": "[parameters('gmailConnectionId')]",
+                "connectionName": "gmail",
+                "id": "[parameters('gmailApiId')]"
+              }
+            }
+          },
+          "storageEndpoint": {
+            "value": "[parameters('storageEndpoint')]"
+          },
+          "tableName": {
+            "value": "[parameters('tableName')]"
+          }
+        }
+      }
+    }
+  ],
+  "outputs": {
+    "workflowId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.Logic/workflows', parameters('workflowName'))]"
+    },
+    "principalId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Logic/workflows', parameters('workflowName')), '2019-05-01', 'full').identity.principalId]"
+    },
+    "state": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Logic/workflows', parameters('workflowName')), '2019-05-01').state]"
+    }
+  }
+}

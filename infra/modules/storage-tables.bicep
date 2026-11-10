@@ -52,7 +52,7 @@ resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   }
   kind: 'StorageV2'
   properties: {
-    httpsTrafficOnly: true
+    supportsHttpsTrafficOnly: true
     minimumTlsVersion: 'TLS1_2'
     allowSharedKeyAccess: false // tvingar Entra/Managed Identity — inga kontonycklar
     publicNetworkAccess: 'Enabled' // dataplansåtkomst via Entra; RBAC krävs i alla fall
