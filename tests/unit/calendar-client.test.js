@@ -5,6 +5,11 @@ const test = require('node:test');
 const vm = require('node:vm');
 
 const source = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'js', 'calendar.js'), 'utf8');
+const datesSource = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'js', 'booking', 'dates.js'), 'utf8');
+// calendar.js är en ES-modul som importerar booking/dates.js; i vm-harnessen
+//inlineas dates.js (utan export-nyckelord) och importraden tas bort.
+const inlineSource = datesSource.replaceAll('export ', '') +
+  '\n' + source.replace(/^import .*$/m, '');
 
 function createCalendar(fetch, timer = setTimeout) {
   const handlers = {};
@@ -17,6 +22,7 @@ function createCalendar(fetch, timer = setTimeout) {
   const description = { hidden: true };
   const document = {
     addEventListener() {},
+    dispatchEvent() {},
     getElementById(id) {
       if (id === 'availability-calendar') return container;
       if (id === 'calendar-description') return description;
@@ -25,9 +31,9 @@ function createCalendar(fetch, timer = setTimeout) {
   };
   const context = vm.createContext({
     document, fetch, AbortController, URLSearchParams, Date, Set,
-    setTimeout: timer, clearTimeout, console: { error() {} }
+    setTimeout: timer, clearTimeout, console: { error() {} }, CustomEvent: function () {}
   });
-  vm.runInContext(source, context);
+  vm.runInContext(inlineSource, context);
   return {
     context, container, description, handlers,
     load: () => vm.runInContext('loadAvailability()', context)

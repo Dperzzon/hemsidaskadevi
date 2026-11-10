@@ -68,6 +68,20 @@ try {
   if (bad.status !== 400) fail(`API utan slutdatum gav ${bad.status}, förväntat 400`);
   await bad.body?.cancel();
 
+  // Bokningsflödet: regler-API ska svara 200 och POST av förfrågningar ska
+  // vara avstängt (503) tills regler + durabel lagring är konfigurerade.
+  const rules = await fetch(`${base}/api/booking-rules`);
+  if (rules.status !== 200) fail(`/api/booking-rules gav ${rules.status}, förväntat 200`);
+  const rulesBody = await rules.json();
+  if (typeof rulesBody.published !== 'boolean') fail('/api/booking-rules svarade med ogiltigt format');
+  const bookingPost = await fetch(`${base}/api/booking-requests`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'smoketest-0001' },
+    body: JSON.stringify({ arrival: '2026-11-20', departure: '2026-11-22' })
+  });
+  if (bookingPost.status !== 503) fail(`POST /api/booking-requests gav ${bookingPost.status}, förväntat 503 innan konfiguration`);
+  await bookingPost.body?.cancel();
+
   // Hashade resurser ska ha immutable cache och serveras komprimerade,
   // och typsnittet ska finnas lokalt.
   const index = await (await fetch(`${base}/`)).text();

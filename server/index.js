@@ -8,6 +8,9 @@ const http = require('node:http');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { handleAvailability } = require('./calendar/availability');
+const { handleBookingRequest } = require('./booking/requests');
+const { loadRules, publicRules } = require('./booking/rules');
+const { createStore, isConfigured } = require('./booking/store');
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -188,9 +191,35 @@ async function serveFile(req, res, root, filePath) {
   res.end(req.method === 'HEAD' ? undefined : data);
 }
 
+function readJsonBody(req, limit = 16 * 1024) {
+  return new Promise((resolve, reject) => {
+    const contentType = req.headers['content-type'] || '';
+    if (!contentType.startsWith('application/json')) {
+      reject(new Error('Felaktig innehållstyp'));
+      return;
+    }
+    let size = 0;
+    const chunks = [];
+    req.on('data', (chunk) => {
+      size += chunk.length;
+      if (size > limit) {
+        reject(new Error('För stort meddelande'));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    req.on('error', reject);
+  });
+}
+
 function createRequestListener(options = {}) {
   const root = path.resolve(options.root ?? path.join(__dirname, '..', 'dist'));
   const availabilityHandler = options.availabilityHandler ?? handleAvailability;
+  const bookingHandler = options.bookingHandler ??
+    ((request, context) => handleBookingRequest(request, context, { ...options, store: createStore(options) }));
+  const rulesHandler = options.rulesHandler ?? (async () => publicRules(await loadRules(options)));
   const warn = options.warn ?? ((message) => console.error(message));
 
   return async function requestListener(req, res) {
@@ -202,12 +231,7 @@ function createRequestListener(options = {}) {
       return;
     }
 
-    if (req.method !== 'GET' && req.method !== 'HEAD') {
-      sendJson(res, 405, { error: 'Metod tillåts inte.' }, { Allow: 'GET, HEAD' });
-      return;
-    }
-
-    if (url.pathname === '/api/availability') {
+    if (url.pathname === '/api/availability' && (req.method === 'GET' || req.method === 'HEAD')) {
       const context = { warn };
       try {
         const result = await availabilityHandler({ query: url.searchParams }, context, options.availability ?? {});
@@ -215,6 +239,44 @@ function createRequestListener(options = {}) {
       } catch {
         sendJson(res, 503, { error: 'Tillgängligheten är för tillfället okänd.' });
       }
+      return;
+    }
+
+    if (url.pathname === '/api/booking-rules' && (req.method === 'GET' || req.method === 'HEAD')) {
+      try {
+        sendJson(res, 200, await rulesHandler());
+      } catch {
+        sendJson(res, 200, { published: false, version: null, text: '' });
+      }
+      return;
+    }
+
+    if (url.pathname === '/api/booking-requests' && req.method === 'POST') {
+      let body;
+      try {
+        body = JSON.parse(await readJsonBody(req));
+      } catch {
+        sendJson(res, 400, { error: 'Förfrågan kunde inte tolkas.' });
+        return;
+      }
+      const forwarded = req.headers['x-forwarded-for'];
+      const ip = (typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : '') ||
+        req.socket.remoteAddress || 'okänd';
+      try {
+        const result = await bookingHandler(
+          { body, idempotencyKey: req.headers['idempotency-key'], ip },
+          { warn },
+          {}
+        );
+        sendJson(res, result.status, result.jsonBody, result.headers);
+      } catch {
+        sendJson(res, 503, { error: 'Förfrågningar kan tyvärr inte tas emot just nu. Vänligen kontakta oss direkt.' });
+      }
+      return;
+    }
+
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      sendJson(res, 405, { error: 'Metod tillåts inte.' }, { Allow: 'GET, HEAD, POST' });
       return;
     }
 
@@ -238,6 +300,12 @@ function createRequestListener(options = {}) {
 
 function main() {
   const port = Number(process.env.PORT) || 8080;
+  if (!isConfigured()) {
+    console.error('VARNING: Durabel bokningslagring är inte konfigurerad (AZURE_STORAGE_ACCOUNT_NAME / AZURE_STORAGE_KEY). Bokningsförfrågningar kan inte tas emot.');
+  }
+  if (!(process.env.AIRBNB_ICAL_URL)) {
+    console.error('VARNING: AIRBNB_ICAL_URL är inte konfigurerad — kalenderns tillgänglighet kan inte läsas.');
+  }
   const server = http.createServer(createRequestListener());
   server.listen(port, () => {
     console.log(`Skadevi servern lyssnar på port ${port}`);
@@ -260,4 +328,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { createRequestListener, resolveStatic, MIME_TYPES, PAGE_ROUTES };
+module.exports = { createRequestListener, readJsonBody, resolveStatic, MIME_TYPES, PAGE_ROUTES };

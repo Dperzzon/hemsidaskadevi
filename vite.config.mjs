@@ -10,6 +10,8 @@ import { createRequire } from 'node:module';
 const root = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const { handleAvailability } = require('./server/calendar/availability.js');
+const { handleBookingRequest } = require('./server/booking/requests.js');
+const { loadRules, publicRules } = require('./server/booking/rules.js');
 
 // Syntetisk kalender för lokal utveckling: två nätter blockade, 12 dagar fram.
 function devFetch() {
@@ -64,6 +66,37 @@ function cleanUrlsAndApi() {
         } catch {
           res.writeHead(503, { 'Content-Type': 'application/json; charset=utf-8' });
           res.end(JSON.stringify({ error: 'Tillgängligheten är för tillfället okänd.' }));
+        }
+        return;
+      }
+      if (url.pathname === '/api/booking-rules') {
+        try {
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+          res.end(JSON.stringify(await publicRules(await loadRules())));
+        } catch {
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+          res.end(JSON.stringify({ published: false, version: null, text: '' }));
+        }
+        return;
+      }
+      if (url.pathname === '/api/booking-requests') {
+        // Dev: bokningshanteraren kräver durabel lagring — utan Azure-
+        // konfiguration svarar API:et 503, exakt som i produktion.
+        const chunks = [];
+        for await (const chunk of req) chunks.push(chunk);
+        let body = null;
+        try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { body = null; }
+        try {
+          const result = await handleBookingRequest(
+            { body, idempotencyKey: req.headers['idempotency-key'], ip: req.socket.remoteAddress },
+            { warn: (message) => console.error(message) },
+            {}
+          );
+          res.writeHead(result.status, result.headers);
+          res.end(JSON.stringify(result.jsonBody));
+        } catch {
+          res.writeHead(503, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ error: 'Förfrågningar kan tyvärr inte tas emot just nu. Vänligen kontakta oss direkt.' }));
         }
         return;
       }

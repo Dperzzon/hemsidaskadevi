@@ -217,3 +217,77 @@ test('okänd metod avvisas med 405', async () => {
     assert.equal(res.status, 405);
   } finally { close(server); }
 });
+
+function post(port, pathname, body, headers = {}) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(body);
+    const req = http.request({
+      host: '127.0.0.1', port, path: pathname, method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data), ...headers }
+    }, (res2) => {
+      let raw = '';
+      res2.on('data', (chunk) => { raw += chunk; });
+      res2.on('end', () => resolve({ status: res2.statusCode, body: raw }));
+    });
+    req.on('error', reject);
+    req.end(data);
+  });
+}
+
+test('/api/booking-rules svarar att reglerna inte är publicerade', async () => {
+  const root = withTempRoot();
+  const server = await listen(createRequestListener({ root }));
+  try {
+    const res = await request(server.address().port, '/api/booking-rules');
+    assert.equal(res.status, 200);
+    assert.deepEqual(JSON.parse(res.body), { published: false, version: null, text: '' });
+  } finally { close(server); }
+});
+
+test('POST /api/booking-requests nekas när reglerna inte är publicerade', async () => {
+  const root = withTempRoot();
+  const server = await listen(createRequestListener({ root }));
+  try {
+    const res = await post(server.address().port, '/api/booking-requests', { arrival: '2026-11-20' });
+    assert.equal(res.status, 503);
+  } finally { close(server); }
+});
+
+test('POST /api/booking-requests skickar vidare till injicerad hanterare', async () => {
+  const root = withTempRoot();
+  let received = null;
+  const server = await listen(createRequestListener({
+    root,
+    bookingHandler: async (req) => {
+      received = req;
+      return { status: 201, jsonBody: { reference: 'SK-2026-TEST01' } };
+    }
+  }));
+  try {
+    const res = await post(server.address().port, '/api/booking-requests', { firstName: 'Anna' }, { 'Idempotency-Key': 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+    assert.equal(res.status, 201);
+    assert.equal(JSON.parse(res.body).reference, 'SK-2026-TEST01');
+    assert.equal(received.body.firstName, 'Anna');
+    assert.equal(received.idempotencyKey, 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee');
+  } finally { close(server); }
+});
+
+test('POST med felaktig JSON avvisas med 400', async () => {
+  const root = withTempRoot();
+  const server = await listen(createRequestListener({ root }));
+  try {
+    const res = await new Promise((resolve, reject) => {
+      const req = http.request({
+        host: '127.0.0.1', port: server.address().port, path: '/api/booking-requests', method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      }, (res2) => {
+        let raw = '';
+        res2.on('data', (chunk) => { raw += chunk; });
+        res2.on('end', () => resolve({ status: res2.statusCode, body: raw }));
+      });
+      req.on('error', reject);
+      req.end('{ogiltigt');
+    });
+    assert.equal(res.status, 400);
+  } finally { close(server); }
+});

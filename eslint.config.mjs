@@ -14,7 +14,9 @@ const browserGlobals = {
   window: 'readonly', document: 'readonly', navigator: 'readonly', location: 'readonly',
   IntersectionObserver: 'readonly', fetch: 'readonly', AbortController: 'readonly',
   URLSearchParams: 'readonly', console: 'readonly', setTimeout: 'readonly',
-  clearTimeout: 'readonly', requestAnimationFrame: 'readonly', setImmediate: 'readonly'
+  clearTimeout: 'readonly', requestAnimationFrame: 'readonly', setImmediate: 'readonly',
+  CustomEvent: 'readonly', sessionStorage: 'readonly', crypto: 'readonly',
+  Intl: 'readonly', Number: 'readonly', Math: 'readonly'
 };
 
 export default [

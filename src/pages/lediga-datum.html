@@ -26,10 +26,155 @@
         <div id="availability-calendar" role="status" aria-live="polite" aria-busy="true"><p class="cal-notice">Kalendern hämtas …</p></div>
       </div>
     </section>
+    <section class="booking-section" id="booking-section" hidden aria-labelledby="booking-title">
+      <div class="booking-card">
+        <h2 id="booking-title" tabindex="-1">Bokningsförfrågan – Skadevi Herrgård</h2>
+        <p class="booking-intro">Fyll i era uppgifter så återkommer vi med besked om tillgänglighet och offert. Er vistelse är inte bokad förrän vi har bekräftat den.</p>
+        <div class="booking-summary" id="booking-summary">
+          <h3>Er vistelse</h3>
+          <dl class="booking-summary-list">
+            <div><dt>Ankomstdatum</dt><dd id="summary-arrival">–</dd></div>
+            <div><dt>Avresedatum</dt><dd id="summary-departure">–</dd></div>
+            <div><dt>Antal nätter</dt><dd id="summary-nights">–</dd></div>
+          </dl>
+          <button type="button" class="booking-link" id="booking-change-dates">Ändra datum</button>
+        </div>
+        <form id="booking-form" class="booking-form" novalidate>
+          <input type="text" name="webbsida" id="field-webbsida" class="hp-field" tabindex="-1" autocomplete="off" aria-hidden="true">
+          <input type="hidden" id="field-arrival" name="arrival">
+          <input type="hidden" id="field-departure" name="departure">
+          <input type="hidden" id="field-nights" name="nights">
+          <div class="booking-field">
+            <label for="field-firstname">Förnamn *</label>
+            <input type="text" id="field-firstname" name="firstName" autocomplete="given-name" maxlength="80" required>
+            <p class="field-error" aria-live="polite"></p>
+          </div>
+          <div class="booking-field">
+            <label for="field-lastname">Efternamn *</label>
+            <input type="text" id="field-lastname" name="lastName" autocomplete="family-name" maxlength="80" required>
+            <p class="field-error" aria-live="polite"></p>
+          </div>
+          <div class="booking-field">
+            <label for="field-email">E-postadress *</label>
+            <input type="email" id="field-email" name="email" autocomplete="email" maxlength="120" required>
+            <p class="field-error" aria-live="polite"></p>
+          </div>
+          <div class="booking-field">
+            <label for="field-phone">Telefonnummer *</label>
+            <input type="tel" id="field-phone" name="phone" autocomplete="tel" maxlength="32" required>
+            <p class="field-error" aria-live="polite"></p>
+          </div>
+          <div class="booking-field">
+            <label for="field-guests">Antal gäster *</label>
+            <select id="field-guests" name="guests" required>
+              <option value="">Välj antal</option>
+              <option value="1">1 gäst</option>
+              <option value="2">2 gäster</option>
+              <option value="3">3 gäster</option>
+              <option value="4">4 gäster</option>
+              <option value="5">5 gäster</option>
+              <option value="6">6 gäster</option>
+              <option value="7">7 gäster</option>
+              <option value="8">8 gäster</option>
+              <option value="9">9 gäster</option>
+              <option value="10">10 gäster</option>
+              <option value="11">11 gäster</option>
+              <option value="12">12 gäster</option>
+              <option value="13">13 gäster</option>
+              <option value="14">14 gäster</option>
+              <option value="15">15 gäster</option>
+              <option value="16">16 gäster</option>
+              <option value="17">17 gäster</option>
+              <option value="18">18 gäster</option>
+              <option value="19">19 gäster</option>
+              <option value="20">20 gäster</option>
+              <option value="21">21 gäster</option>
+              <option value="22">22 gäster</option>
+              <option value="23">23 gäster</option>
+              <option value="24">24 gäster</option>
+            </select>
+            <p class="field-error" aria-live="polite"></p>
+          </div>
+          <div class="booking-field">
+            <label for="field-company">Företagsnamn (frivilligt)</label>
+            <input type="text" id="field-company" name="company" autocomplete="organization" maxlength="120">
+            <p class="field-error" aria-live="polite"></p>
+          </div>
+          <fieldset class="booking-addons">
+            <legend>Tillval</legend>
+            <p class="booking-addons-note">Samtliga tillval är frivilliga. Priset uppdateras när ni markerar eller avmarkerar tillval.</p>
+            <div class="booking-addon">
+              <input type="checkbox" id="addon-slutstad" name="slutstad">
+              <label for="addon-slutstad">Slutstädning (exklusive kök) — 2 500 kr</label>
+              <p class="booking-addon-note">Ett engångspris per vistelse. Köket ingår inte i städningen.</p>
+            </div>
+            <div class="booking-addon">
+              <input type="checkbox" id="addon-lakan" name="lakan">
+              <label for="addon-lakan">Hyra lakan och handdukar — 200 kr per person</label>
+              <div class="booking-addon-count">
+                <label for="linen-count">Antal personer:</label>
+                <input type="number" id="linen-count" name="linenCount" min="1" max="40" disabled>
+              </div>
+            </div>
+            <div class="booking-addon">
+              <input type="checkbox" id="addon-ved" name="ved">
+              <label for="addon-ved">Köpa ved — 350 kr</label>
+              <p class="booking-addon-note">Ett engångspris per beställning.</p>
+            </div>
+            <div class="booking-addon">
+              <input type="checkbox" id="addon-tidig-incheckning" name="tidigIncheckning">
+              <label for="addon-tidig-incheckning">Tidig incheckning — 500 kr</label>
+              <p class="booking-addon-note">Önskemål som behöver bekräftas av Skadevi Herrgård.</p>
+            </div>
+            <div class="booking-addon">
+              <input type="checkbox" id="addon-sen-utcheckning" name="senUtcheckning">
+              <label for="addon-sen-utcheckning">Sen utcheckning — 500 kr</label>
+              <p class="booking-addon-note">Önskemål som behöver bekräftas av Skadevi Herrgård.</p>
+            </div>
+          </fieldset>
+          <div class="booking-prices" aria-live="polite">
+            <h3>Prisöversikt</h3>
+            <ul id="price-list"></ul>
+            <div class="price-line price-line-total" id="price-total-row" hidden><span>Summa tillval</span><span id="price-total">0 kr</span></div>
+            <p class="booking-price-note">Boendepris tillkommer och bekräftas i samband med bokningsförfrågan. Er vistelse är inte bokad förrän vi har bekräftat den.</p>
+          </div>
+          <div class="booking-field booking-consent">
+            <input type="checkbox" id="consent-rules" name="consentRules" required>
+            <label for="consent-rules">Jag har läst och godkänner Skadevi Herrgårds <button type="button" class="booking-rules-link" id="open-rules-label" aria-haspopup="dialog">bokningsregler</button>.</label>
+            <p class="field-error" aria-live="polite"></p>
+          </div>
+          <div class="booking-field booking-consent">
+            <input type="checkbox" id="consent-contact" name="consentContact">
+            <label for="consent-contact">Jag vill gärna bli kontaktad för att diskutera min vistelse och eventuella frågor.</label>
+          </div>
+          <div class="booking-field">
+            <label for="field-message">Övriga önskemål eller frågor (frivilligt)</label>
+            <textarea id="field-message" name="message" maxlength="2000"></textarea>
+            <p class="field-error" aria-live="polite"></p>
+          </div>
+          <p class="booking-submit-notice" id="submit-notice" hidden></p>
+          <p class="booking-form-error" id="form-error" role="alert" hidden></p>
+          <button type="submit" class="btn" id="booking-submit" disabled>Skicka bokningsförfrågan</button>
+          <p class="booking-submit-note">En bokningsförfrågan är inte en bekräftad bokning. Ni får besked från oss om tillgänglighet och pris innan bokningen blir giltig.</p>
+        </form>
+        <div class="booking-confirmation" id="booking-confirmation" hidden tabindex="-1">
+          <h3>Tack för din bokningsförfrågan!</h3>
+          <p>Vi har tagit emot dina önskemål och återkommer med besked om tillgänglighet och bokning. Din vistelse är ännu inte bekräftad.</p>
+          <p><strong>Referensnummer:</strong> <span id="confirmation-reference">–</span><br><strong>Status:</strong> Inväntar godkännande</p>
+        </div>
+      </div>
+    </section>
+    <dialog id="booking-rules-dialog" class="booking-rules-dialog" aria-labelledby="rules-dialog-title">
+      <h3 id="rules-dialog-title">Bokningsregler – Skadevi Herrgård</h3>
+      <p id="rules-dialog-notice" hidden>Bokningsreglerna publiceras inom kort.</p>
+      <div id="rules-dialog-body" class="booking-rules-text"></div>
+      <button type="button" class="btn btn-outline" id="close-rules">Stäng</button>
+    </dialog>
     <section class="category-cta"><span class="eyebrow">Hittade ni era datum?</span><h2>Boka er<br><em>vistelse</em></h2><p>Meddela oss era datum så återkommer vi med bekräftelse och offert.</p><a href="/boka" class="btn">Boka</a></section>
   </main>
   <footer class="footer" role="contentinfo"><div class="footer-grid"><div class="footer-col footer-col-contact"><h3>Kontakta oss</h3><p><a href="tel:+46702730422">+46 70 273 04 22</a></p><p><a href="mailto:skadevigard@gmail.com">skadevigard@gmail.com</a></p><p>Skoklostervägen 16<br>746 94 Häggeby</p><p><a href="https://maps.google.com/?q=Skoklosterv%C3%A4gen+16+746+94+H%C3%A4ggeby" target="_blank" rel="noopener" class="maps-link">Visa på karta</a></p></div><div class="footer-col footer-col-image"><img width="750" height="500" src="/images/gallery/huset-logga.webp" alt="Skadevi Gård" loading="lazy"></div><div class="footer-col footer-col-social"><h3>Följ oss</h3><div class="social-links"><a href="https://www.instagram.com/skadevigard/" target="_blank" rel="noopener"><img loading="lazy" width="750" height="500" src="/images/sociala-symboler.webp" alt="Följ oss på sociala medier" class="social-symbol-img"></a></div></div></div><div class="footer-bottom"><p>&copy; <span data-year>2025</span> Skadevi Gård</p></div></footer>
   <script type="module" src="/js/calendar.js"></script>
+  <script type="module" src="/js/booking-form.js"></script>
   <script type="module" src="/js/main.js"></script>
 </body>
 </html>

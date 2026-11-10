@@ -12,7 +12,7 @@
     "build": "vite build && node scripts/compress.mjs",
     "preview": "node server/index.js",
     "start": "node server/index.js",
-    "test": "node --test \"tests/unit/*.test.js\"",
+    "test": "node --test \"tests/unit/*.test.js\" \"tests/unit/*.test.mjs\"",
     "test:smoke": "node scripts/smoke-test.mjs",
     "test:e2e": "playwright test --grep-invert @visual",
     "test:visual": "playwright test --grep @visual",
