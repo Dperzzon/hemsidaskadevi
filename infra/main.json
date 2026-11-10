@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.49.2.45890",
-      "templateHash": "6694496081825873754"
+      "templateHash": "1426291537968215162"
     }
   },
   "parameters": {
@@ -512,7 +512,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.49.2.45890",
-              "templateHash": "9715611041484548881"
+              "templateHash": "2780946466414345243"
             }
           },
           "parameters": {
@@ -598,7 +598,7 @@
               },
               "kind": "StorageV2",
               "properties": {
-                "httpsTrafficOnly": true,
+                "supportsHttpsTrafficOnly": true,
                 "minimumTlsVersion": "TLS1_2",
                 "allowSharedKeyAccess": false,
                 "publicNetworkAccess": "Enabled",
