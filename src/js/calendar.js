@@ -73,7 +73,8 @@ function monthGrid(y, m) {
     cells.push({
       day: d,
       key,
-      blocked: state.blocked.has(key) || key < todayKey,
+      blocked: state.blocked.has(key),
+      past: key < todayKey,
       today: key === todayKey
     });
   }
@@ -85,9 +86,14 @@ function renderMonth(y, m) {
   const days = monthGrid(y, m).map((cell) => {
     if (cell.blank) return '<span class="cal-day cal-blank"></span>';
     const classes = ['cal-day'];
-    if (cell.blocked) classes.push('cal-booked');
+    if (cell.past) classes.push('cal-past');
+    else if (cell.blocked) classes.push('cal-booked');
+    else classes.push('cal-selectable');
     if (cell.today) classes.push('cal-today');
-    return `<span class="${classes.join(' ')}" data-date="${cell.key}">${cell.day}</span>`;
+    const status = cell.past ? 'förflutet datum'
+      : cell.blocked ? 'bokat eller ej tillgängligt' : 'ledigt';
+    const tabindex = cell.past || cell.blocked ? '' : ' tabindex="0"';
+    return `<span class="${classes.join(' ')}" data-date="${cell.key}" role="button"${tabindex} aria-pressed="false" aria-label="${cell.day} ${title}, ${status}">${cell.day}</span>`;
   }).join('');
   return `
     <div class="cal-month">
@@ -106,7 +112,7 @@ function render() {
   const notice = {
     loading: 'Kalendern hämtas …',
     error: 'Kalendern kunde inte läsas just nu. Tillgängligheten är okänd. Kontakta oss så bekräftar vi tillgängligheten.',
-    ok: 'Gröna datum är bokade eller ej tillgängliga.'
+    ok: 'Guldfärgade datum är lediga — grå datum är bokade eller ej tillgängliga.'
   }[state.status];
   if (state.status !== 'ok') {
     container.innerHTML = `<p class="cal-notice cal-notice-${state.status}">${notice}</p>`;
@@ -132,6 +138,23 @@ function render() {
   document.getElementById('cal-next').addEventListener('click', () => {
     state.base = shiftMonth(y, m, 1);
     loadAvailability();
+  });
+  container.querySelectorAll('.cal-day.cal-selectable').forEach((day) => {
+    const select = () => {
+      container.querySelectorAll('.cal-day.cal-selected').forEach((el) => {
+        el.classList.remove('cal-selected');
+        el.setAttribute('aria-pressed', 'false');
+      });
+      day.classList.add('cal-selected');
+      day.setAttribute('aria-pressed', 'true');
+    };
+    day.addEventListener('click', select);
+    day.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        select();
+      }
+    });
   });
 }
 

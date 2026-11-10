@@ -11,7 +11,8 @@ function createCalendar(fetch, timer = setTimeout) {
   const container = {
     innerHTML: '',
     attributes: {},
-    setAttribute(name, value) { this.attributes[name] = value; }
+    setAttribute(name, value) { this.attributes[name] = value; },
+    querySelectorAll() { return []; }
   };
   const description = { hidden: true };
   const document = {
@@ -42,11 +43,23 @@ test('successful response displays the requested months and booked dates', async
   const calendar = createCalendar(async (url) => {
     requests.push(url);
     const start = new URL(url, 'http://localhost').searchParams.get('start');
-    return response({ blocked: [start] });
+    // Blockera första datumet i följande månad så det inte råkar vara ett
+    // förflutet datum (som renderas som cal-past, inte cal-booked).
+    const startParts = start.split('-').map(Number);
+    const blocked = (() => {
+      const d = new Date(startParts[0], startParts[1] - 1 + 1, 1);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+    })();
+    return response({ blocked: [blocked] });
   });
   await calendar.load();
   const start = new URL(requests[0], 'http://localhost').searchParams.get('start');
-  assert.match(calendar.container.innerHTML, new RegExp(`cal-booked[^"]*" data-date="${start}"`));
+  const startParts = start.split('-').map(Number);
+  const blocked = (() => {
+    const d = new Date(startParts[0], startParts[1] - 1 + 1, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+  })();
+  assert.match(calendar.container.innerHTML, new RegExp(`cal-booked[^"]*" data-date="${blocked}"`));
   assert.equal((calendar.container.innerHTML.match(/class="cal-month"/g) || []).length, 2);
   assert.equal(calendar.description.hidden, false);
   assert.equal(calendar.container.attributes['aria-busy'], 'false');

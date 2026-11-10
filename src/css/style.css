@@ -444,6 +444,7 @@ h6 { font-size: var(--text-lg); }
   transition: border-color .2s ease, color .2s ease;
 }
 .cal-nav-btn:hover { border-color: var(--color-secondary); color: var(--color-secondary); }
+.cal-nav-btn:focus-visible { outline: 2px solid var(--color-secondary); outline-offset: 2px; }
 .cal-months { display: grid; grid-template-columns: 1fr 1fr; gap: 36px; }
 .cal-month h3 { margin: 0 0 14px; font-family: var(--font-heading); font-size: 1.15rem; font-weight: 400; text-align: center; }
 .cal-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); margin-bottom: 8px; }
@@ -455,17 +456,25 @@ h6 { font-size: var(--text-lg); }
   justify-content: center;
   aspect-ratio: 1;
   font-size: 13px;
-  color: var(--color-text);
-  background: var(--color-bg-alt);
+  color: #2e2a24;
+  background: #c9a96e;
   border: 1px solid transparent;
+  transition: background .15s ease, box-shadow .15s ease;
 }
-.cal-day.cal-booked { color: #9a958b; background: #e4e0d7; text-decoration: line-through; cursor: not-allowed; }
-.cal-day.cal-today { border-color: var(--color-accent); }
+.cal-day.cal-booked { color: #5c584f; background: #c8c6c0; text-decoration: line-through; cursor: not-allowed; }
+.cal-day.cal-past { color: #b3afa6; background: transparent; cursor: default; }
+.cal-day.cal-selectable { cursor: pointer; }
+.cal-day.cal-selectable:hover { background: #b8965c; }
+.cal-day.cal-selectable:focus-visible { outline: 2px solid var(--color-secondary); outline-offset: 2px; }
+.cal-day.cal-today { border-color: var(--color-secondary); }
+.cal-day.cal-selected { box-shadow: inset 0 0 0 2px var(--color-secondary); }
+.cal-day.cal-past.cal-selected,
+.cal-day.cal-booked.cal-selected { box-shadow: none; }
 .cal-legend { display: flex; justify-content: center; gap: 28px; margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--color-border); }
 .cal-legend-item { display: inline-flex; align-items: center; gap: 9px; color: var(--color-text-light); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; }
 .cal-legend-dot { width: 12px; height: 12px; border-radius: 50%; }
-.cal-legend-free { background: var(--color-accent); }
-.cal-legend-booked { background: #c6c1b6; }
+.cal-legend-free { background: #c9a96e; }
+.cal-legend-booked { background: #c8c6c0; }
 
 @media (max-width: 768px) {
   .calendar-section { padding: 0 var(--space-md) 80px; }
