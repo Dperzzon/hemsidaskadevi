@@ -3,9 +3,11 @@
    ========================================================================== */
 :root {
   --color-primary: #333333;
+  --color-primary-dark: #2a2a27;
   --color-primary-light: #555;
-  --color-secondary: #8b6b4a;
+  --color-secondary: #876847;
   --color-accent: #c9a96e;
+  --color-accent-text: #816941; /* mörkare guldton för text på ljus bakgrund: 4.7:1 kontrast */
   --color-bg: #ffffff;
   --color-bg-alt: #f7f5f0;
   --color-text: #000000;
@@ -213,7 +215,7 @@ h6 { font-size: var(--text-lg); }
   justify-content: center;
   text-align: left;
   color: #000;
-  overflow: visible;
+  overflow-x: clip; /* decorativa ::before-element får inte bredda sidan */
   padding: 100px var(--space-xl) 0;
 }
 .hero-bg {
@@ -781,7 +783,7 @@ h6 { font-size: var(--text-lg); }
   font-size: var(--text-lg);
   font-weight: 500;
   line-height: 1.4;
-  color: #c9a96e;
+  color: var(--color-accent-text);
   text-transform: none;
   letter-spacing: 0.05em;
   margin-bottom: var(--space-lg);
@@ -823,7 +825,7 @@ h6 { font-size: var(--text-lg); }
   letter-spacing: 0.05em;
   text-transform: uppercase;
   transition: background 0.2s, color 0.2s;
-  color: #c9a96e;
+  color: var(--color-accent-text);
 }
 .footer-col-contact .maps-link:hover {
   background: #c9a96e;
@@ -856,7 +858,7 @@ h6 { font-size: var(--text-lg); }
   font-size: var(--text-lg);
   font-weight: 500;
   line-height: 1.4;
-  color: #c9a96e;
+  color: var(--color-accent-text);
   margin-bottom: var(--space-sm);
 }
 .social-links {
@@ -1571,6 +1573,13 @@ h6 { font-size: var(--text-lg); }
   .faq-aside .text-link { grid-column: auto; }
   .faq-group-heading { gap: 12px; }
   .faq-group-heading h2 { font-size: 1.5rem; }
+}
+
+/* Tillvalsrutnät (priser.html): två kolumner på bred skärm, en kolumn på mobil.
+   Placerad sist i filen så den vinner över .pricing-grid:s responsiva 1fr-regler. */
+.pricing-grid-2 { grid-template-columns:repeat(2,1fr); }
+@media (max-width: 768px) {
+  .pricing-grid-2 { grid-template-columns:1fr; }
 }
 
 /* --- Tillgänglighet: minskad rörelse --- */
