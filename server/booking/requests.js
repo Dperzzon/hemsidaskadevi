@@ -5,13 +5,19 @@
 // VIKTIGT: en bokningsförfrågan är ALDRIG en bekräftad bokning. Alla poster
 // sparas med status "Inväntar godkännande" och skickas aldrig till Airbnb.
 //
-// Beslutspunkter (dokumenterade i docs/bokningsflode.md):
-// - Bokningsreglerna måste vara publicerade i server/booking/house-rules.json
-//   innan förfrågningar tas emot (annars 503).
-// - Permanent lagring: Azure Table Storage; utan konfiguration nekas inskick.
-// - E-postleverans: notiser skrivs som utkorgsposter i lagringen; val av
-//   e-postleverantör (t.ex. SendGrid/Azure Communication Services/SMTP) är en
-//   separat beslutspunkt och den verkliga leveransen är avstängd tills dess.
+// Skydd (dokumenterat i docs/bokningsflode.md):
+// - Totalstängning: inskick nekas tills BOOKING_REQUESTS_ENABLED=1 sätts
+//   efter att hela kedjan (lagring, Logic Apps, regler) verifierats/godkänts.
+// - Bokningsreglerna (publicerade i server/booking/house-rules.json) måste
+//   godkännas med aktuell version.
+// - Permanent lagring: Azure Table Storage med Managed Identity (Entra);
+//   utan konfiguration nekas inskick.
+// - Tillgängligheten kontrolleras alltid på serversidan mot Airbnb-kalendern
+//   innan registrering; överlappande väntande förfrågningar tillåts men
+//   flaggas — Airbnb-iCal ger ingen atomär låsning, Skadevi avgör.
+// - E-post: notiser skrivs som utkorgsposter i lagringen; Logic Apps
+//   (recurrence-pollning, se infra/logicapp/) skickar dem via den befintliga
+//   Gmail-anslutningen. Ingen publikt oskyddad webhook används.
 
 const crypto = require('node:crypto');
 const { handleAvailability } = require('../calendar/availability');
@@ -183,8 +189,22 @@ function makeReference(now = new Date()) {
   return `SK-${now.getFullYear()}-${suffix}`;
 }
 
+// HTML-escapar gästuppgifter så att Logic Apps-flödet aldrig tolkar dem som
+// HTML-kod — skyddar mot infogad HTML/skript i mejlen.
+function escapeHtml(value) {
+  if (value === undefined || value === null) return '';
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
 // Bygger notiserna (värd + gäst) som läggs i utkorgen i lagringen. Den
-// verkliga e-postleveransen är en separat beslutspunkt (se ovan).
+// verkliga e-postleveransen sker i Logic Apps (recurrence-pollning av
+// utkorgspartitionen, se infra/logicapp/). Varje mejl märker tydligt att
+// förfrågan inte är en bekräftad bokning.
 function buildNotifications(record) {
   const addonLines = [];
   if (record.addons.slutstad) addonLines.push('Slutstädning (exklusive kök): 2 500 kr');
@@ -207,20 +227,42 @@ function buildNotifications(record) {
     `Summa tillval: ${record.totalAddons} kr`,
     record.discount ? `Rabatt (dras av från boendepriset i offerten): ${record.discount.label} ${record.discount.percent} %` : null,
     `Bokningsregler godkända (version ${record.rulesVersion})`,
+    record.overlaps?.length ? `VARNING — ÖVERLAPP med annan väntande förfrågan: ${record.overlaps.join(', ')}. Avgör själv vilken som ska godkännas. Ingen av dem är bekräftad.` : null,
     record.message ? `Önskemål: ${record.message}` : null
   ].filter(Boolean).join('\n');
+  const htmlRows = [
+    `Referens: ${escapeHtml(record.reference)}`,
+    `Status: ${escapeHtml(record.status)}`,
+    `Vistelse: ${escapeHtml(record.arrival)} → ${escapeHtml(record.departure)} (${record.nights} nätter)`,
+    `Gäster: ${record.guests}`,
+    `Namn: ${escapeHtml(record.firstName)} ${escapeHtml(record.lastName)}`,
+    `E-post: ${escapeHtml(record.email)}`,
+    `Telefon: ${escapeHtml(record.phone)}`,
+    record.company ? `Företag: ${escapeHtml(record.company)}` : null,
+    record.addons.lakan ? `Lakan/handdukar till: ${record.addons.linenCount} personer` : null,
+    'Tillval:',
+    ...(addonLines.length ? addonLines.map(escapeHtml) : ['- Inga']),
+    `Summa tillval: ${record.totalAddons} kr`,
+    record.discount ? `Rabatt (dras av från boendepriset i offerten): ${escapeHtml(record.discount.label)} ${record.discount.percent} %` : null,
+    `Bokningsregler godkända (version ${escapeHtml(record.rulesVersion)})`,
+    record.overlaps?.length ? `VARNING — ÖVERLAPP med annan väntande förfrågan: ${record.overlaps.map(escapeHtml).join(', ')}. Avgör själv vilken som ska godkännas. Ingen av dem är bekräftad.` : null,
+    record.message ? `Önskemål: ${escapeHtml(record.message)}` : null
+  ].filter(Boolean).map((row) => `<li>${row}</li>`).join('');
+  const disclaimer = 'OBS: Detta är en bokningsförfrågan (status: Inväntar godkännande) — inte en bekräftad bokning.';
   return {
     host: {
       to: MAIL.hostRecipient,
       replyTo: MAIL.replyTo,
       subject: `Bokningsförfrågan ${record.reference} — Inväntar godkännande`,
-      body: summary
+      body: summary,
+      html: `<h2>Bokningsförfrågan ${escapeHtml(record.reference)}</h2><p><strong>${disclaimer}</strong></p><ul>${htmlRows}</ul>`
     },
     guest: {
-      to: 'guest',
+      to: record.email,
       replyTo: MAIL.replyTo,
       subject: `Vi har tagit emot din bokningsförfrågan (${record.reference})`,
-      body: 'Tack för din bokningsförfrågan! Vi har tagit emot dina önskemål och återkommer med besked om tillgänglighet och bokning. Din vistelse är ännu inte bekräftad.'
+      body: `Tack för din bokningsförfrågan! Vi har tagit emot dina önskemål och återkommer med besked om tillgänglighet och bokning. Din vistelse är ännu inte bekräftad. ${disclaimer}`,
+      html: `<p>Tack för din bokningsförfrågan! Vi har tagit emot dina önskemål och återkommer med besked om tillgänglighet och bokning. <strong>Din vistelse är ännu inte bekräftad.</strong></p><p>${disclaimer}</p>`
     }
   };
 }
@@ -229,24 +271,14 @@ async function saveOutbox(store, record, context) {
   for (const [key, notification] of Object.entries(buildNotifications(record))) {
     try {
       await store.save({
+        partition: 'outbox',
         idempotencyKey: `outbox-${record.idempotencyKey}-${key}`,
-        reference: record.reference,
         status: 'Utkorg',
-        arrival: notification.to,
-        departure: notification.subject,
-        nights: 0,
-        guests: 0,
-        firstName: 'notis',
-        lastName: record.reference,
-        email: notification.to,
-        replyTo: notification.replyTo ?? '',
-        phone: '',
-        company: '',
-        message: notification.body,
-        addons: {},
-        totalAddons: 0,
-        rulesVersion: record.rulesVersion,
-        consentContact: false,
+        mailTo: notification.to,
+        mailReplyTo: notification.replyTo ?? '',
+        mailSubject: notification.subject,
+        mailHtml: notification.html,
+        attemptCount: 0,
         createdAt: record.createdAt
       }, context);
     } catch {
@@ -259,6 +291,17 @@ async function saveOutbox(store, record, context) {
 async function handleBookingRequest(request, context, options = {}) {
   const warn = context.warn ?? (() => {});
   const now = options.now ?? new Date();
+
+  // 0. Totalstängning: bokningsinskick hålls avstängt tills hela kedjan
+  // (lagring, Logic Apps, regler) är verifierad och godkänd. Aktiveras
+  // uttryckligen via BOOKING_REQUESTS_ENABLED=1 (miljö) eller options.enabled.
+  const enabled = options.enabled ?? process.env.BOOKING_REQUESTS_ENABLED === '1';
+  if (!enabled) {
+    return {
+      status: 503, headers: API_HEADERS,
+      jsonBody: { error: 'Bokningsförfrågningar kan inte tas emot via formuläret just nu. Vänligen kontakta oss direkt.' }
+    };
+  }
 
   // 1. Bokningsreglerna måste vara publicerade innan förfrågningar tas emot.
   const rules = await loadRules(options);
@@ -338,12 +381,38 @@ async function handleBookingRequest(request, context, options = {}) {
     };
   }
 
-  // 7. Spara förfrågan med status "Inväntar godkännande" och unik referens.
+  // 7. Överlapp mot andra väntande förfrågningar: eftersom Airbnb-iCal inte
+  // ger atomär låsning av datum tillåts flera förfrågningar för samma period.
+  // Ingen av dem blir bekräftad; varje värdnotis flaggar överlappen så att
+  // Skadevi avgör vilken som ska godkännas.
+  let overlaps = [];
+  try {
+    const pending = await store.listPending();
+    overlaps = pending
+      .filter((other) => other.idempotencyKey !== idempotencyKey &&
+        other.arrival < validated.record.departure && other.departure > validated.record.arrival)
+      .map((other) => `${other.reference} (${other.arrival}–${other.departure})`);
+  } catch {
+    // Överlappskontrollen får aldrig blockera registreringen.
+  }
+
+  // 8. Unik referens (genereras på serversidan, kontrolleras mot lagringen).
+  const makeReferenceFn = options.makeReference ?? makeReference;
+  let reference = makeReferenceFn(now);
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const clash = await store.findByReference(reference).catch(() => null);
+    if (!clash) break;
+    reference = makeReferenceFn(now);
+  }
+
+  // 9. Spara förfrågan med status "Inväntar godkännande" (aldrig en bekräftad
+  // bokning — bekräftelse görs endast manuellt av Skadevi).
   const record = {
     ...validated.record,
     idempotencyKey,
-    reference: makeReference(now),
+    reference,
     status: 'Inväntar godkännande',
+    overlaps,
     createdAt: now.toISOString()
   };
   try {
@@ -372,6 +441,6 @@ async function handleBookingRequest(request, context, options = {}) {
 
 module.exports = {
   handleBookingRequest, validatePayload, nightsBetween, nightKeys, todayKey,
-  createRateLimiter, makeReference, buildNotifications,
+  createRateLimiter, makeReference, buildNotifications, escapeHtml,
   FIELD_LIMITS, MAX_GUESTS, MAX_NIGHTS
 };

@@ -2,9 +2,10 @@
 // validering, tillgänglighetskontroll, idempotens, regler och missbruksskydd.
 'use strict';
 
+
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { handleBookingRequest, validatePayload, nightKeys, createRateLimiter, buildNotifications } = require('../../server/booking/requests');
+const { handleBookingRequest, validatePayload, nightKeys, createRateLimiter, buildNotifications, escapeHtml } = require('../../server/booking/requests');
 
 const RULES = { published: true, version: 'test-2026-11-10', text: '1. Regel ett.\n2. Regel två.' };
 
@@ -37,12 +38,19 @@ function setup(overrides = {}) {
       stored.set(record.idempotencyKey, record);
       return { duplicate: false, record };
     },
-    async findByIdempotencyKey(key) { return stored.get(key) ?? null; }
+    async findByIdempotencyKey(key) { return stored.get(key) ?? null; },
+    async findByReference(reference) {
+      return [...stored.values()].find((item) => item.reference === reference && item.partition !== 'outbox') ?? null;
+    },
+    async listPending() {
+      return [...stored.values()].filter((item) => item.partition !== 'outbox' && item.status === 'Inväntar godkännande');
+    }
   };
   const options = {
     rules: RULES,
     store,
     rateLimiter: () => true,
+    enabled: true,
     availabilityHandler: async () => ({ status: 200, jsonBody: { blocked: [] } }),
     now: new Date('2026-11-10T12:00:00Z'),
     ...overrides
@@ -55,6 +63,13 @@ function setup(overrides = {}) {
 function request(overrides = {}) {
   return { body: validBody(), idempotencyKey: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', ip: '10.0.0.1', ...overrides };
 }
+
+test('bokningsinskick är avstängt som standard (kill switch) tills kedjan verifierats', async () => {
+  const { options, context } = setup();
+  const result = await handleBookingRequest(request(), context, { ...options, enabled: undefined });
+  assert.equal(result.status, 503);
+  assert.match(result.jsonBody.error, /kan inte tas emot via formuläret just nu/);
+});
 
 test('reglerna måste vara publicerade innan förfrågningar tas emot', async () => {
   const { options, context } = setup({ rules: { published: false, version: null, text: '' } });
@@ -164,7 +179,13 @@ test('dubbel inskick med samma idempotensnyckel ger samma referens', async () =>
 
 test('fel vid sparande ger 500 och ingen bekräftelse', async () => {
   const { options, context } = setup({
-    store: { type: 'azure-table', save: async () => { throw new Error('storage down'); }, findByIdempotencyKey: async () => null }
+    store: {
+      type: 'azure-table',
+      save: async () => { throw new Error('storage down'); },
+      findByIdempotencyKey: async () => null,
+      findByReference: async () => null,
+      listPending: async () => []
+    }
   });
   const result = await handleBookingRequest(request(), context, options);
   assert.equal(result.status, 500);
@@ -265,4 +286,75 @@ test('kort vistelse får ingen rabattpost', async () => {
   assert.equal(result.status, 201);
   const record = [...stored.values()].find((item) => item.status === 'Inväntar godkännande');
   assert.equal(record.discount, null);
+});
+
+test('referensen garanteras unik mot lagringen', async () => {
+  let calls = 0;
+  const { options, context } = setup({
+    makeReference: () => (calls++ === 0 ? 'SK-2026-AAAAAA' : 'SK-2026-BBBBBB')
+  });
+  // Simulera att referens SK-2026-AAAAAA redan finns i lagringen.
+  options.store.findByReference = async (ref) => (ref === 'SK-2026-AAAAAA' ? { reference: ref } : null);
+  const result = await handleBookingRequest(request(), context, options);
+  assert.equal(result.status, 201);
+  assert.equal(result.jsonBody.reference, 'SK-2026-BBBBBB');
+});
+
+test('överlappande väntande förfrågningar tillåts och flaggas till Skadevi (ingen atomär låsning)', async () => {
+  const { options, stored, context } = setup();
+  // En tidigare väntande förfrågan överlappar 20–23 november.
+  options.store.listPending = async () => [{
+    idempotencyKey: 'tidigare-nyckel-12345678', reference: 'SK-2026-AAA111',
+    arrival: '2026-11-19', departure: '2026-11-24', status: 'Inväntar godkännande'
+  }];
+  const result = await handleBookingRequest(request(), context, options);
+  assert.equal(result.status, 201, 'överlapp ska inte neka registrering — Skadevi avgör');
+  const host = [...stored.values()].find((item) => item.partition === 'outbox' && item.mailTo === 'skadevigard@gmail.com');
+  assert.match(host.mailHtml, /ÖVERLAPP/);
+  assert.match(host.mailHtml, /SK-2026-AAA111/);
+  // Ingen av förfrågningarna får vara bekräftad.
+  assert.equal([...stored.values()].every((item) => item.status !== 'Bekräftad'), true);
+});
+
+test('gästuppgifter HTML-escapas i notisen till Skadevi', async () => {
+  const { options, stored, context } = setup();
+  const body = validBody({ firstName: 'Anna<script>', message: '<script>alert(1)</script><img src=x onerror=alert(1)>' });
+  const result = await handleBookingRequest(request({ body }), context, options);
+  assert.equal(result.status, 201);
+  const host = [...stored.values()].find((item) => item.partition === 'outbox' && item.mailTo === 'skadevigard@gmail.com');
+  assert.doesNotMatch(host.mailHtml, /<script>alert|<img src=x/);
+  assert.match(host.mailHtml, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.match(host.mailHtml, /&lt;img src=x onerror=alert\(1\)&gt;/);
+  assert.match(host.mailHtml, /Anna&lt;script&gt;/);
+  // escapeHtml är grundprimitivet för hela mejlmallen.
+  assert.equal(escapeHtml('<x>&"'), '&lt;x&gt;&amp;&quot;');
+});
+
+test('utkorgspost innehåller komplett mejlmall för Logic Apps', async () => {
+  const { options, stored, context } = setup();
+  await handleBookingRequest(request(), context, options);
+  const outbox = [...stored.values()].filter((item) => item.partition === 'outbox');
+  assert.equal(outbox.length, 2);
+  for (const row of outbox) {
+    assert.equal(row.status, 'Utkorg');
+    assert.ok(row.mailSubject.includes('SK-2026-'));
+    assert.ok(row.mailHtml.includes('inte en bekräftad bokning'));
+    assert.equal(row.attemptCount, 0);
+  }
+  const host = outbox.find((item) => item.mailTo === 'skadevigard@gmail.com');
+  assert.equal(host.mailReplyTo, 'skadevigard@gmail.com');
+  const guest = outbox.find((item) => item.mailTo === 'anna@example.com');
+  assert.ok(guest.mailHtml.includes('Tack för din bokningsförfrågan'));
+});
+
+test('misslyckad utkorgssparning stoppar inte registreringen', async () => {
+  const { options, stored, context } = setup();
+  const originalSave = options.store.save.bind(options.store);
+  options.store.save = async (record, ctx) => {
+    if (record.partition === 'outbox') throw new Error('utkorg nere');
+    return originalSave(record, ctx);
+  };
+  const result = await handleBookingRequest(request(), context, options);
+  assert.equal(result.status, 201, 'förfrågan ska vara registrerad även om utkorgen misslyckas');
+  assert.equal([...stored.values()].filter((item) => item.status === 'Inväntar godkännande').length, 1);
 });

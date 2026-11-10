@@ -22,21 +22,28 @@ test('injektade ofullständiga regler behandlas som opublicerade', async () => {
   }
 });
 
-test('filen i repot publicerar de beslutade reglerna (version 2026-11-10)', async () => {
+test('filen i repot publicerar de beslutade reglerna (version 2026-11-10-v2)', async () => {
   const rules = await loadRules();
   assert.equal(rules.published, true);
-  assert.equal(rules.version, '2026-11-10');
+  assert.equal(rules.version, '2026-11-10-v2');
   assert.ok(rules.text.length > 0);
 });
 
-test('avbokningspolicyn stämmer med beslutet', async () => {
+test('avbokningspolicyn stämmer med beslutet (100/50 %, dagsgränser)', async () => {
   const rules = await loadRules();
   assert.match(rules.text, /Begränsad/);
-  assert.match(rules.text, /Fullständig återbetalning vid avbokning minst 30 dagar före incheckning/);
-  assert.match(rules.text, /Delvis återbetalning vid avbokning 7–30 dagar före incheckning/);
-  // Nivån för delvis återbetalning är inte påhittad: den ska vara markerad
-  // som "specificeras vid bekräftelse".
+  assert.match(rules.text, /Avbokning minst 30 dagar före incheckning: 100 % återbetalning/);
+  assert.match(rules.text, /Avbokning från 7 dagar till mindre än 30 dagar före incheckning: 50 % återbetalning/);
+  // Beräkningsgrund ska vara tydlig och lagstadgade rättigheter inte åsidosättas.
+  assert.match(rules.text, /beräknas på den bekräftade boendesumman enligt offerten/);
+  assert.match(rules.text, /inte era lagstadgade konsumenträttigheter/);
+  // Villkoret under 7 dagar är ännu inte beslutat och ska flaggas, inte hittas på.
   assert.match(rules.text, /specificeras vid bekräftelse/);
+  assert.ok(rules.pendingDecisions.includes('avbokning-mindre-an-7-dagar'));
+  assert.deepEqual(rules.cancellationPolicy.tiers, [
+    { minDaysBefore: 30, percent: 100 },
+    { minDaysBefore: 7, percent: 50 }
+  ]);
 });
 
 test('husreglerna stämmer med beslutet', async () => {
@@ -45,6 +52,12 @@ test('husreglerna stämmer med beslutet', async () => {
   assert.match(rules.text, /Lås alla dörrar och stäng alla fönster vid avfärd/);
   assert.match(rules.text, /max två husdjur/);
   assert.match(rules.text, /Inga katter/);
+});
+
+test('regelversionen ändras när villkoren ändras (versionshantering bevaras)', async () => {
+  const rules = await loadRules();
+  // Tidigare version var 2026-11-10; den nya texten kräver en ny version.
+  assert.notEqual(rules.version, '2026-11-10');
 });
 
 test('publicRules läcker aldrig mer än version + text', async () => {

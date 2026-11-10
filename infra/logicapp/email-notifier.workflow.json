@@ -1,0 +1,167 @@
+{
+  "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "$connections": {
+      "defaultValue": {},
+      "type": "Object"
+    },
+    "storageEndpoint": {
+      "defaultValue": "https://SKADEVI-LAGRINGSKONTO.table.core.windows.net",
+      "type": "String"
+    },
+    "tableName": {
+      "defaultValue": "bookingrequests",
+      "type": "String"
+    },
+    "maxAttempts": {
+      "defaultValue": 5,
+      "type": "Int"
+    }
+  },
+  "triggers": {
+    "Recurrence": {
+      "recurrence": {
+        "frequency": "Minute",
+        "interval": 5,
+        "timeZone": "W. Europe Standard Time"
+      },
+      "runtimeConfiguration": {
+        "concurrency": {
+          "runs": 1
+        }
+      },
+      "type": "Recurrence"
+    }
+  },
+  "actions": {
+    "Haemta_utkorg": {
+      "type": "Http",
+      "inputs": {
+        "method": "GET",
+        "uri": "@{parameters('storageEndpoint')}/@{parameters('tableName')}()?$filter=PartitionKey eq 'outbox' and (status eq 'Utkorg' and attemptCount lt @{parameters('maxAttempts')})",
+        "authentication": {
+          "type": "ManagedServiceIdentity",
+          "audience": "https://storage.azure.com/"
+        }
+      },
+      "runtimeConfiguration": {
+        "secureData": {
+          "properties": ["inputs", "outputs"]
+        }
+      }
+    },
+    "Om_det_finns_poster": {
+      "type": "If",
+      "expression": "@greater(length(body('Haemta_utkorg')?['value']), 0)",
+      "actions": {
+        "Behandla_varje_post": {
+          "type": "Foreach",
+          "foreach": "@body('Haemta_utkorg')?['value']",
+          "actions": {
+            "Markera_som_under_skickning": {
+              "type": "Http",
+              "inputs": {
+                "method": "PATCH",
+                "uri": "@{parameters('storageEndpoint')}/@{parameters('tableName')}(PartitionKey='@{items('Behandla_varje_post')?['PartitionKey']}',RowKey='@{items('Behandla_varje_post')?['RowKey']}')",
+                "headers": {
+                  "If-Match": "*"
+                },
+                "body": {
+                  "status": "Skickar",
+                  "attemptedAt": "@{utcNow()}",
+                  "attemptCount@odata.type": "Edm.Int32",
+                  "attemptCount": "@add(items('Behandla_varje_post')?['attemptCount'], 1)"
+                },
+                "authentication": {
+                  "type": "ManagedServiceIdentity",
+                  "audience": "https://storage.azure.com/"
+                }
+              },
+              "runtimeConfiguration": {
+                "secureData": {
+                  "properties": ["inputs", "outputs"]
+                }
+              }
+            },
+            "Skicka_mejl_(V2)": {
+              "type": "ApiConnection",
+              "inputs": {
+                "host": {
+                  "connection": {
+                    "name": "@parameters('$connections')['gmail']['connectionId']"
+                  }
+                },
+                "method": "post",
+                "path": "/v2/Mail",
+                "body": {
+                  "To": "@{items('Behandla_varje_post')?['mailTo']}",
+                  "Subject": "@{items('Behandla_varje_post')?['mailSubject']}",
+                  "Body": "@{items('Behandla_varje_post')?['mailHtml']}"
+                }
+              },
+              "retryPolicy": {
+                "type": "exponential",
+                "count": 4,
+                "minimumInterval": "PT30S",
+                "maximumInterval": "PT10M"
+              }
+            },
+            "Markera_som_skickad": {
+              "type": "Http",
+              "inputs": {
+                "method": "PATCH",
+                "uri": "@{parameters('storageEndpoint')}/@{parameters('tableName')}(PartitionKey='@{items('Behandla_varje_post')?['PartitionKey']}',RowKey='@{items('Behandla_varje_post')?['RowKey']}')",
+                "headers": {
+                  "If-Match": "*"
+                },
+                "body": {
+                  "status": "Skickad",
+                  "sentAt": "@{utcNow()}"
+                },
+                "authentication": {
+                  "type": "ManagedServiceIdentity",
+                  "audience": "https://storage.azure.com/"
+                }
+              },
+              "runAfter": {
+                "Skicka_mejl_(V2)": ["Succeeded"]
+              },
+              "runtimeConfiguration": {
+                "secureData": {
+                  "properties": ["inputs", "outputs"]
+                }
+              }
+            },
+            "Markera_som_misslyckad": {
+              "type": "Http",
+              "inputs": {
+                "method": "PATCH",
+                "uri": "@{parameters('storageEndpoint')}/@{parameters('tableName')}(PartitionKey='@{items('Behandla_varje_post')?['PartitionKey']}',RowKey='@{items('Behandla_varje_post')?['RowKey']}')",
+                "headers": {
+                  "If-Match": "*"
+                },
+                "body": {
+                  "status": "Misslyckad"
+                },
+                "authentication": {
+                  "type": "ManagedServiceIdentity",
+                  "audience": "https://storage.azure.com/"
+                }
+              },
+              "runAfter": {
+                "Skicka_mejl_(V2)": ["Failed", "TimedOut"]
+              },
+              "runtimeConfiguration": {
+                "secureData": {
+                  "properties": ["inputs", "outputs"]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "outputs": {}
+}

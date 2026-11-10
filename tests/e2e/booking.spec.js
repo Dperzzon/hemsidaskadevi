@@ -5,8 +5,8 @@ import { FIXED_NOW, prepare, settle } from './helpers.js';
 
 const RULES_MOCK = {
   published: true,
-  version: 'test-regler-1',
-  text: 'AVBOKNINGSPOLICY (Begränsad)\n• Fullständig återbetalning vid avbokning minst 30 dagar före incheckning.\n• Delvis återbetalning vid avbokning 7–30 dagar före incheckning. Nivån för delvis återbetalning specificeras vid bekräftelse.\n\nHUSREGLER\n• Ingen rökning.\n• Lås alla dörrar och stäng alla fönster vid avfärd.\n• Husdjur: max två husdjur. Inga katter.'
+  version: 'test-regler-2',
+  text: 'AVBOKNINGSPOLICY (Begränsad)\n• Avbokning minst 30 dagar före incheckning: 100 % återbetalning.\n• Avbokning från 7 dagar till mindre än 30 dagar före incheckning: 50 % återbetalning.\n• Återbetalningsprocenten beräknas på den bekräftade boendesumman enligt offerten.\n• Avbokning mindre än 7 dagar före incheckning: villkoret specificeras vid bekräftelse.\n• Dessa villkor begränsar inte era lagstadgade konsumenträttigheter.\n\nHUSREGLER\n• Ingen rökning.\n• Lås alla dörrar och stäng alla fönster vid avfärd.\n• Husdjur: max två husdjur. Inga katter.'
 };
 
 test.beforeEach(async ({ page }) => {
@@ -118,7 +118,7 @@ test('bokningsreglerna kan läsas utan att påbörjad förfrågan förloras', as
   await page.locator('#open-rules-label').click();
   const dialog = page.locator('#booking-rules-dialog');
   await expect(dialog).toBeVisible();
-  await expect(dialog).toContainText('Fullständig återbetalning vid avbokning minst 30 dagar före incheckning');
+  await expect(dialog).toContainText('Avbokning minst 30 dagar före incheckning: 100 % återbetalning');
   await expect(dialog).toContainText('specificeras vid bekräftelse');
   await expect(dialog).toContainText('Ingen rökning');
   await page.locator('#close-rules').click();
@@ -134,9 +134,11 @@ test('bokningsreglerna visar avbokningspolicy och husregler', async ({ page }) =
   await page.locator('#open-rules-label').click();
   const dialog = page.locator('#booking-rules-dialog');
   await expect(dialog).toBeVisible();
-  await expect(dialog).toContainText('Fullständig återbetalning vid avbokning minst 30 dagar före incheckning');
-  await expect(dialog).toContainText('Delvis återbetalning vid avbokning 7–30 dagar före incheckning');
-  await expect(dialog).toContainText('specificeras vid bekräftelse');
+  await expect(dialog).toContainText('Avbokning minst 30 dagar före incheckning: 100 % återbetalning');
+  await expect(dialog).toContainText('Avbokning från 7 dagar till mindre än 30 dagar före incheckning: 50 % återbetalning');
+  await expect(dialog).toContainText('beräknas på den bekräftade boendesumman enligt offerten');
+  await expect(dialog).toContainText('villkoret specificeras vid bekräftelse');
+  await expect(dialog).toContainText('begränsar inte era lagstadgade konsumenträttigheter');
   await expect(dialog).toContainText('Ingen rökning');
   await expect(dialog).toContainText('Lås alla dörrar och stäng alla fönster vid avfärd');
   await expect(dialog).toContainText('max två husdjur');
@@ -276,7 +278,7 @@ test('lyckad inskick visar professionell bekräftelse med referens', async ({ pa
   await expect(page.locator('#booking-confirmation')).toContainText('Inväntar godkännande');
   expect(payload.arrival).toBe('2026-11-16');
   expect(payload.departure).toBe('2026-11-19');
-  expect(payload.rulesVersion).toBe('test-regler-1');
+  expect(payload.rulesVersion).toBe('test-regler-2');
   expect(payload.consentRules).toBe(true);
   expect(payload.consentContact).toBe(false);
   expect(payload.addons.slutstad).toBe(true);
