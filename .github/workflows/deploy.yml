@@ -108,6 +108,15 @@ jobs:
           echo "Paketets storlek:" && du -sh package
       - name: Smoke-testa den paketerade applikationen
         run: node scripts/smoke-test.mjs ./package
+      # OIDC-inloggning krävs innan webapps-deploy (annars "No credentials
+      # found"). Ger kortlivad federerad token via den användartilldelade
+      # Managed Identity — inga klienthemligheter.
+      - name: Logga in på Azure via OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
       - name: Driftsätt till Azure App Service
         uses: azure/webapps-deploy@v3
         with:
