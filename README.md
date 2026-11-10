@@ -58,16 +58,11 @@ docs/                Driftsättningsguide m.m.
 assets/originals/    Originalbilder (källmaterial; webbplatsen använder public/images/)
 ```
 
-### De fyra föråldrade mallsidorna
+### Typsnitt
 
-`priser.html`, `mat-dryck.html`, `om-oss.html` och `digital-visning.html`
-innehåller en trasig typsnittslänk (`rel="stylesheet>` utan avslutande
-citattecken) från den gamla mallen. Eftersom felet påverkar renderingen
-(pixelfallade typsnitt, avklippt sidhuvud) och en fix skulle förändra
-sidornas utseende lämnas de as-is av Vite (se `vite.config.mjs`): de
-kopieras oförändrade till `dist/` och läser `/css/style.css` samt
-`/js/main.js` som skapas av `scripts/finalize-dist.mjs`. Att rätta felet
-kräver ett separat beslut — se docs/migrering.md.
+Alla sidor (även de fyra äldre mallsidorna priser, mat-dryck, om-oss och
+digital-visning) använder de selfhostade typsnitten via `src/css/fonts.css`.
+Filerna hämtas en gång med `npm run fetch-fonts` och ligger i `public/fonts/`.
 
 ## Produktion
 

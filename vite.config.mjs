@@ -33,28 +33,6 @@ const PAGE_ROUTES = [
   'digital-visning', 'boka', 'lediga-datum'
 ];
 
-// Föråldrade mallsidor med en trasig typsnittslänk (rel="stylesheet> utan
-// avslutande citattecken). Sidorna ska rendera EXAKT som tidigare, så Vite
-// får inte transformera deras HTML: en infogad <script>/<link>-tagg skulle
-// sväljas av webbläsarens tolkning av den trasiga länken. De kopieras
-// oförändrade till dist/ av copyLegacyPages() och läser oförändrade sökvägar
-// (/css/style.css och /js/main.js, se scripts/finalize-dist.mjs).
-const LEGACY_PAGES = ['priser.html', 'mat-dryck.html', 'om-oss.html', 'digital-visning.html'];
-
-function copyLegacyPages() {
-  return {
-    name: 'skadevi-copy-legacy-pages',
-    apply: 'build',
-    async closeBundle() {
-      const { copyFile, mkdir } = await import('node:fs/promises');
-      await mkdir(path.join(root, 'dist', 'pages'), { recursive: true });
-      for (const name of LEGACY_PAGES) {
-        await copyFile(path.join(root, 'src', 'pages', name), path.join(root, 'dist', 'pages', name));
-      }
-    }
-  };
-}
-
 // Middleware för rena URL:er + kalender-API i dev- och preview-servern.
 function cleanUrlsAndApi() {
   return {
@@ -99,7 +77,7 @@ function cleanUrlsAndApi() {
 }
 
 async function pageInputs() {
-  const pages = (await readdir(path.join(root, 'src', 'pages'))).filter((name) => name.endsWith('.html') && !LEGACY_PAGES.includes(name));
+  const pages = (await readdir(path.join(root, 'src', 'pages'))).filter((name) => name.endsWith('.html'));
   return [
     path.join(root, 'src', 'index.html'),
     path.join(root, 'src', '404.html'),
@@ -111,7 +89,7 @@ export default defineConfig(async () => ({
   root: path.join(root, 'src'),
   publicDir: path.join(root, 'public'),
   appType: 'mpa',
-  plugins: [cleanUrlsAndApi(), copyLegacyPages()],
+  plugins: [cleanUrlsAndApi()],
   build: {
     outDir: path.join(root, 'dist'),
     emptyOutDir: true,

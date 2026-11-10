@@ -6,3 +6,6 @@ test-results/
 playwright-report/
 baseline-run.log
 *.local
+
+manual-granskning/
+

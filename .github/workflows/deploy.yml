@@ -54,8 +54,6 @@ jobs:
           done
           test -f dist/robots.txt
           test -f dist/sitemap.xml
-          test -f dist/css/style.css
-          test -f dist/js/main.js
           test -f dist/images/logo.png
           test -f dist/fonts/v20-UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7.woff2
           # Alla HTML-sidor ska referera existerande hashade resurser.

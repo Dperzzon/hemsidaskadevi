@@ -88,21 +88,31 @@ localhost-baserade.
 - `<main>`-landmark på startsidan, aria-label på galleri-navigeringen och
   de fyra generiska "Läs mer"-länkarna, favicon länkad på alla sidor (tystar
   404 i konsolen), `prefers-reduced-motion` stöds.
-- **Dokumenterade, ej genomförda (kräver beslut eftersom de förändrar
-  synligt utseende):**
-  1. **Färgkontrast** (Lighthouse a11y 93–94): `cal-booked` (#9a958b på
-     #e4e0d7) och liknande lågkontrast-texter i designen.
-  2. **Rubriknivåer** (heading-order): sidfotens `h5` efter `h3`/`h1` hoppar
-     nivåer; h5 är rikligt stiliserat (footer, strip-kort, rum/aktivitetskort)
-     och en ändring kräver motsvarande CSS-arbete.
-  3. **De fyra föråldrade mallsidorna** (priser, mat-dryck, om-oss,
-     digital-visning): trasig typsnittslänk `rel="stylesheet>` (avslutande
-     citattecken saknas) som äter efterföljande `<header>`-tagg i DOM:en —
-     sidorna renderar därför med fallback-typsnitt och utan fungerande
-     menyknapp. Rättelse förändrar synligt utseende och avvisas därför
-     här; sidorna byggs oförändrade (se vite.config.mjs).
-  4. `aria-label` räcker inte för SEO-auditet "link-text" ("Läs mer" är
-     generisk crawlingsbar text); att byta synlig text är en innehållsändring.
+- **Dokumenterade kontrastfynd (Lighthouse color-contrast) — förslag som
+  INTE är genomförda eftersom de förändrar synliga färger:**
+  1. `--color-secondary` `#8b6b4a` mot `#f7f5f0` = **4,48:1** (krav 4,5).
+     Förslag: `#876847` → 4,70:1. En knappt märkbar mörkning av den bruna
+     tonen (knappar/strong-text); inga andra kulörer berörs.
+  2. `--color-accent` `#c9a96e` (guld) som **text** mot `#f7f5f0` = **2,05:1**
+     (sidfotsrubriker "Kontakta oss/Följ oss" med guld på ljus bakgrund,
+     kartlänk). Som text krävs t.ex. `#85693a` (≈ 4,6:1) — en synligt
+     mörkare guldton. Alternativ: mörkare sidfotsbakgrund så att guldet
+     behålls. Guldet som **dekoration** (ramar, linjer, strip-kanter) är
+     omdiskuterat men omfattas inte av textkravet.
+  3. Kalenderns bokade-datum-text `#9a958b` på `#e4e0d7` ≈ 2,1:1 — det är
+     avsikten att bokade datum ska vara "tönande"; förslag: mörkare text
+     (`#7d7869` ≈ 3,2:1) eller ljusare ruta.
+- **Rubriknivåer — RÄTTADE (godkänt, nov 2026):** sidfoternas `h5` → `h3`
+  och startsidans strip-kortrubriker `h5` → `h2` med beräknade stilar
+  pinnade i CSS (vikt 500, radhöjd 1,4, versaler, spärrning). Verifierat
+  visuellt oförändrat: samtliga ovidberörda sidors baslinjer passerar.
+  Döda `h5`-regler (room-card/activity-card) borttagna.
+- **De fyra föråldrade mallsidorna — RÄTTADE (godkänt, nov 2026):** den
+  trasiga typsnittslänken (`rel="stylesheet>` utan avslutande citattecken)
+  på priser, mat-dryck, om-oss och digital-visning är ersatt med sajtens
+  selfhostade typsnittsblock. Sidorna går nu genom Vite-processeringen som
+  alla andra (legacy-undantaget i vite.config.mjs är borttaget). Deras
+  baslinjer är därför regenererade; se "Visuella skillnader" nedan.
 
 ## Säkerhet
 
@@ -131,9 +141,35 @@ localhost-baserade.
 - Visuella baslinjer är Windows-specifika (typsnittsrendering) — regenerera
   per maskin vid behov, aldrig för att "bli grön".
 - LCP 2,5–2,7 s på /brollop och /lediga-datum under simulerad Slow 4G
-  (lokalt mätt). Ytterligare minskning kräver lägre bildkvalitet eller
+  (lokalt mätt). Yttre minskning kräver lägre bildkvalitet eller
   designändring — avstår enligt uppdraget.
-- De fyra legacy-sidorna blir riktade först när deras mall-buggar tas bort
-  (då kan de normaliseras och gå genom Vite-transformeringen).
-- Azure-deployment är inte körd (enligt uppdrag); pipeline är förberedd och
-  lokalt smoke-testad.
+- Fyra legacy-sidor har en förbygglig horisontell överrullning på mobil
+  (scrollWidth 406 px mot 390 vy; pris-tabellen) — pre-existerande beteende,
+  oförändrat av migreringen.
+- Azure-deployment är inte körd (enligt uppdrag); pipeline är förberedd,
+  Linux-kompatibel och paketet är startverifierat via smoke-testet.
+
+## Visuella skillnader vid de godkända rättelserna (nov 2026)
+
+Baslinjer för /priser, /mat-dryck, /om-oss och /digital-visning (alla tre
+viewportar + /prisers sju brytpunkter, 19 bilder) regenererades EFTER att
+följande skillnader mot de gamla baslinjerna dokumenterats — de är själva
+buggfixen:
+
+1. **Sidhuvud:** `<header class="header">` finns nu i DOM:en (den var tidigare
+   uppäten av den trasiga länkens attributtolkning). Logotypen "SKADEVI
+   GÅRD" renderas i sajtens varumärkestypsnitt (Libre Baskerville, versaler,
+   spärrning) i stället för ostylad systemfont på ett vitt band; heron
+   täcker hela toppen. Sidhöjd /priser 3 965 → 3 954 px, /mat-dryck
+   2 405 → 2 410 px, /om-oss 2 761 → 2 766 px, /digital-visning
+   2 058 → 2 006 px (små textomflödesförskjutningar av typsnittsbytet).
+2. **Typsnitt:** Inter + Libre Baskerville (selfhostade) i hela sidan i
+   stället för fallback-fonts (Georgia/Arial-liknande) — samma som övriga
+   12 sidor alltid haft.
+3. **Meny:** hamburgerknappen öppnar/stänger `.header-nav` (aria-expanded,
+   ✕-ikon) och länkarna fungerar; header får `.scrolled`-tillstånd vid scroll
+   med vit bakgrund — precis som /boka och övriga undersidor.
+4. **Mobil:** sidbredd vid 390 px-vy minskade från 411 → 406 px (den
+   kvarvarande 16 px-överrullningen är pris-tabellen, pre-existerande).
+5. Innehåll, texter, priser och sektioner oförändrade; favicon 404 i
+   konsolen borttagna (link rel=icon tillagd tidigare i migreringen).

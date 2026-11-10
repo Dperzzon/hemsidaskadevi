@@ -25,7 +25,7 @@ for (const page of expectedPages) {
   }
 }
 
-for (const asset of ['robots.txt', 'sitemap.xml', 'css/style.css', 'js/main.js', 'images/logo.png']) {
+for (const asset of ['robots.txt', 'sitemap.xml', 'images/logo.png']) {
   try {
     await stat(path.join(dist, asset));
   } catch {

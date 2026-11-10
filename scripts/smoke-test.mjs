@@ -43,8 +43,6 @@ try {
     ['/digital-visning', 200], ['/boka', 200], ['/lediga-datum', 200],
     ['/robots.txt', 200],
     ['/sitemap.xml', 200],
-    ['/css/style.css', 200],
-    ['/js/main.js', 200],
     ['/images/logo.png', 200],
     ['/images/gallery/dukning-pergola.webp', 200],
     ['/fonts/v20-UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7.woff2', 200],
@@ -70,7 +68,8 @@ try {
   if (bad.status !== 400) fail(`API utan slutdatum gav ${bad.status}, förväntat 400`);
   await bad.body?.cancel();
 
-  // Hashade resurser ska ha immutable cache och serveras komprimerade.
+  // Hashade resurser ska ha immutable cache och serveras komprimerade,
+  // och typsnittet ska finnas lokalt.
   const index = await (await fetch(`${base}/`)).text();
   const cssRef = index.match(/href="(\/assets\/[\w-]+\.css)"/)?.[1];
   if (!cssRef) fail('startsidan refererar ingen hashad css');
