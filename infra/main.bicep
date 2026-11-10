@@ -63,6 +63,13 @@ param githubOidcSubject string
 #disable-next-line secure-secrets-in-params
 param secretAdminPrincipalId string = ''
 
+@description('Namn på lagringskontot för bokningsförfrågningar (Azure Table Storage, Sweden Central). Tomt = bokningslagring förbereds ännu inte. Sätts först efter Skadevis godkännande.')
+param bookingStorageAccountName string = ''
+
+@description('Objekt-ID (principalId) för Logic Appens system-assigned managed identity i Splat Reality-prenumerationen. Får Storage Table Data Contributor på bokningstabellen. Fylls i FÖRST efter att Logic App-flödet har deployerats i Splat Reality (tvåfas: deploya Logic App → hämta principalId → skicka hit).')
+#disable-next-line secure-secrets-in-params
+param logicAppPrincipalId string = ''
+
 var commonTags = {
   Owner: owner
   Environment: environment
@@ -93,6 +100,25 @@ module webapp 'modules/webapp.bicep' = {
     keyVaultName: keyVaultName
     keyVaultSecretName: keyVaultSecretName
     secretAdminPrincipalId: secretAdminPrincipalId
+    bookingStorageAccountName: bookingStorageAccountName
+  }
+}
+
+// Permanent lagring för bokningsförfrågningar (Azure Table Storage).
+// Skapas bara när bookingStorageAccountName är angivet — inga nya resurser
+// skapas utan Skadevis uttryckliga godkännande. Logic Appens identitet finns
+// i en annan prenumeration (Splat Reality, där Gmail-anslutningen bor) och
+// tilldelas sin RBAC-roll separat när Logic App-flödet har deployerats.
+module bookingStorage 'modules/storage-tables.bicep' = if (!empty(bookingStorageAccountName)) {
+  name: 'booking-storage'
+  scope: rg
+  params: {
+    storageAccountName: bookingStorageAccountName
+    location: location
+    environment: environment
+    owner: owner
+    webAppPrincipalId: webapp.outputs.webAppPrincipalId
+    logicAppPrincipalId: logicAppPrincipalId
   }
 }
 
@@ -113,3 +139,4 @@ output githubIdentityClientId string = githubOidc.outputs.clientId
 output githubIdentityPrincipalId string = githubOidc.outputs.principalId
 output webAppId string = webapp.outputs.webAppId
 output webAppDefaultHostname string = webapp.outputs.defaultHostname
+output webAppPrincipalId string = webapp.outputs.webAppPrincipalId

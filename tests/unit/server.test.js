@@ -242,8 +242,8 @@ test('/api/booking-rules serverar de publicerade beslutade reglerna', async () =
     assert.equal(res.status, 200);
     const rules = JSON.parse(res.body);
     assert.equal(rules.published, true);
-    assert.equal(rules.version, '2026-11-10');
-    assert.match(rules.text, /Fullständig återbetalning/);
+    assert.equal(rules.version, '2026-11-10-v3');
+    assert.match(rules.text, /100 % återbetalning/);
     assert.match(rules.text, /Inga katter/);
   } finally { close(server); }
 });

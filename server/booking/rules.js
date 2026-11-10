@@ -16,26 +16,33 @@ const RULES_PATH = path.join(__dirname, 'house-rules.json');
 
 // Läser och validerar regelfilen. Returnerar alltid ett objekt med
 // { published, version, text }; ogiltig fil behandlas som "ej publicerad".
+// Strukturerade fält (cancellationPolicy, pendingDecisions) följer med internt
+// för administration/test — publicRules exponerar aldrig mer än version+text.
+function normalizeRules(parsed) {
+  if (parsed && parsed.published === true && typeof parsed.version === 'string' &&
+      parsed.version.trim() && typeof parsed.text === 'string' && parsed.text.trim()) {
+    return {
+      published: true,
+      version: parsed.version.trim(),
+      text: parsed.text,
+      pendingDecisions: Array.isArray(parsed.pendingDecisions) ? parsed.pendingDecisions : [],
+      cancellationPolicy: parsed.cancellationPolicy ?? null
+    };
+  }
+  return { published: false, version: null, text: '', pendingDecisions: [], cancellationPolicy: null };
+}
+
 async function loadRules(options = {}) {
   if (options.rules) {
-    const injected = options.rules;
-    if (injected.published === true && typeof injected.version === 'string' &&
-        injected.version.trim() && typeof injected.text === 'string' && injected.text.trim()) {
-      return { published: true, version: injected.version.trim(), text: injected.text };
-    }
-    return { published: false, version: null, text: '' };
+    return normalizeRules(options.rules);
   }
   try {
     const raw = await fs.readFile(RULES_PATH, 'utf8');
-    const parsed = JSON.parse(raw);
-    if (parsed && parsed.published === true && typeof parsed.version === 'string' &&
-        parsed.version.trim() && typeof parsed.text === 'string' && parsed.text.trim()) {
-      return { published: true, version: parsed.version.trim(), text: parsed.text };
-    }
+    return normalizeRules(JSON.parse(raw));
   } catch {
     // Saknad eller ogiltig fil: reglerna är inte publicerade.
+    return { published: false, version: null, text: '', pendingDecisions: [], cancellationPolicy: null };
   }
-  return { published: false, version: null, text: '' };
 }
 
 // Det offentliga svarformatet: aldrig mer än version + text.

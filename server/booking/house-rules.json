@@ -1,6 +1,16 @@
 {
   "published": true,
-  "version": "2026-11-10",
-  "partialRefundLevel": "specificeras vid bekräftelse",
-  "text": "Välkomna till Skadevi Herrgård! För er vistelse gäller följande boknings- och husregler.\n\nAVBOKNINGSPOLICY (Begränsad)\n• Fullständig återbetalning vid avbokning minst 30 dagar före incheckning.\n• Delvis återbetalning vid avbokning 7–30 dagar före incheckning. Nivån för delvis återbetalning specificeras vid bekräftelse.\n\nHUSREGLER\n• Ingen rökning.\n• Lås alla dörrar och stäng alla fönster vid avfärd.\n• Husdjur: max två husdjur. Inga katter."
+  "version": "2026-11-10-v3",
+  "partialRefundLevel": "50 procent (beslutad)",
+  "pendingDecisions": [],
+  "cancellationPolicy": {
+    "basis": "bekräftad boendesumma enligt offerten (tillval debiteras inte i förväg)",
+    "tiers": [
+      { "minDaysBefore": 30, "percent": 100 },
+      { "minDaysBefore": 14, "percent": 50 },
+      { "minDaysBefore": 0, "percent": 0 }
+    ],
+    "pending": []
+  },
+  "text": "Välkomna till Skadevi Herrgård! För er vistelse gäller följande boknings- och husregler.\n\nAVBOKNINGSPOLICY (Begränsad)\n• Avbokning minst 30 dagar före incheckning: 100 % återbetalning.\n• Avbokning från 14 dagar till mindre än 30 dagar före incheckning: 50 % återbetalning.\n• Avbokning mindre än 14 dagar före incheckning: ingen återbetalning.\n• Återbetalningsprocenten beräknas på den bekräftade boendesumman enligt offerten. Köpta tillval (slutstädning, lakan och handdukar, ved samt önskemål om tidig incheckning eller sen utcheckning) debiteras inte i förväg.\n• Dessa villkor begränsar inte era lagstadgade konsumenträttigheter.\n\nHUSREGLER\n• Ingen rökning.\n• Lås alla dörrar och stäng alla fönster vid avfärd.\n• Husdjur: max två husdjur. Inga katter."
 }

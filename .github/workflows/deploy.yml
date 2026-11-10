@@ -83,6 +83,10 @@ jobs:
           cache-dependency-path: package-lock.json
       - name: Installera beroenden
         run: npm ci --ignore-scripts --no-audit --no-fund
+      # Bygg i helt ren miljö: gamla dist/ och package/ får aldrig läcka in
+      # i det nya paketet.
+      - name: Rensa gamla byggartefakter
+        run: rm -rf dist package node_modules/.vite
       - name: Bygg frontend med Vite (hashade resurser + förkomprimering)
         run: npm run build
       - name: Verifiera bygget
@@ -90,17 +94,20 @@ jobs:
       - name: Paketera endast produktionsfilerna
         run: |
           set -e
-          mkdir -p package/server package/dist
+          mkdir -p package/dist
           cp package.json package-lock.json package/
-          cp server/index.js package/server/
-          # Innehållskopiering: mål-KATALOGEN finns redan, så "cp -r src dst"
-          # skulle skapa package/dist/dist (bekräftat fel i CI på Linux).
-          cp -r server/calendar/. package/server/calendar/
+          # Kopiera hela serverkatalogen (innehållskopiering: mål-KATALOGEN
+          # finns redan, så "cp -r src dst" skulle skapa package/server/server
+          # — bekräftat fel i CI på Linux). Nya underkataloger som server/booking/
+          # kommer då automatiskt med utan att listas manuellt.
+          # Tester och utvecklingsfiler exkluderas; hemligheter ska aldrig
+          # ligga under server/ och verifieras av verify-package.mjs.
+          rsync -a --exclude='*.test.js' --exclude='*.spec.js' \
+            --exclude='__tests__/' --exclude='*.md' --exclude='.env*' \
+            server/ package/server/
           cp -r dist/. package/dist/
-          # Regressionskontroll: felaktigt paketerat bygge får aldrig nå Azure.
-          test -f package/dist/index.html || { echo "::error::package/dist/index.html saknas — paketeringen är felaktig"; exit 1; }
-          test -f package/dist/pages/priser.html || { echo "::error::package/dist/pages saknas — paketeringen är felaktig"; exit 1; }
-          test -f package/server/calendar/availability.js || { echo "::error::package/server/calendar saknas — paketeringen är felaktig"; exit 1; }
+          # Regressionskontroll: saknade servermoduler får aldrig nå Azure.
+          node scripts/verify-package.mjs ./package
           # Endast produktionsberoenden (node-ical, temporal-polyfill).
           npm ci --ignore-scripts --no-audit --no-fund --omit=dev
           cp -r node_modules package/node_modules

@@ -7,6 +7,136 @@ bokningsreglerna och skicka en förfrågan — utan att lämna sidan.
 En bokningsförfrågan är **aldrig** en bekräftad bokning: den sparas alltid med
 status **"Inväntar godkännande"** och påverkar aldrig Airbnb-kalendern.
 
+## Beslutade regler och avbokningsvillkor (2026-11-10-v2)
+
+Bokningsreglerna är publicerade i `server/booking/house-rules.json` med
+version `2026-11-10-v2`:
+
+- Avbokning minst 30 dagar före incheckning: 100 % återbetalning.
+- Avbokning från 7 dagar till mindre än 30 dagar före incheckning: 50 % återbetalning.
+- Återbetalningsprocenten beräknas på den bekräftade boendesumman enligt
+  offerten; tillval debiteras inte i förväg; villkoren begränsar inte
+  lagstadgade konsumenträttigheter.
+- **Ej beslutat (flaggat, inte påhittat):** avbokning mindre än 7 dagar före
+  incheckning — specificeras vid bekräftelse (`pendingDecisions` i JSON,
+  verifierat i `tests/unit/refund.test.js`). Uppdateras villkoret: ändra texten
+  och höj reglerversionen.
+- Husregler: ingen rökning; lås alla dörrar och stäng alla fönster vid avfärd;
+  max två husdjur; inga katter.
+
+Datumgränserna är dagsprecisa och verifierade i `tests/unit/refund.test.js`
+(exakt 30 dagar → 100 %, 29 dagar → 50 %, exakt 7 dagar → 50 %, 6 dagar → ej
+beslutat). Bindande bokningar är fortfarande inte aktiverade (se kill switch
+nedan).
+
+## Azure-inventering (2026-11-10)
+
+Utförd med az CLI (läsbara frågor):
+
+- **Prenumeration "Azure subscription 1" (Skadevi):** Key Vault
+  `kv-skadevi-prod`, App Service-plan `asp-skadevi-prod`, webbapp
+  `hemsida-skadevi-prod` (Bicep definierar system-assigned managed identity),
+  user-assigned identitet `id-gh-actions-skadevi` (GitHub OIDC). **Inga
+  lagringskonton, ingen Logic Apps-miljö.**
+- **Prenumeration "Splat Reality":** `rg-splatcrm-prod` innehåller Gmail-anslutningen
+  `gmail` (Microsoft.Web/connections, managed connector "gmail") samt Logic Apps
+  `logic-splatcrm-gmail-in`, `logic-splatcrm-gmail-out` (Gmail-trigger "When a
+  new email arrives" → HTTP POST till CRM) och
+  `logic-splatcrm-user-invitation-email` (HTTP-trigger med SAS-skyddad
+  callback-URL → **Send email (V2)** via samma Gmail-anslutning). Även
+  lagringskontona `splatarchive`, `splatstorageprod`, `splataistorage` (Splat
+  CRM/backup — ÅTERANVÄNDS EJ för Skadevis gästuppgifter: dataskiljande,
+  annan verksamhet).
+
+**Slutsats Gmail-anslutningen:** den befintliga `gmail`-anslutningen
+stödjer utskick — den används redan i produktion för "Send email (V2)"
+(/v2/Mail) i `logic-splatcrm-user-invitation-email`. Gmail-anslutningens
+OAuth-behörighet omfattar sändning. **Kvar att verifiera:** att anslutningen
+är autentiserad som skadevigard@gmail.com (anslutningens autentiserade konto
+är inte läsbar via ARM — kontrolleras i portalen under Connections) och att
+Googles kvoter för den kontotypen räcker (de gör det med god marginal).
+
+**Nya resurser som förbereds (inte skapade):**
+1. Lagringskonto för bokningsdata i Skadevis prenumeration, Sweden Central
+   (`infra/modules/storage-tables.bicep`) — Table Storage, Standard_LRS,
+   `allowSharedKeyAccess: false` (Entra-only), tabell `bookingrequests`,
+   RBAC "Storage Table Data Contributor" på tabellnivå för webbappens och
+   Logic Appens managed identities.
+2. Logic App `logic-skadevi-bokningsnotis` i `rg-splatcrm-prod` (samma
+   miljö som Gmail-anslutningen) — se nedan. Deployeras i Disabled-läge.
+
+## Lagring: hur den fungerar
+
+- `server/booking/store.js` — Azure Table Storage med **Microsoft Entra/
+  Managed Identity först**: token hämtas via App Services identitetsslutpunkt
+  (`IDENTITY_ENDPOINT`/`IDENTITY_HEADER`, valfri user-assigned identitet via
+  `AZURE_CLIENT_ID`), cachelas till 60 sekunder före utgång och skickas som
+  Bearer med `x-ms-version: 2019-02-02`. SharedKey finns kvar som uttrycklig
+  reserv men lagringskontot ska skapas med nyckelåtkomst avstängd.
+- **Idempotens:** `PartitionKey='request'`, `RowKey=<idempotensnyckel>` —
+  dubbelinskick (samma nyckel) ger 409 och samma referens tillbaka.
+  Samtidiga förfrågningar med olika nycklar sparas båda (se testet "olika
+  idempotensnycklar ...").
+- **Unika referenser:** genereras på serversidan och kontrolleras mot
+  lagringen (upp till 5 försök) innan posten sparas.
+- **Sparat innehåll:** referens, status, ankomst/avresa/nätter, gäster,
+  namn, e-post, telefon, företag (frivilligt), meddelande, tillval, rabatt,
+  godkänd regelversion, tidpunkt. Inga IP-adresser, ingen onödig data.
+- **Gallring:** `store.purgeOlderThan(threshold)` för både request- och
+  utkorgspartitionen; schemalagd rutin via `scripts/purge-old-bookings.mjs`
+  (torrkörning som standard, `--confirm` för verklig gallring). Rekommenderad
+  retention: 24 månader.
+- **"Visas aldrig som mottagen om lagringen misslyckas":** misslyckat sparande
+  kastar → HTTP 500 och ingen bekräftelse visas (tester bekräftar).
+
+## Logic Apps och Gmail (förberett, ej deployerat)
+
+Fil: `infra/logicapp/email-notifier.workflow.json` + modul
+`infra/modules/logic-app-notify.bicep`.
+
+- **Trigger:** Recurrence var 5:e minut (ingen HTTP-trigger/webbhook alls —
+  det finns ingen publikt oskyddad ingång).
+- **Flöde:** hämta utkorgsposter (`PartitionKey eq 'outbox' and status eq
+  'Utkorg' and attemptCount lt 5`) → markera "Skickar" (If-Match, räknare +
+  1) → **Send email (V2)** via den befintliga Gmail-anslutningen (till
+  skadevigard@gmail.com, reply-to samma adress) → markera "Skickad" (sentAt).
+  Vid fel: markera "Misslyckad"; försöksräknaren förhindrar oändliga
+  återförsök, och exponentiell retry-policy (4 försök) hanterar tillfälliga
+  fel inom körningen.
+- **Idempotens/undvik duplicering:** en post i "Skickar" plockas aldrig igen
+  av pågående pollning; "Skickad"/"Misslyckad" plockas aldrig. Om körningen
+  kraschar mellan sändning och statusuppdatering kan mejlet i värsta fall
+  skickas en gång till vid manuell omkörning — residuerlig risk som är
+  dokumenterad och rimlig för denna volym.
+- **Personuppgifter i körhistorik:** känsliga in/utdata döljs med
+  `secureData` på HTTP- och mejlaktionerna; HTML-bodyn är servergenererad och
+  HTML-escapad (`escapeHtml` i `server/booking/requests.js`, tester bekräftar)
+  så Logic Apps aldrig tolkar gästuppgifter som HTML. Rekommendation:
+  begränsa läsbehörigheten till resursgruppen (RBAC).
+- **Källmål för mejlen:** värdnotis till skadevigard@gmail.com med referens,
+  datum, gäster, tillval, rabatt, överlappsvarningar och kontaktuppgifter;
+  mottagningsbekräftelse till gästens e-postadress (reply-to
+  skadevigard@gmail.com). Båda märkta tydligt: "inte en bekräftad bokning".
+
+## Kill switch (inskick avstängt tills vidare)
+
+`POST /api/booking-requests` nekas (503) så länge `BOOKING_REQUESTS_ENABLED`
+inte är exakt `1` (Bicep sätter värdet till `'0'` initialt). Aktivering kräver
+samtligt: lagringskonto + RBAC verifierade, Logic App-flödet verifierat,
+Skadevis godkännande — därefter ändras `BOOKING_REQUESTS_ENABLED` till `'1'`
+via Bicep. Oavsett läge kräver servern dessutom publicerade regler, durabel
+lagring, ny tillgänglighetskontroll och status "Inväntar godkännande".
+
+## Kostnader (uppskattning per månad)
+
+- Table Storage (Standard_LRS): ~10 kr/GB; bokningsdata är några kB per
+  förfrågan → bråkdel av en krona i lagring; transaktioner ~0,04 kr per
+  10 000 (hundratals per månad i denna volym) → **< 2 kr/mån totalt**.
+- Logic Apps (Consumption): action-pris ~0,000025 €/aktion; pollning var 5:e
+  minut ≈ 8 640 körtiden/mån × ~3 aktioner ≈ **< 5 kr/mån**.
+- Ingen annan ny resurs. Total: **< 10 kr/mån**.
+
+
 ## Så fungerar flödet
 
 1. **Datumval i kalendern.** Första klicket (på ledigt, guldfärgat datum)
@@ -58,26 +188,26 @@ för tillgänglighetskontrollen — samma kod som kalendern, med samma
 
 ## Beslutspunkter (kräver Skadevis godkännande)
 
-1. ~~Bokningsreglerna~~ **BESLUTAT 2026-11-10.** Reglerna (avbokningspolicy
-   "Begränsad" + husregler) är publicerade i `server/booking/house-rules.json`
-   med version `2026-11-10`. Nivån för delvis återbetalning är markerad som
-   "specificeras vid bekräftelse" (fältet `partialRefundLevel`) — ingen
-   procentsats har hittats på. Uppdateras nivån: ändra texten och höj versionen.
-2. **Durabel lagring.** Rekommenderad lösning: Azure Table Storage (billig,
-   serverlös, ingen ny tjänst) med
-   `AZURE_STORAGE_ACCOUNT_NAME` + `AZURE_STORAGE_KEY` (+ valfri
-   `AZURE_TABLE_NAME`, default `bookingrequests`). Lagringskontot/table måste
-   väljas/godkännas av Skadevi. Utan konfiguration svarar API:et 503 och
-   produktionsservern varnar vid start. En lokal JSONL-fil (`data/`) finns
-   endast för utveckling/test och är inte permanent lagring.
-3. **E-postleverantör.** Mottagare och reply-to är beslutat:
-   `skadevigard@gmail.com` (se `server/booking/mail.js`). Notiser (till Skadevi
-   + mottagningsbekräftelse till gästen) skrivs som utkorgsposter i lagringen
-   med fullständigt innehåll. Kvar att besluta: leverantör
-   (t.ex. SendGrid, Azure Communication Services eller SMTP), avsändaradress
-   (kan sättas via `BOOKING_MAIL_FROM`) och nödvändiga hemligheter — den
-   verkliga leveransen är avstängd (`deliveryEnabled: false`) tills dess.
-   Kostnad: gratisnivåerna räcker gott för denna volym.
+1. ~~Bokningsreglerna~~ **BESLUTAT.** Publicerade i
+   `server/booking/house-rules.json`, version `2026-11-10-v2`. Avbokning
+   under 7 dagar kvarstår som flaggat beslut (`pendingDecisions`).
+2. ~~Durabel lagring~~ **BESLUTAT (Azure Table Storage, Managed Identity).**
+   Infrastrukturen är förberedd i `infra/modules/storage-tables.bicep` men
+   inga resurser är skapade. Vid aktivering: sätt
+   `AZURE_STORAGE_ACCOUNT_NAME` via Bicep (webbappen autentiserar med sin
+   managed identity — ingen nyckel behövs) och tilldela RBAC.
+3. **Logic App-flödet** är förberett (`infra/logicapp/` +
+   `infra/modules/logic-app-notify.bicep`) men ska inte deployeras eller
+   aktiveras i den befintliga Splat-miljön utan godkännande. Deployeras i
+   Disabled-läge; RBAC-tilldelning för dess identitet görs efter deploy.
+4. **Aktivering av verklig inskick:** `BOOKING_REQUESTS_ENABLED=1` sätts via
+   Bicep först när hela kedjan (lagring → utkorg → Logic App → mejl) är
+   verifierad och godkänd.
+5. ~~E-postleverantör~~ **BESLUTAT.** Befintlig Gmail-anslutning i
+   Splat Reality-prenumerationen återanvänds; skadevigard@gmail.com är
+   mottagare och reply-to (se `server/booking/mail.js`). Kvar att verifiera:
+   att anslutningen är autentiserad som just skadevigard@gmail.com (kontroll
+   i portalen) och Googles sändningskvoter (överdimensionerade för volymen).
 
 ## Rabatter
 

@@ -52,6 +52,9 @@ param customDomainStage string = 'disabled'
 #disable-next-line secure-secrets-in-params
 param secretAdminPrincipalId string = ''
 
+@description('Namn på lagringskontot för bokningsförfrågningar. Tomt = ingen bokningslagring aktiverad ännu (se infra/modules/storage-tables.bicep).')
+param bookingStorageAccountName string = ''
+
 var tags = {
   Owner: owner
   Environment: environment
@@ -65,7 +68,9 @@ var tags = {
 // AIRBNB_ICAL_URL är en Key Vault-referens (utan versionsnummer) så att
 // hemligheten kan roteras i Key Vault utan ny deployment, och så att
 // upprepade deployments aldrig nollställer den.
-var appSettings = [
+// Totalstängning: bokningsinskick aktiveras först när hela kedjan är
+// verifierad och godkänd — ändra till '1' via Bicep, aldrig manuellt.
+var baseAppSettings = [
   {
     name: 'NODE_ENV'
     value: 'production'
@@ -74,7 +79,24 @@ var appSettings = [
     name: 'AIRBNB_ICAL_URL'
     value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/${keyVaultSecretName})'
   }
+  {
+    name: 'BOOKING_REQUESTS_ENABLED'
+    value: '0'
+  }
 ]
+
+// Lagringskontots NAMN är ingen hemlighet — autentisering sker med webbappens
+// managed identity (Entra), aldrig nycklar.
+var bookingSettings = !empty(bookingStorageAccountName)
+  ? [
+      {
+        name: 'AZURE_STORAGE_ACCOUNT_NAME'
+        value: bookingStorageAccountName
+      }
+    ]
+  : []
+
+var appSettings = concat(baseAppSettings, bookingSettings)
 
 resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
   name: keyVaultName
@@ -184,3 +206,4 @@ resource managedCertificate 'Microsoft.Web/certificates@2024-11-01' = if (custom
 output webAppId string = webApp.id
 output defaultHostname string = webApp.properties.defaultHostName
 output keyVaultName string = keyVault.name
+output webAppPrincipalId string = webApp.identity.principalId
