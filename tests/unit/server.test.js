@@ -234,13 +234,17 @@ function post(port, pathname, body, headers = {}) {
   });
 }
 
-test('/api/booking-rules svarar att reglerna inte är publicerade', async () => {
+test('/api/booking-rules serverar de publicerade beslutade reglerna', async () => {
   const root = withTempRoot();
   const server = await listen(createRequestListener({ root }));
   try {
     const res = await request(server.address().port, '/api/booking-rules');
     assert.equal(res.status, 200);
-    assert.deepEqual(JSON.parse(res.body), { published: false, version: null, text: '' });
+    const rules = JSON.parse(res.body);
+    assert.equal(rules.published, true);
+    assert.equal(rules.version, '2026-11-10');
+    assert.match(rules.text, /Fullständig återbetalning/);
+    assert.match(rules.text, /Inga katter/);
   } finally { close(server); }
 });
 

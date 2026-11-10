@@ -22,10 +22,29 @@ test('injektade ofullständiga regler behandlas som opublicerade', async () => {
   }
 });
 
-test('filen i repot är opublicerad tills riktiga regler lämnats in', async () => {
+test('filen i repot publicerar de beslutade reglerna (version 2026-11-10)', async () => {
   const rules = await loadRules();
-  assert.equal(rules.published, false);
-  assert.equal(rules.text, '');
+  assert.equal(rules.published, true);
+  assert.equal(rules.version, '2026-11-10');
+  assert.ok(rules.text.length > 0);
+});
+
+test('avbokningspolicyn stämmer med beslutet', async () => {
+  const rules = await loadRules();
+  assert.match(rules.text, /Begränsad/);
+  assert.match(rules.text, /Fullständig återbetalning vid avbokning minst 30 dagar före incheckning/);
+  assert.match(rules.text, /Delvis återbetalning vid avbokning 7–30 dagar före incheckning/);
+  // Nivån för delvis återbetalning är inte påhittad: den ska vara markerad
+  // som "specificeras vid bekräftelse".
+  assert.match(rules.text, /specificeras vid bekräftelse/);
+});
+
+test('husreglerna stämmer med beslutet', async () => {
+  const rules = await loadRules();
+  assert.match(rules.text, /Ingen rökning/);
+  assert.match(rules.text, /Lås alla dörrar och stäng alla fönster vid avfärd/);
+  assert.match(rules.text, /max två husdjur/);
+  assert.match(rules.text, /Inga katter/);
 });
 
 test('publicRules läcker aldrig mer än version + text', async () => {

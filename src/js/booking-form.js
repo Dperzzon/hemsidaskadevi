@@ -1,4 +1,4 @@
-import { formatSek, ADDONS, addonLines, sumAddons } from './booking/pricing.js';
+import { formatSek, ADDONS, addonLines, sumAddons, discountNote } from './booking/pricing.js';
 
 // Bokningsflödet: formulär, tillval, prisöversikt, bokningsregler och inskick.
 // Formuläret görs synligt när kalendern skickar 'booking:dates'.
@@ -60,6 +60,12 @@ function updatePrices() {
     '<li class="price-line price-line-empty"><span>Inga tillval valda</span><span>0 kr</span></li>';
   els.priceTotal.textContent = formatSek(total);
   els.priceTotalRow.hidden = lines.length === 0;
+  // Rabattinfo: gäller boendepriset som bekräftas i offerten — ingen
+  // falsk totalsumma visas.
+  const nights = Number(els.nights.value) || 0;
+  const note = discountNote(nights);
+  els.discountNote.textContent = note ?? '';
+  els.discountNote.hidden = !note;
 }
 
 function syncLinenCount() {
@@ -295,6 +301,7 @@ function queryAll() {
     priceList: q('price-list'),
     priceTotal: q('price-total'),
     priceTotalRow: q('price-total-row'),
+    discountNote: q('discount-note'),
     consentRules: q('consent-rules'),
     consentContact: q('consent-contact'),
     submit: q('booking-submit'),

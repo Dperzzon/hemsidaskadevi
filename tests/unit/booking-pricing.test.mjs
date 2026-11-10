@@ -48,3 +48,38 @@ test('alla tillval är frivilliga och har verifierade priser', () => {
   assert.equal(pricing.ADDONS.find((addon) => addon.id === 'tidigIncheckning').price, 500);
   assert.equal(pricing.ADDONS.find((addon) => addon.id === 'senUtcheckning').price, 500);
 });
+
+test('veckorabatt 30 % gäller från 7 nätter', () => {
+  assert.equal(pricing.bestDiscount(6), null);
+  assert.deepEqual(pricing.bestDiscount(7), { id: 'veckorabatt', label: 'Veckorabatt', percent: 30, minNights: 7 });
+  assert.deepEqual(pricing.bestDiscount(27), { id: 'veckorabatt', label: 'Veckorabatt', percent: 30, minNights: 7 });
+});
+
+test('månadsrabatt 69 % gäller från 28 nätter och ersätter veckorabatten', () => {
+  assert.deepEqual(pricing.bestDiscount(28), { id: 'manadsrabatt', label: 'Månadsrabatt', percent: 69, minNights: 28 });
+  assert.deepEqual(pricing.bestDiscount(93), { id: 'manadsrabatt', label: 'Månadsrabatt', percent: 69, minNights: 28 });
+});
+
+test('ingen rabatt används felaktigt under gränsvärdena', () => {
+  for (const nights of [0, 1, 2, 3, 6]) {
+    assert.equal(pricing.bestDiscount(nights), null, `${nights} nätter ska inte ge rabatt`);
+    assert.equal(pricing.discountNote(nights), null);
+  }
+});
+
+test('applyDiscount räknar korrekt och kan användas när grundpris finns', () => {
+  const weekly = pricing.bestDiscount(7);
+  const monthly = pricing.bestDiscount(28);
+  assert.equal(pricing.applyDiscount(10000, weekly), 7000);
+  assert.equal(pricing.applyDiscount(10000, monthly), 3100);
+  assert.equal(pricing.applyDiscount(10000, null), 10000);
+});
+
+test('discountNote beskriver rabatten diskret utan totalsummor', () => {
+  assert.match(pricing.discountNote(7), /Veckorabatt 30 %/);
+  assert.match(pricing.discountNote(7), /boendepriset i offerten/);
+  assert.match(pricing.discountNote(28), /Månadsrabatt 69 %/);
+  assert.equal(pricing.discountNote(3), null);
+  // Noten får aldrig innehålla en påhittad totalsumma i kronor.
+  assert.doesNotMatch(pricing.discountNote(7), /kr/);
+});

@@ -579,6 +579,7 @@ h6 { font-size: var(--text-lg); }
 .price-line-request em { font-style: normal; font-size: 11px; color: var(--color-text-light); }
 .price-line-empty { color: var(--color-text-light); }
 .price-line-total { font-weight: 600; border-top: 1px solid var(--color-border); border-bottom: none; }
+.booking-discount-note { margin-top: 10px; font-size: 12px; line-height: 1.7; color: var(--color-accent-text); }
 .booking-price-note { margin-top: 12px; font-size: 12px; line-height: 1.7; color: var(--color-text-light); }
 .booking-consent { flex-direction: row !important; flex-wrap: wrap; align-items: flex-start; gap: 10px !important; }
 .booking-consent label { flex: 1; font-weight: 400; font-size: 14px; min-width: 240px; }
@@ -597,6 +598,7 @@ h6 { font-size: var(--text-lg); }
 .booking-confirmation { padding: 28px 32px; background: var(--color-bg-alt); border-left: 3px solid var(--color-accent); }
 .booking-confirmation h3 { font-family: var(--font-heading); font-size: var(--text-xl); margin-bottom: 10px; }
 .booking-confirmation p { font-size: 14px; line-height: 1.8; }
+.booking-confirmation-contact { margin-top: 10px; font-size: 13px; color: var(--color-text-light); }
 .booking-rules-dialog {
   width: min(680px, calc(100vw - 32px));
   max-height: min(80vh, 720px);

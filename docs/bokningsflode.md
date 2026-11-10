@@ -58,11 +58,11 @@ för tillgänglighetskontrollen — samma kod som kalendern, med samma
 
 ## Beslutspunkter (kräver Skadevis godkännande)
 
-1. **Bokningsreglerna.** Regeltexten ska vara exakt samma som på Airbnb-annonsen.
-   Publicera den i `server/booking/house-rules.json`:
-   `{ "published": true, "version": "2026-11-10", "text": "1. ... 2. ..." }`.
-   Så länge reglerna inte är publicerade är skickknappen avstängd och
-   API:et svarar 503 — förfrågningar tas inte emot.
+1. ~~Bokningsreglerna~~ **BESLUTAT 2026-11-10.** Reglerna (avbokningspolicy
+   "Begränsad" + husregler) är publicerade i `server/booking/house-rules.json`
+   med version `2026-11-10`. Nivån för delvis återbetalning är markerad som
+   "specificeras vid bekräftelse" (fältet `partialRefundLevel`) — ingen
+   procentsats har hittats på. Uppdateras nivån: ändra texten och höj versionen.
 2. **Durabel lagring.** Rekommenderad lösning: Azure Table Storage (billig,
    serverlös, ingen ny tjänst) med
    `AZURE_STORAGE_ACCOUNT_NAME` + `AZURE_STORAGE_KEY` (+ valfri
@@ -70,11 +70,28 @@ för tillgänglighetskontrollen — samma kod som kalendern, med samma
    väljas/godkännas av Skadevi. Utan konfiguration svarar API:et 503 och
    produktionsservern varnar vid start. En lokal JSONL-fil (`data/`) finns
    endast för utveckling/test och är inte permanent lagring.
-3. **E-postleverantör.** Notiser (till Skadevi + mottagningsbekräftelse till
-   gästen) skrivs som utkorgsposter i lagringen med fullständigt innehåll.
-   Välj leverantör (t.ex. SendGrid, Azure Communication Services eller SMTP)
-   och koppla en avsändaradress — den verkliga e-postleveransen är avstängd
-   tills dess. Kostnad: gratisnivåerna räcker gott för denna volym.
+3. **E-postleverantör.** Mottagare och reply-to är beslutat:
+   `skadevigard@gmail.com` (se `server/booking/mail.js`). Notiser (till Skadevi
+   + mottagningsbekräftelse till gästen) skrivs som utkorgsposter i lagringen
+   med fullständigt innehåll. Kvar att besluta: leverantör
+   (t.ex. SendGrid, Azure Communication Services eller SMTP), avsändaradress
+   (kan sättas via `BOOKING_MAIL_FROM`) och nödvändiga hemligheter — den
+   verkliga leveransen är avstängd (`deliveryEnabled: false`) tills dess.
+   Kostnad: gratisnivåerna räcker gott för denna volym.
+
+## Rabatter
+
+Beslutade rabatter (gäller boendepriset): veckorabatt 30 % för vistelser på
+7 nätter eller mer, månadsrabatt 69 % för 28 nätter eller mer (månadsrabatten
+ersätter veckorabatten). Logiken finns på både klient- och serversidan
+(`src/js/booking/pricing.js`, `server/booking/pricing.js`). Eftersom
+boendepriset ännu inte kan beräknas säkert (vistelsetyp avgör grundpriset)
+visas rabatten i prisöversikten som en diskret notis — t.ex. "Veckorabatt
+30 % gäller för vistelser på 7 nätter eller fler och dras av från
+boendepriset i offerten." — aldrig som en falsk totalsumma. Sparade
+bokningsförfrågningar innehåller rabatten som information, och notisen till
+Skadevi redovisar den. När en säker grundprismetod finns kan
+`applyDiscount(base, bestDiscount(nights))` används direkt.
 
 ## Skydd
 

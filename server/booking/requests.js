@@ -17,6 +17,8 @@ const crypto = require('node:crypto');
 const { handleAvailability } = require('../calendar/availability');
 const { loadRules } = require('./rules');
 const { createStore } = require('./store');
+const { bestDiscount } = require('./pricing');
+const { MAIL } = require('./mail');
 
 const MAX_GUESTS = 24;
 const MAX_NIGHTS = 93;
@@ -118,11 +120,14 @@ function validatePayload(body, now = new Date()) {
 
   if (Object.keys(errors).length) return { errors };
 
+  const nights = nightsBetween(arrival, departure);
+  const discount = bestDiscount(nights); // rabatt på boendepriset (besluten logik)
+
   return {
     record: {
       arrival,
       departure,
-      nights: nightsBetween(arrival, departure),
+      nights,
       guests,
       firstName,
       lastName,
@@ -139,6 +144,9 @@ function validatePayload(body, now = new Date()) {
         senUtcheckning: addons.senUtcheckning === true
       },
       totalAddons: Number(body.totalAddons) || 0,
+      // Rabatten lagras som information (gäller boendepriset som bekräftas
+      // i offerten) — ingen total prisberäkning sker på serversidan.
+      discount: discount ? { id: discount.id, label: discount.label, percent: discount.percent } : null,
       rulesVersion: typeof body.rulesVersion === 'string' ? body.rulesVersion.slice(0, 64) : '',
       consentContact: body.consentContact === true
     }
@@ -197,13 +205,20 @@ function buildNotifications(record) {
     'Tillval:',
     ...(addonLines.length ? addonLines : ['- Inga']),
     `Summa tillval: ${record.totalAddons} kr`,
+    record.discount ? `Rabatt (dras av från boendepriset i offerten): ${record.discount.label} ${record.discount.percent} %` : null,
     `Bokningsregler godkända (version ${record.rulesVersion})`,
     record.message ? `Önskemål: ${record.message}` : null
   ].filter(Boolean).join('\n');
   return {
-    host: { to: 'host', subject: `Bokningsförfrågan ${record.reference} — Inväntar godkännande`, body: summary },
+    host: {
+      to: MAIL.hostRecipient,
+      replyTo: MAIL.replyTo,
+      subject: `Bokningsförfrågan ${record.reference} — Inväntar godkännande`,
+      body: summary
+    },
     guest: {
       to: 'guest',
+      replyTo: MAIL.replyTo,
       subject: `Vi har tagit emot din bokningsförfrågan (${record.reference})`,
       body: 'Tack för din bokningsförfrågan! Vi har tagit emot dina önskemål och återkommer med besked om tillgänglighet och bokning. Din vistelse är ännu inte bekräftad.'
     }
@@ -224,6 +239,7 @@ async function saveOutbox(store, record, context) {
         firstName: 'notis',
         lastName: record.reference,
         email: notification.to,
+        replyTo: notification.replyTo ?? '',
         phone: '',
         company: '',
         message: notification.body,

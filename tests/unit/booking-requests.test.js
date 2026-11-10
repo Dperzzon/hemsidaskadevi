@@ -204,7 +204,8 @@ test('buildNotifications beskriver förfrågan utan att markera den bekräftad',
     arrival: '2026-11-20', departure: '2026-11-23', nights: 3, guests: 4,
     firstName: 'Anna', lastName: 'Andersson', email: 'anna@example.com', phone: '+4670',
     company: '', message: '', addons: { slutstad: true, lakan: true, linenCount: 4, ved: true, tidigIncheckning: true, senUtcheckning: false },
-    totalAddons: 2500 + 800 + 350 + 500, rulesVersion: 'test-2026-11-10'
+    totalAddons: 2500 + 800 + 350 + 500, discount: { id: 'veckorabatt', label: 'Veckorabatt', percent: 30 },
+    rulesVersion: 'test-2026-11-10'
   };
   const { host, guest } = buildNotifications(record);
   assert.match(host.subject, /Inväntar godkännande/);
@@ -212,4 +213,56 @@ test('buildNotifications beskriver förfrågan utan att markera den bekräftad',
   assert.match(host.body, /4 pers × 200 kr/);
   assert.match(host.body, /Tidig incheckning \(önskemål\)/);
   assert.match(guest.body, /ännu inte bekräftad/);
+});
+
+test('notiserna går till skadevigard@gmail.com med reply-to samma adress', () => {
+  const record = {
+    reference: 'SK-2026-ABC234', status: 'Inväntar godkännande',
+    arrival: '2026-11-20', departure: '2026-11-23', nights: 3, guests: 2,
+    firstName: 'Anna', lastName: 'Andersson', email: 'anna@example.com', phone: '+4670',
+    company: '', message: '', addons: {}, totalAddons: 0, discount: null,
+    rulesVersion: 'test-2026-11-10'
+  };
+  const { host, guest } = buildNotifications(record);
+  assert.equal(host.to, 'skadevigard@gmail.com');
+  assert.equal(host.replyTo, 'skadevigard@gmail.com');
+  assert.equal(guest.replyTo, 'skadevigard@gmail.com');
+});
+
+test('notisen till Skadevi redovisar beslutade rabatter', () => {
+  const record = {
+    reference: 'SK-2026-ABC234', status: 'Inväntar godkännande',
+    arrival: '2026-11-20', departure: '2026-12-18', nights: 28, guests: 2,
+    firstName: 'Anna', lastName: 'Andersson', email: 'anna@example.com', phone: '+4670',
+    company: '', message: '', addons: {}, totalAddons: 0,
+    discount: { id: 'manadsrabatt', label: 'Månadsrabatt', percent: 69 },
+    rulesVersion: 'test-2026-11-10'
+  };
+  const { host } = buildNotifications(record);
+  assert.match(host.body, /Månadsrabatt 69 %/);
+  assert.match(host.body, /boendepriset i offerten/);
+  // Ingen påhittad totalsumma för boendet.
+  assert.doesNotMatch(host.body, /Totalt:/);
+});
+
+test('rabatten beräknas på serversidan och sparas som information', async () => {
+  // 10 nätter → veckorabatt 30 % (utövar att servern inte litar på klienten).
+  const { options, stored, context } = setup({
+    now: new Date('2026-11-10T12:00:00Z')
+  });
+  const body = validBody({ arrival: '2026-11-20', departure: '2026-11-30' });
+  const result = await handleBookingRequest(request({ body }), context, options);
+  assert.equal(result.status, 201);
+  const record = [...stored.values()].find((item) => item.status === 'Inväntar godkännande');
+  assert.equal(record.nights, 10);
+  assert.deepEqual(record.discount, { id: 'veckorabatt', label: 'Veckorabatt', percent: 30 });
+});
+
+test('kort vistelse får ingen rabattpost', async () => {
+  const { options, stored, context } = setup({ now: new Date('2026-11-10T12:00:00Z') });
+  const body = validBody({ arrival: '2026-11-20', departure: '2026-11-23' });
+  const result = await handleBookingRequest(request({ body }), context, options);
+  assert.equal(result.status, 201);
+  const record = [...stored.values()].find((item) => item.status === 'Inväntar godkännande');
+  assert.equal(record.discount, null);
 });

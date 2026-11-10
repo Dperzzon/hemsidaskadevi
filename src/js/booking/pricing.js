@@ -51,6 +51,40 @@ export const ADDONS = [
   }
 ];
 
+// Rabatter (beslutade av Skadevi): veckorabatt 30 % för vistelser på 7
+// nätter eller mer, månadsrabatt 69 % för 28 nätter eller mer. Månadsrabatten
+// ersätter veckorabatten när båda uppfylls. Rabatterna gäller boendepriset —
+// som ännu inte kan beräknas säkert i formuläret (vistelsetyp avgör grundpriset)
+// — och presenteras därför som rabattinfo, aldrig som falska totalsummor.
+export const DISCOUNTS = [
+  { id: 'veckorabatt', label: 'Veckorabatt', percent: 30, minNights: 7 },
+  { id: 'manadsrabatt', label: 'Månadsrabatt', percent: 69, minNights: 28 }
+];
+
+// Bästa (största) rabatt som gäller för antalet nätter, eller null.
+export function bestDiscount(nights) {
+  let best = null;
+  for (const discount of DISCOUNTS) {
+    if (nights >= discount.minNights && (!best || discount.percent > best.percent)) {
+      best = discount;
+    }
+  }
+  return best;
+}
+
+// Tillämpar en rabatt på ett grundbelopp (används när boendepris kan beräknas).
+export function applyDiscount(baseAmount, discount) {
+  if (!discount) return baseAmount;
+  return Math.round(baseAmount * (1 - discount.percent / 100));
+}
+
+// Tekst för UI: rabatten gäller boendepriset som bekräftas i offerten.
+export function discountNote(nights) {
+  const discount = bestDiscount(nights);
+  if (!discount) return null;
+  return `${discount.label} ${discount.percent} % gäller för vistelser på ${discount.minNights} nätter eller fler och dras av från boendepriset i offerten.`;
+}
+
 export function formatSek(amount) {
   return `${new Intl.NumberFormat('sv-SE').format(amount)} kr`;
 }

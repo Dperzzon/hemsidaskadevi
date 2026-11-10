@@ -6,7 +6,7 @@ import { FIXED_NOW, prepare, settle } from './helpers.js';
 const RULES_MOCK = {
   published: true,
   version: 'test-regler-1',
-  text: '1. Testregel.\n2. Testregel två.'
+  text: 'AVBOKNINGSPOLICY (Begränsad)\n• Fullständig återbetalning vid avbokning minst 30 dagar före incheckning.\n• Delvis återbetalning vid avbokning 7–30 dagar före incheckning. Nivån för delvis återbetalning specificeras vid bekräftelse.\n\nHUSREGLER\n• Ingen rökning.\n• Lås alla dörrar och stäng alla fönster vid avfärd.\n• Husdjur: max två husdjur. Inga katter.'
 };
 
 test.beforeEach(async ({ page }) => {
@@ -118,11 +118,81 @@ test('bokningsreglerna kan läsas utan att påbörjad förfrågan förloras', as
   await page.locator('#open-rules-label').click();
   const dialog = page.locator('#booking-rules-dialog');
   await expect(dialog).toBeVisible();
-  await expect(dialog).toContainText('Testregel.');
+  await expect(dialog).toContainText('Fullständig återbetalning vid avbokning minst 30 dagar före incheckning');
+  await expect(dialog).toContainText('specificeras vid bekräftelse');
+  await expect(dialog).toContainText('Ingen rökning');
   await page.locator('#close-rules').click();
   await expect(dialog).toBeHidden();
   await expect(page.locator('#field-firstname')).toHaveValue('Anna');
   await expect(page.locator('#summary-arrival')).toHaveText('16 november 2026');
+});
+
+test('bokningsreglerna visar avbokningspolicy och husregler', async ({ page }) => {
+  await goto(page);
+  await clickDay(page, '2026-11-16');
+  await clickDay(page, '2026-11-19');
+  await page.locator('#open-rules-label').click();
+  const dialog = page.locator('#booking-rules-dialog');
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText('Fullständig återbetalning vid avbokning minst 30 dagar före incheckning');
+  await expect(dialog).toContainText('Delvis återbetalning vid avbokning 7–30 dagar före incheckning');
+  await expect(dialog).toContainText('specificeras vid bekräftelse');
+  await expect(dialog).toContainText('Ingen rökning');
+  await expect(dialog).toContainText('Lås alla dörrar och stäng alla fönster vid avfärd');
+  await expect(dialog).toContainText('max två husdjur');
+  await expect(dialog).toContainText('Inga katter');
+});
+
+test('veckorabatt visas diskret för vistelser på 7 nätter eller fler', async ({ page }) => {
+  await goto(page);
+  // 1–11 december: 10 lediga nätter i mocken (bokade dagar är 12–14, 20, 27–28).
+  await clickDay(page, '2026-12-01');
+  await clickDay(page, '2026-12-11');
+  await expect(page.locator('#summary-nights')).toHaveText('10 nätter');
+  await expect(page.locator('#discount-note')).toBeVisible();
+  await expect(page.locator('#discount-note')).toContainText('Veckorabatt 30 %');
+  await expect(page.locator('#discount-note')).toContainText('boendepriset i offerten');
+});
+
+test('månadsrabatt visas för vistelser på 28 nätter eller fler', async ({ page }) => {
+  await page.unrouteAll({ behavior: 'ignoreErrors' });
+  await page.clock.setFixedTime(FIXED_NOW);
+  await page.route('**/api/availability?*', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: '{"blocked":[]}' }));
+  await page.route('**/api/booking-rules', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(RULES_MOCK) }));
+  await page.goto('/lediga-datum', { waitUntil: 'load' });
+  await expect(page.locator('.cal-month h3').first()).toHaveText('November 2026');
+  // 29 november → 27 december: exakt 28 nätter (avresedagen är ingen natt).
+  await clickDay(page, '2026-11-29');
+  await clickDay(page, '2026-12-27');
+  await expect(page.locator('#summary-nights')).toHaveText('28 nätter');
+  await expect(page.locator('#discount-note')).toContainText('Månadsrabatt 69 %');
+});
+
+test('ingen rabatt visas under gränsvärdena', async ({ page }) => {
+  await goto(page);
+  await clickDay(page, '2026-11-16');
+  await clickDay(page, '2026-11-19');
+  await expect(page.locator('#summary-nights')).toHaveText('3 nätter');
+  await expect(page.locator('#discount-note')).toBeHidden();
+});
+
+test('bekräftelsen anger kontaktadressen skadevigard@gmail.com', async ({ page }) => {
+  await goto(page);
+  await clickDay(page, '2026-11-16');
+  await clickDay(page, '2026-11-19');
+  await page.locator('#field-firstname').fill('Anna');
+  await page.locator('#field-lastname').fill('Andersson');
+  await page.locator('#field-email').fill('anna@example.com');
+  await page.locator('#field-phone').fill('+4670123456');
+  await page.locator('#field-guests').selectOption('2');
+  await page.locator('#consent-rules').check();
+  await page.locator('#booking-submit').click();
+  await expect(page.locator('#booking-confirmation')).toBeVisible();
+  const contact = page.locator('.booking-confirmation-contact');
+  await expect(contact).toContainText('skadevigard@gmail.com');
+  await expect(contact.locator('a')).toHaveAttribute('href', 'mailto:skadevigard@gmail.com');
 });
 
 test('tillval uppdaterar prisöversikten och lakan-räknaren', async ({ page }) => {
