@@ -21,7 +21,7 @@ param owner string = 'Skadevi Herrgård'
 #disable-next-line secure-secrets-in-params
 param webAppPrincipalId string = ''
 
-@description('Objekt-ID (principalId) för Logic Appens system-assigned managed identity — får Storage Table Data Contributor på tabellen.')
+@description('Objekt-ID (principalId) för Logic Appens system-assigned managed identity — ska ligga i SAMMA Entra-tenant som lagringen (Skadevi-tenant 7169feeb-…). Kors-tenant fungerar inte: Entra-only-lagring avvisar token från annan tenant, och Azure RBAC kan inte tilldela principals från en annan tenant. Får Storage Table Data Contributor på tabellen.')
 #disable-next-line secure-secrets-in-params
 param logicAppPrincipalId string = ''
 
