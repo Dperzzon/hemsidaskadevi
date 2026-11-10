@@ -1,0 +1,8 @@
+{
+  // Utveckling sker med Vite: starta med `npm run dev` (se README.md).
+  // Live Server behövs inte längre och har inga projektinställningar här.
+  "files.associations": {
+    "*.bicepparam": "bicep"
+  },
+  "eslint.enable": true
+}
