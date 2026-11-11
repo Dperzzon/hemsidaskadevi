@@ -1,8 +1,12 @@
 'use strict';
 
-// Steg 7C: säkerhetskontroller för den isolerade Logic App-deploymenten.
-// Testet läser den kompilerade ARM-mallen och flödesdefinitionen och säkerställer
-// att deploymenten endast kan skapa Logic Appen och dess två rolltilldelningar.
+// Steg 7C/7D: säkerhetskontroller för den isolerade, tvåfasiga
+// Logic App-deploymenten. Testet läser de kompilerade ARM-mallarna och
+// flödesdefinitionen och säkerställer att:
+//   - fas A endast skapar Logic Appen + tabellrollen
+//   - fas B endast skapar Key Vault Secrets User på det enskilda sekretet
+//   - ingen rolltilldelning scopas till hela Key Vault
+//   - flödet är avstängt, saknar hemligheter och inte kan skapa bokningar.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -10,13 +14,15 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const root = path.join(__dirname, '..', '..');
-const template = JSON.parse(fs.readFileSync(path.join(root, 'infra', 'modules', 'logic-app-notify.json'), 'utf8'));
+const phaseATemplate = JSON.parse(fs.readFileSync(path.join(root, 'infra', 'modules', 'logic-app-notify.json'), 'utf8'));
+const phaseBTemplate = JSON.parse(fs.readFileSync(path.join(root, 'infra', 'modules', 'keyvault-secret-role.json'), 'utf8'));
 const workflow = JSON.parse(fs.readFileSync(path.join(root, 'infra', 'logicapp', 'email-notifier.workflow.json'), 'utf8'));
-const paramsText = fs.readFileSync(path.join(root, 'infra', 'logic-app-notify.bicepparam'), 'utf8');
+const phaseAParamsText = fs.readFileSync(path.join(root, 'infra', 'logic-app-notify.bicepparam'), 'utf8');
+const phaseBParamsText = fs.readFileSync(path.join(root, 'infra', 'keyvault-secret-role.bicepparam'), 'utf8');
 
-const resources = template.resources;
-const workflowResource = resources.find((resource) => resource.type === 'Microsoft.Logic/workflows');
-const roleAssignments = resources.filter((resource) => resource.type === 'Microsoft.Authorization/roleAssignments');
+const workflowResource = phaseATemplate.resources.find((resource) => resource.type === 'Microsoft.Logic/workflows');
+const phaseATableRole = phaseATemplate.resources.find((resource) => resource.type === 'Microsoft.Authorization/roleAssignments');
+const phaseBRole = phaseBTemplate.resources.find((resource) => resource.type === 'Microsoft.Authorization/roleAssignments');
 
 function collectActions(actions, collected = []) {
   for (const [name, action] of Object.entries(actions ?? {})) {
@@ -30,10 +36,9 @@ function collectActions(actions, collected = []) {
 const allActions = collectActions(workflow.actions);
 const httpActions = allActions.filter((action) => action.type === 'Http');
 
-test('isolerad deployment skapar endast Logic App och två rolltilldelningar', () => {
-  assert.equal(resources.length, 3);
-  assert.deepEqual(resources.map((resource) => resource.type).sort(), [
-    'Microsoft.Authorization/roleAssignments',
+test('fas A deklarerar endast Logic App + tabellroll', () => {
+  assert.equal(phaseATemplate.resources.length, 2);
+  assert.deepEqual(phaseATemplate.resources.map((resource) => resource.type).sort(), [
     'Microsoft.Authorization/roleAssignments',
     'Microsoft.Logic/workflows'
   ]);
@@ -43,8 +48,37 @@ test('isolerad deployment skapar endast Logic App och två rolltilldelningar', (
     'Microsoft.KeyVault/vaults',
     'Microsoft.Network/dnsZones'
   ]) {
-    assert.ok(!resources.some((resource) => resource.type === forbidden), `${forbidden} får inte skapas`);
+    assert.ok(!phaseATemplate.resources.some((resource) => resource.type === forbidden), `${forbidden} får inte skapas`);
   }
+  assert.ok(String(phaseATableRole.scope).includes('tableServices/tables'));
+});
+
+test('fas B deklarerar endast Key Vault-rollen på det enskilda sekretet', () => {
+  assert.equal(phaseBTemplate.resources.length, 1);
+  assert.equal(phaseBRole.type, 'Microsoft.Authorization/roleAssignments');
+  assert.ok(String(phaseBRole.scope).startsWith("[resourceId('Microsoft.KeyVault/vaults/secrets'"));
+  assert.ok(String(phaseBRole.scope).includes("parameters('keyVaultSecretName')"));
+  assert.equal(phaseBTemplate.parameters.keyVaultSecretName.defaultValue, 'resend-api-key');
+  assert.equal(phaseBTemplate.parameters.keyVaultSecretsUserRoleId.defaultValue, '4633458b-17de-408a-b874-0445c86b69e6');
+  assert.ok(String(phaseBRole.properties.principalId).includes('identity.principalId'));
+});
+
+test('ingen rolltilldelning scopas till hela Key Vault eller andra resurser', () => {
+  const allRoleAssignments = [
+    ...phaseATemplate.resources.filter((resource) => resource.type === 'Microsoft.Authorization/roleAssignments'),
+    ...phaseBTemplate.resources.filter((resource) => resource.type === 'Microsoft.Authorization/roleAssignments')
+  ];
+  assert.equal(allRoleAssignments.length, 2, 'endast tabellrollen och sekretessrollen ska finnas');
+  for (const role of allRoleAssignments) {
+    assert.ok(
+      !String(role.scope).includes("[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]"),
+      'rolltilldelning på hela valvet är förbjuden'
+    );
+  }
+});
+
+test('fas A och fas B ger tillsammans exakt tre resurser', () => {
+  assert.equal(phaseATemplate.resources.length + phaseBTemplate.resources.length, 3);
 });
 
 test('Logic App skapas i Disabled-läge med systemidentitet', () => {
@@ -53,17 +87,10 @@ test('Logic App skapas i Disabled-läge med systemidentitet', () => {
   assert.equal(workflowResource.name, "[parameters('workflowName')]");
 });
 
-test('rolltilldelningar har minsta scope och tenantverifierade roller', () => {
-  const tableRole = roleAssignments.find((resource) => String(resource.scope).includes('tableServices/tables'));
-  const kvRole = roleAssignments.find((resource) => String(resource.scope).includes('Microsoft.KeyVault/vaults'));
-  assert.ok(tableRole, 'tabellroll saknas');
-  assert.ok(kvRole, 'Key Vault-roll saknas');
-  assert.ok(tableRole.properties.roleDefinitionId.includes("parameters('tableDataContributorRoleId')"));
-  assert.ok(kvRole.properties.roleDefinitionId.includes("parameters('keyVaultSecretsUserRoleId')"));
-  assert.equal(template.parameters.tableDataContributorRoleId.defaultValue, '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3');
-  assert.equal(template.parameters.keyVaultSecretsUserRoleId.defaultValue, '4633458b-17de-408a-b874-0445c86b69e6');
-  assert.equal(tableRole.properties.principalId, kvRole.properties.principalId);
-  assert.ok(String(tableRole.properties.principalId).includes('identity.principalId'));
+test('tabellrollen använder tenantverifierad roll och tabellscope', () => {
+  assert.ok(phaseATableRole.properties.roleDefinitionId.includes("parameters('tableDataContributorRoleId')"));
+  assert.equal(phaseATemplate.parameters.tableDataContributorRoleId.defaultValue, '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3');
+  assert.ok(String(phaseATableRole.properties.principalId).includes('identity.principalId'));
 });
 
 test('endast Recurrence-trigger och HTTP/If/Foreach – inga connectors eller webhooks', () => {
@@ -81,7 +108,6 @@ test('API-nyckeln är inte hårdkodad och hämtas från Key Vault', () => {
   assert.ok(!/re_[A-Za-z0-9]{8,}/.test(raw), 'Resend-nyckel får inte finnas i flödet');
   const send = allActions.find((action) => action.name === 'Skicka_mejl_resend');
   assert.ok(send.inputs.headers.Authorization.includes("body('Hamta_api_nyckel')"));
-  assert.equal(template.parameters.keyVaultSecretName.defaultValue, 'resend-api-key');
 });
 
 test('all känslig HTTP-data skyddas i körhistoriken', () => {
@@ -106,13 +132,18 @@ test('flödet kan inte skapa bokningar eller röra andra Azure-tjänster', () =>
       `oväntad mål-URI: ${uri}`
     );
   }
-  assert.ok(!JSON.stringify(template).includes('BOOKING_REQUESTS_ENABLED'));
+  assert.ok(!JSON.stringify(phaseATemplate).includes('BOOKING_REQUESTS_ENABLED'));
 });
 
-test('parameterfilen är låst till Skadevis prod-resurser och innehåller inga hemligheter', () => {
-  assert.ok(paramsText.includes("using './modules/logic-app-notify.bicep'"));
-  assert.ok(paramsText.includes("param keyVaultName = 'kv-skadevi-prod'"));
-  assert.ok(paramsText.includes("param keyVaultSecretName = 'resend-api-key'"));
-  assert.ok(paramsText.includes("param storageAccountName = 'stskadevibokningprod'"));
-  assert.ok(!/secret\s*=\s*['"][^'"]+['"]/i.test(paramsText), 'parameterfilen får inte innehålla hemliga värden');
+test('parameterfilerna är låsta till Skadevis prod-resurser och innehåller inga hemligheter', () => {
+  assert.ok(phaseAParamsText.includes("using './modules/logic-app-notify.bicep'"));
+  assert.ok(phaseAParamsText.includes("param keyVaultName = 'kv-skadevi-prod'"));
+  assert.ok(phaseAParamsText.includes("param keyVaultSecretName = 'resend-api-key'"));
+  assert.ok(phaseAParamsText.includes("param storageAccountName = 'stskadevibokningprod'"));
+  assert.ok(phaseBParamsText.includes("using './modules/keyvault-secret-role.bicep'"));
+  assert.ok(phaseBParamsText.includes("param keyVaultName = 'kv-skadevi-prod'"));
+  assert.ok(phaseBParamsText.includes("param keyVaultSecretName = 'resend-api-key'"));
+  for (const text of [phaseAParamsText, phaseBParamsText]) {
+    assert.ok(!/secret\s*=\s*['"][^'"]+['"]/i.test(text), 'parameterfilen får inte innehålla hemliga värden');
+  }
 });

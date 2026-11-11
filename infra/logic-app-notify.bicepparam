@@ -1,13 +1,16 @@
 using './modules/logic-app-notify.bicep'
 
 // ============================================================================
-// Isolerad deployment av Logic App för bokningsnotiser (steg 7C).
+// FAS A — isolerad deployment av Logic App för bokningsnotiser (steg 7D).
 //
 // Skapar ENDAST:
 //   1. Logic App logic-skadevi-bokningsnotis (state: Disabled)
 //   2. Storage Table Data Contributor för appens managed identity på
 //      bokningstabellen (tabellnivå)
-//   3. Key Vault Secrets User för appens managed identity på kv-skadevi-prod
+//
+// Key Vault Secrets User skapas INTE här. Den kräver att sekretet
+// resend-api-key redan finns och tilldelas i fas B med
+// infra/keyvault-secret-role.bicepparam.
 //
 // Rör INTE App Service, lagringskontot, Key Vault-konfigurationen eller DNS.
 // Inga hemligheter skapas och inga mejl skickas.

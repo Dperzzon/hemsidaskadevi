@@ -279,28 +279,34 @@ test('avsändare och mottagare stämmer med beslutet', () => {
   assert.equal(workflow.parameters.hostRecipient.defaultValue, 'skadevigard@gmail.com');
 });
 
-test('Logic App-modulen: systemidentitet, Disabled-läge, RBAC på tabell- och valvnivå', () => {
+test('Logic App-modulen: systemidentitet, Disabled-läge och tabellroll; KV-rollen ligger i fas B på sekretesscope', () => {
   const resources = moduleJson.resources;
   const workflowRes = resources.find((r) => r.type === 'Microsoft.Logic/workflows');
   assert.ok(workflowRes);
   assert.deepEqual(workflowRes.identity, { type: 'SystemAssigned' });
   assert.equal(workflowRes.properties.state, 'Disabled');
   const roleAssignments = resources.filter((r) => r.type === 'Microsoft.Authorization/roleAssignments');
-  assert.equal(roleAssignments.length, 2);
-  const roles = roleAssignments.map((r) => r.properties.roleDefinitionId);
-  assert.equal(roles.length, 2);
-  // Rollerna refereras via tenant-GUID:er i parametrarnas defaultValue.
+  assert.equal(roleAssignments.length, 1, 'fas A får endast innehålla tabellrollen');
   assert.equal(moduleJson.parameters.tableDataContributorRoleId.defaultValue, '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3');
-  assert.equal(moduleJson.parameters.keyVaultSecretsUserRoleId.defaultValue, '4633458b-17de-408a-b874-0445c86b69e6');
-  assert.ok(roles.every((id) => id.startsWith('[subscriptionResourceId')), 'rolldefinition ska refereras per tenant');
+  assert.equal(moduleJson.parameters.keyVaultSecretsUserRoleId, undefined, 'Key Vault-rollen får inte ligga i fas A');
   // Tilldelning på tabellnivå (scope sätts via resourceId till tabellen).
   const tableScoped = roleAssignments.find(
     (r) => typeof r.scope === 'string' && r.scope.includes('tableServices') && r.scope.includes('bookingrequests')
   );
   assert.ok(tableScoped, 'tabellscope saknas');
-  const raw = JSON.stringify(moduleJson);
-  assert.ok(!/re_[A-Za-z0-9]/.test(raw), 'ingen API-nyckel i Bicep-modulen');
-  assert.ok(!raw.includes('connectionString'), 'ingen anslutningssträng i Bicep-modulen');
+  assert.ok(tableScoped.properties.roleDefinitionId.startsWith('[subscriptionResourceId'), 'rolldefinition ska refereras per tenant');
+
+  const phaseB = JSON.parse(fs.readFileSync(path.join(__dirname, '../../infra/modules/keyvault-secret-role.json'), 'utf8'));
+  const phaseBRoles = phaseB.resources.filter((r) => r.type === 'Microsoft.Authorization/roleAssignments');
+  assert.equal(phaseBRoles.length, 1, 'fas B får endast innehålla Key Vault-rollen');
+  assert.ok(String(phaseBRoles[0].scope).includes("Microsoft.KeyVault/vaults/secrets"));
+  assert.ok(String(phaseBRoles[0].scope).includes("parameters('keyVaultSecretName')"));
+  assert.equal(phaseB.parameters.keyVaultSecretsUserRoleId.defaultValue, '4633458b-17de-408a-b874-0445c86b69e6');
+  assert.ok(phaseBRoles[0].properties.roleDefinitionId.startsWith('[subscriptionResourceId'), 'rolldefinition ska refereras per tenant');
+
+  const raw = JSON.stringify(moduleJson) + JSON.stringify(phaseB);
+  assert.ok(!/re_[A-Za-z0-9]/.test(raw), 'ingen API-nyckel i Bicep-modulerna');
+  assert.ok(!raw.includes('connectionString'), 'ingen anslutningssträng i Bicep-modulerna');
 });
 
 test('Main-mallen: BOOKING_REQUESTS_ENABLED hålls avstängt och Logic App är villkorligt kopplad', () => {

@@ -15,8 +15,10 @@ targetScope = 'resourceGroup'
 //   identity (audience https://storage.azure.com/) och rollen Storage Table
 //   Data Contributor på TABELLEN (tilldelas här, samma tenant).
 // - API-nyckeln hämtas per körning direkt från Key Vault med managed identity
-//   (audience https://vault.azure.net); rollen Key Vault Secrets User på valvet
-//   tilldelas här. Nyckeln finns ALDRIG i Bicep, GitHub eller kod.
+//   (audience https://vault.azure.net). Rollen Key Vault Secrets User scopas
+//   till ENBART sekretessen resend-api-key och tilldelas i den separata fas B-
+//   modulen (keyvault-secret-role.bicep) efter att sekretet skapats manuellt.
+//   Nyckeln finns ALDRIG i Bicep, GitHub eller kod.
 // - Logic App skapas i Disabled-läge och aktiveras först efter att Resend-
 //   kontot, API-nyckeln och domänverifieringen (DNS) är klara och godkända.
 // - Körhistorik: känsliga fält döljs med secureData (inputs/outputs) på alla
@@ -54,10 +56,6 @@ param hostRecipient string = 'skadevigard@gmail.com'
 
 @description('Rolldefinitions-ID för Storage Table Data Contributor i SKADEVIS tenant (verifierat 2026-11-11 — avviker från välkänd global GUID).')
 param tableDataContributorRoleId string = '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3'
-
-@description('Rolldefinitions-ID för Key Vault Secrets User i SKADEVIS tenant (verifierat 2026-11-11 via az role definition list — dataActions: secrets/getSecret + readMetadata endast).')
-#disable-next-line secure-secrets-in-params
-param keyVaultSecretsUserRoleId string = '4633458b-17de-408a-b874-0445c86b69e6'
 
 @description('Miljötagg.')
 param environment string = 'prod'
@@ -146,17 +144,9 @@ resource tableContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' =
   }
 }
 
-// Läser rätt att hämta Resend-API-nyckeln: Key Vault Secrets User på valvet
-// (RBAC-valv; get på secrets, inga skriv-/listbehörigheter överförda).
-resource kvSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(keyVault.id, 'logicapp-kv-secrets-user')
-  scope: keyVault
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', keyVaultSecretsUserRoleId)
-    principalId: workflow.identity.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
+// Key Vault Secrets User skapas INTE här. Den scopas till det enskilda
+// sekretet resend-api-key i den separata fas B-modulen
+// (keyvault-secret-role.bicep), efter att sekretet skapats manuellt.
 
 output workflowId string = workflow.id
 output principalId string = workflow.identity.principalId

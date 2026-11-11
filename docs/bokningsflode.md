@@ -163,40 +163,68 @@ plaintext (`mailHtml`/`mailText`); Logic App skickar båda fälten till Resend.
   (`resend._domainkey`, `send` TXT/MX) finns inte i DNS. Domänverifiering hos
   Resend kan därför inte slutföras förrän överföringen till GoDaddy är klar.
 
-### Steg 7C — isolerad deployment av Logic App
+### Steg 7C/7D — isolerad, tvåfasig deployment av Logic App
 
-Den isolerade deploymenten använder endast `infra/modules/logic-app-notify.bicep`
-med `infra/logic-app-notify.bicepparam` och skapar exakt:
+Deploymenten är uppdelad i två separata moduler/filer eftersom Key Vault-rollen
+scopas till det enskilda sekretet, som ännu inte finns.
+
+**Fas A** – `infra/modules/logic-app-notify.bicep` med
+`infra/logic-app-notify.bicepparam` skapar exakt:
 
 1. `logic-skadevi-bokningsnotis` (`state: Disabled`, system-assigned identity)
 2. `Storage Table Data Contributor` på tabellnivån `bookingrequests`
-3. `Key Vault Secrets User` på `kv-skadevi-prod`
 
-Ingen App Service, lagringskonto, Key Vault-konfiguration eller DNS ingår i
-deploymenten; befintliga resurser refereras endast som `existing`.
+**Fas B** – `infra/modules/keyvault-secret-role.bicep` med
+`infra/keyvault-secret-role.bicepparam`, först när sekretet `resend-api-key`
+har skapats manuellt, skapar exakt:
+
+3. `Key Vault Secrets User` på resursen
+   `.../vaults/kv-skadevi-prod/secrets/resend-api-key`
+
+Fas B skapar ingen Logic App och ingen tabellroll; den refererar den befintliga
+Logic Appens managed identity och det befintliga sekretet. Ingen App Service,
+lagringskonto, Key Vault-konfiguration eller DNS ingår i någon av faserna.
+Befintliga resurser refereras endast som `existing`, och inga befintliga
+RBAC-tilldelningar ändras.
 
 Kör alltid validate och what-if före en godkänd deployment:
 
 ```powershell
+# Fas A
 az deployment group validate -g rg-skadevi-prod `
   --template-file infra/modules/logic-app-notify.bicep `
   --parameters infra/logic-app-notify.bicepparam
-
 az deployment group what-if -g rg-skadevi-prod `
   --template-file infra/modules/logic-app-notify.bicep `
   --parameters infra/logic-app-notify.bicepparam
+
+# Fas B (endast efter att resend-api-key skapats manuellt)
+az deployment group validate -g rg-skadevi-prod `
+  --template-file infra/modules/keyvault-secret-role.bicep `
+  --parameters infra/keyvault-secret-role.bicepparam
+az deployment group what-if -g rg-skadevi-prod `
+  --template-file infra/modules/keyvault-secret-role.bicep `
+  --parameters infra/keyvault-secret-role.bicepparam
 ```
 
-What-if ska visa **3 att skapa** och övriga befintliga resurser som `Ignore`.
-Om något befintligt visas som `Modify` eller `Delete` ska deploymenten avbrytas.
+What-if ska visa **2 att skapa i fas A** och **1 att skapa i fas B**; övriga
+befintliga resurser som `Ignore`. Om något befintligt visas som `Modify` eller
+`Delete` ska deploymenten avbrytas.
 
-**RBAC-scope:** Azure RBAC kan inte begränsa en Key Vault-roll till ett enskilt
-sekretessnamn. Minsta möjliga RBAC-scope är valvet; även Key Vault access
-policies gäller på valvnivå. Därför används `Key Vault Secrets User` (endast
-`secrets/getSecret` + metadata) på `kv-skadevi-prod`. Flödet refererar bara
-`resend-api-key`, men identiteten kan tekniskt läsa valvets övriga hemligheter.
-Det är en känd kvarstående risk som accepteras tills ett separat Key Vault för
-Resend eventuellt införs.
+**RBAC-scope:** Azure RBAC stöder rolltilldelning på enskild hemlighet enligt
+[Key Vault RBAC-guiden](https://learn.microsoft.com/en-us/azure/key-vault/general/rbac-guide)
+(secret scope role assignment). Här används `Key Vault Secrets User` på
+`.../secrets/resend-api-key`, vilket ger läsbehörighet till just den hemligheten
+och inte till `airbnb-ical-url` eller valvets övriga hemligheter. Logic Appens
+identitet har ingen annan Key Vault-roll, så ingen bredare åtkomst ärvs.
+Sekretesscope rekommenderas generellt bara i undantagsfall; här är det motiverat
+av principen om minsta behörighet. Microsofts exempel förutsätter att sekretet
+redan finns, och rolltilldelningen är en extension-resurs på sekretesscopet.
+Fas B körs därför först efter att sekretet skapats manuellt; vad-if kan visserligen
+visa den planerade rolltilldelningen även innan sekretet finns, men det är inte
+ett bevis på att deploymenten är giltig.
+
+
 
 ### GDPR — Resends personuppgiftsbehandling (kräver godkännande före aktivering)
 
