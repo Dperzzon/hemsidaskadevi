@@ -197,29 +197,87 @@ test('bekräftelsen anger kontaktadressen skadevigard@gmail.com', async ({ page 
   await expect(contact.locator('a')).toHaveAttribute('href', 'mailto:skadevigard@gmail.com');
 });
 
-test('tillval uppdaterar prisöversikten och lakan-räknaren', async ({ page }) => {
+test('tillval uppdaterar totalpriset omedelbart och lakan-räknaren', async ({ page }) => {
   await goto(page);
   await clickDay(page, '2026-11-16');
   await clickDay(page, '2026-11-19');
   await page.locator('#field-guests').selectOption('4');
-  await expect(page.locator('#price-total-row')).toBeHidden();
+  // 3 vardagsnätter (må–ons): 3 × 7 000 = 21 000 kr.
+  await expect(page.locator('#price-list')).toContainText('Boende (3 nätter)');
+  await expect(page.locator('#price-list')).toContainText('21 000 kr');
   await expect(page.locator('#price-list')).toContainText('Inga tillval valda');
+  await expect(page.locator('#price-total')).toContainText('21 000 kr');
   await page.locator('#addon-slutstad').check();
-  await expect(page.locator('#price-total-row')).toBeVisible();
-  await expect(page.locator('#price-total')).toContainText('2 500 kr');
+  await expect(page.locator('#price-total')).toContainText('23 500 kr');
   await page.locator('#addon-lakan').check();
   await expect(page.locator('#linen-count')).toBeEnabled();
   await expect(page.locator('#linen-count')).toHaveValue('4');
-  await expect(page.locator('#price-total')).toContainText('3 300 kr');
+  await expect(page.locator('#price-total')).toContainText('24 300 kr');
   await page.locator('#linen-count').fill('2');
-  await expect(page.locator('#price-total')).toContainText('2 900 kr');
+  await expect(page.locator('#price-total')).toContainText('23 900 kr');
   await page.locator('#addon-ved').check();
-  await expect(page.locator('#price-total')).toContainText('3 250 kr');
+  await expect(page.locator('#price-total')).toContainText('24 250 kr');
   await page.locator('#addon-tidig-incheckning').check();
-  await expect(page.locator('#price-total')).toContainText('3 750 kr');
+  await expect(page.locator('#price-total')).toContainText('24 750 kr');
   await page.locator('#addon-sen-utcheckning').check();
-  await expect(page.locator('#price-total')).toContainText('4 250 kr');
-  await expect(page.locator('.booking-price-note')).toContainText('Boendepris tillkommer');
+  await expect(page.locator('#price-total')).toContainText('25 250 kr');
+  await expect(page.locator('#price-list')).toContainText('Summa tillval');
+  await expect(page.locator('#price-total-row')).toContainText('TOTALPRIS FÖR HELA VISTELSEN');
+  await expect(page.locator('.booking-price-note')).toContainText('beräknad offert');
+  await expect(page.locator('.booking-price-note')).toContainText('inte en bekräftad bokning');
+});
+
+test('totalpriset uppdateras när datum ändras (helgpris 10 000 kr)', async ({ page }) => {
+  await goto(page);
+  await clickDay(page, '2026-12-04'); // fredag
+  await clickDay(page, '2026-12-06'); // avresa söndag → 2 nätter: fre + lör
+  await expect(page.locator('#price-list')).toContainText('Boende (2 nätter)');
+  await expect(page.locator('#price-list')).toContainText('20 000 kr');
+  await expect(page.locator('#price-total')).toContainText('20 000 kr');
+  // Ändra datum: längre vistelse → nytt totalpris direkt.
+  await page.locator('#booking-change-dates').click();
+  await clickDay(page, '2026-12-04');
+  await clickDay(page, '2026-12-11'); // 7 nätter fre–fre: veckorabatt 30 %
+  await expect(page.locator('#discount-note')).toBeVisible();
+  await expect(page.locator('#discount-note')).toContainText('Veckorabatt 30 %');
+  await expect(page.locator('#price-list')).toContainText('Veckorabatt 30 %');
+  // Boende: fre 20 000 + 4 vardagsnätter 28 000 + lör 20 000 + fre 20 000 = 88 000.
+  // Boende: fre 20 000 + lör 20 000 + 5 vardagsnätter 35 000 = 55 000 kr.
+  await expect(page.locator('#price-list').first()).toContainText('55 000 kr');
+  await expect(page.locator('#price-list').first()).toContainText('Boendepris efter rabatt');
+  await expect(page.locator('#price-list').first()).toContainText('− 16 500 kr');
+  await expect(page.locator('#price-total')).toContainText('38 500 kr');
+  await expect(page.locator('#price-total-row')).toContainText('TOTALPRIS FÖR HELA VISTELSEN');
+});
+
+test('antal gäster uppdaterar lakan-priset i totalprisofferten', async ({ page }) => {
+  await goto(page);
+  await clickDay(page, '2026-11-16');
+  await clickDay(page, '2026-11-19');
+  await page.locator('#field-guests').selectOption('2');
+  await page.locator('#addon-lakan').check();
+  // 2 personer × 200 kr + 21 000 kr boende.
+  await expect(page.locator('#price-total')).toContainText('21 400 kr');
+  await page.locator('#field-guests').selectOption('5');
+  await expect(page.locator('#price-total')).toContainText('22 000 kr');
+  // 0 personer är tillåtet (minst 0, högst antal gäster).
+  await page.locator('#linen-count').fill('0');
+  await expect(page.locator('#price-total')).toContainText('21 000 kr');
+});
+
+test('tjänster för tidig incheckning och sen utcheckning visar tiderna och bekräftelsekravet', async ({ page }) => {
+  await goto(page);
+  await clickDay(page, '2026-11-16');
+  await clickDay(page, '2026-11-19');
+  await expect(page.locator('label[for="addon-tidig-incheckning"]')).toContainText('Tidig incheckning — 500 kr');
+  const tidig = page.locator('.booking-addon', { has: page.locator('#addon-tidig-incheckning') });
+  await expect(tidig).toContainText('Ordinarie incheckning är kl. 14.00');
+  await expect(tidig).toContainText('checka in redan kl. 09.00');
+  await expect(tidig).toContainText('bekräftas av Skadevi Herrgård');
+  const sen = page.locator('.booking-addon', { has: page.locator('#addon-sen-utcheckning') });
+  await expect(sen).toContainText('Ordinarie utcheckning är kl. 11.00');
+  await expect(sen).toContainText('stanna till kl. 16.00');
+  await expect(sen).toContainText('bekräftas av Skadevi Herrgård');
 });
 
 test('skick är avstängt när bokningsreglerna inte är publicerade', async ({ page }) => {
