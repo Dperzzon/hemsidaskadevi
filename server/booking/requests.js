@@ -23,7 +23,7 @@ const crypto = require('node:crypto');
 const { handleAvailability } = require('../calendar/availability');
 const { loadRules } = require('./rules');
 const { createStore } = require('./store');
-const { bestDiscount } = require('./pricing');
+const { quote, PRICE_VERSION } = require('./pricing');
 const { MAIL } = require('./mail');
 
 const MAX_GUESTS = 24;
@@ -118,8 +118,8 @@ function validatePayload(body, now = new Date()) {
 
   const addons = body.addons && typeof body.addons === 'object' && !Array.isArray(body.addons) ? body.addons : {};
   const linenCount = addons.lakan ? Number(addons.linenCount) : 0;
-  if (!Number.isInteger(linenCount) || linenCount < 1 || linenCount > 40) {
-    errors.linenCount = 'Ange hur många personer som behöver lakan och handdukar (1–40).';
+  if (addons.lakan && (!Number.isInteger(linenCount) || linenCount < 0 || linenCount > guests)) {
+    errors.linenCount = 'Ange hur många personer som behöver lakan och handdukar (0 till antal gäster).';
   }
 
   if (!body.consentRules) errors.consentRules = 'Bokningsreglerna måste godkännas.';
@@ -127,7 +127,21 @@ function validatePayload(body, now = new Date()) {
   if (Object.keys(errors).length) return { errors };
 
   const nights = nightsBetween(arrival, departure);
-  const discount = bestDiscount(nights); // rabatt på boendepriset (besluten logik)
+
+  // AUKTORITATIV PRISBERÄKNING PÅ SERVERN: belopp från klienten (t.ex.
+  // body.totalAddons) ignoreras alltid — servern räknar om hela offerten
+  // utifrån datum, gäster och valda tillval.
+  const pricing = quote({
+    arrival, departure, guests,
+    addons: {
+      slutstad: addons.slutstad === true,
+      lakan: addons.lakan === true,
+      linenCount,
+      ved: addons.ved === true,
+      tidigIncheckning: addons.tidigIncheckning === true,
+      senUtcheckning: addons.senUtcheckning === true
+    }
+  });
 
   return {
     record: {
@@ -149,10 +163,21 @@ function validatePayload(body, now = new Date()) {
         tidigIncheckning: addons.tidigIncheckning === true,
         senUtcheckning: addons.senUtcheckning === true
       },
-      totalAddons: Number(body.totalAddons) || 0,
-      // Rabatten lagras som information (gäller boendepriset som bekräftas
-      // i offerten) — ingen total prisberäkning sker på serversidan.
-      discount: discount ? { id: discount.id, label: discount.label, percent: discount.percent } : null,
+      // Serverberäknad offert — sparad i fullhet så att lagringsposten är
+      // verifierbar (pris per natt, rabatt, tillval, total, regelversion).
+      lodgingBase: pricing.lodgingBase,
+      peakNights: pricing.peakNights,
+      peakBase: pricing.peakBase,
+      nightlyBreakdown: pricing.nightlyBreakdown,
+      discount: pricing.discount
+        ? { id: pricing.discount.id, label: pricing.discount.label, percent: pricing.discount.percent, amount: pricing.discountAmount }
+        : null,
+      discountAmount: pricing.discountAmount,
+      lodgingAfterDiscount: pricing.lodgingAfterDiscount,
+      addonLines: pricing.addonLines,
+      totalAddons: pricing.addonsTotal,
+      total: pricing.total,
+      priceVersion: PRICE_VERSION,
       rulesVersion: typeof body.rulesVersion === 'string' ? body.rulesVersion.slice(0, 64) : '',
       consentContact: body.consentContact === true
     }
@@ -206,12 +231,15 @@ function escapeHtml(value) {
 // utkorgspartitionen, se infra/logicapp/). Varje mejl märker tydligt att
 // förfrågan inte är en bekräftad bokning.
 function buildNotifications(record) {
-  const addonLines = [];
-  if (record.addons.slutstad) addonLines.push('Slutstädning (exklusive kök): 2 500 kr');
-  if (record.addons.lakan) addonLines.push(`Lakan och handdukar: ${record.addons.linenCount} pers × 200 kr`);
-  if (record.addons.ved) addonLines.push('Ved: 350 kr');
-  if (record.addons.tidigIncheckning) addonLines.push('Tidig incheckning (önskemål): 500 kr');
-  if (record.addons.senUtcheckning) addonLines.push('Sen utcheckning (önskemål): 500 kr');
+  const addonLines = record.addonLines ?? [];
+  const priceLines = [
+    `Boendepris före rabatt: ${record.lodgingBase} kr`,
+    record.discount ? `Rabatt (${record.discount.label} ${record.discount.percent} %): − ${record.discountAmount} kr` : null,
+    `Boendepris efter rabatt: ${record.lodgingAfterDiscount} kr`,
+    `Summa tillval: ${record.totalAddons} kr`,
+    `TOTALPRIS FÖR HELA VISTELSEN: ${record.total} kr`,
+    `Prisreglernas version: ${record.priceVersion}`
+  ].filter(Boolean);
   const summary = [
     `Referens: ${record.reference}`,
     `Status: ${record.status}`,
@@ -222,10 +250,10 @@ function buildNotifications(record) {
     `Telefon: ${record.phone}`,
     record.company ? `Företag: ${record.company}` : null,
     record.addons.lakan ? `Lakan/handdukar till: ${record.addons.linenCount} personer` : null,
+    'Prisöversikt (serverberäknad):',
+    ...priceLines,
     'Tillval:',
-    ...(addonLines.length ? addonLines : ['- Inga']),
-    `Summa tillval: ${record.totalAddons} kr`,
-    record.discount ? `Rabatt (dras av från boendepriset i offerten): ${record.discount.label} ${record.discount.percent} %` : null,
+    ...(addonLines.length ? addonLines.map((line) => `${line.label}: ${line.amount} kr`) : ['- Inga']),
     `Bokningsregler godkända (version ${record.rulesVersion})`,
     record.overlaps?.length ? `VARNING — ÖVERLAPP med annan väntande förfrågan: ${record.overlaps.join(', ')}. Avgör själv vilken som ska godkännas. Ingen av dem är bekräftad.` : null,
     record.message ? `Önskemål: ${record.message}` : null
@@ -240,10 +268,10 @@ function buildNotifications(record) {
     `Telefon: ${escapeHtml(record.phone)}`,
     record.company ? `Företag: ${escapeHtml(record.company)}` : null,
     record.addons.lakan ? `Lakan/handdukar till: ${record.addons.linenCount} personer` : null,
+    'Prisöversikt (serverberäknad):',
+    ...priceLines.map((row) => escapeHtml(row)),
     'Tillval:',
-    ...(addonLines.length ? addonLines.map(escapeHtml) : ['- Inga']),
-    `Summa tillval: ${record.totalAddons} kr`,
-    record.discount ? `Rabatt (dras av från boendepriset i offerten): ${escapeHtml(record.discount.label)} ${record.discount.percent} %` : null,
+    ...(addonLines.length ? addonLines.map((line) => escapeHtml(`${line.label}: ${line.amount} kr`)) : ['- Inga']),
     `Bokningsregler godkända (version ${escapeHtml(record.rulesVersion)})`,
     record.overlaps?.length ? `VARNING — ÖVERLAPP med annan väntande förfrågan: ${record.overlaps.map(escapeHtml).join(', ')}. Avgör själv vilken som ska godkännas. Ingen av dem är bekräftad.` : null,
     record.message ? `Önskemål: ${escapeHtml(record.message)}` : null
@@ -427,7 +455,13 @@ async function handleBookingRequest(request, context, options = {}) {
         nights: savedRecord.nights,
         arrival: savedRecord.arrival,
         departure: savedRecord.departure,
-        totalAddons: savedRecord.totalAddons
+        guests: savedRecord.guests,
+        lodgingBase: savedRecord.lodgingBase,
+        lodgingAfterDiscount: savedRecord.lodgingAfterDiscount,
+        discount: savedRecord.discount,
+        totalAddons: savedRecord.totalAddons,
+        total: savedRecord.total,
+        priceVersion: savedRecord.priceVersion
       }
     };
   } catch {

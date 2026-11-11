@@ -113,7 +113,7 @@
               <label for="addon-lakan">Hyra lakan och handdukar — 200 kr per person</label>
               <div class="booking-addon-count">
                 <label for="linen-count">Antal personer:</label>
-                <input type="number" id="linen-count" name="linenCount" min="1" max="40" disabled>
+                <input type="number" id="linen-count" name="linenCount" min="0" max="24" disabled>
               </div>
             </div>
             <div class="booking-addon">
@@ -123,21 +123,21 @@
             </div>
             <div class="booking-addon">
               <input type="checkbox" id="addon-tidig-incheckning" name="tidigIncheckning">
-              <label for="addon-tidig-incheckning">Tidig incheckning — 500 kr</label>
-              <p class="booking-addon-note">Önskemål som behöver bekräftas av Skadevi Herrgård.</p>
+                <label for="addon-tidig-incheckning">Tidig incheckning — 500 kr</label>
+                <p class="booking-addon-note">Ordinarie incheckning är kl. 14.00. Med tidig incheckning kan ni checka in redan kl. 09.00. Önskemål som behöver bekräftas av Skadevi Herrgård — bekräftas inte enbart genom betalning eller inskickad bokningsförfrågan.</p>
             </div>
             <div class="booking-addon">
               <input type="checkbox" id="addon-sen-utcheckning" name="senUtcheckning">
-              <label for="addon-sen-utcheckning">Sen utcheckning — 500 kr</label>
-              <p class="booking-addon-note">Önskemål som behöver bekräftas av Skadevi Herrgård.</p>
+                <label for="addon-sen-utcheckning">Sen utcheckning — 500 kr</label>
+                <p class="booking-addon-note">Ordinarie utcheckning är kl. 11.00. Med sen utcheckning kan ni stanna till kl. 16.00. Önskemål som behöver bekräftas av Skadevi Herrgård — bekräftas inte enbart genom betalning eller inskickad bokningsförfrågan.</p>
             </div>
           </fieldset>
           <div class="booking-prices" aria-live="polite">
             <h3>Prisöversikt</h3>
             <ul id="price-list"></ul>
-            <div class="price-line price-line-total" id="price-total-row" hidden><span>Summa tillval</span><span id="price-total">0 kr</span></div>
+            <div class="price-line price-line-total" id="price-total-row" hidden><span>TOTALPRIS FÖR HELA VISTELSEN</span><span id="price-total">0 kr</span></div>
             <p class="booking-discount-note" id="discount-note" hidden></p>
-            <p class="booking-price-note">Boendepris tillkommer och bekräftas i samband med bokningsförfrågan. Er vistelse är inte bokad förrän vi har bekräftat den.</p>
+            <p class="booking-price-note">Priset är en beräknad offert för den valda perioden. En bokningsförfrågan är inte en bekräftad bokning — ni får besked från oss om tillgänglighet och pris innan bokningen blir giltig.</p>
           </div>
           <div class="booking-field booking-consent">
             <input type="checkbox" id="consent-rules" name="consentRules" required>
