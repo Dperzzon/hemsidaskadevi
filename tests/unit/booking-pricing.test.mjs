@@ -166,11 +166,11 @@ test('ofullständig vistelse visar aldrig missvisande totalpris', () => {
 });
 
 test('klienten och servern använder samma prisreglerversion', () => {
-  assert.equal(pricing.PRICE_VERSION, '2026-11-11.3');
+  assert.equal(pricing.PRICE_VERSION, '2026-11-11.4');
   assert.ok(pricing.PRICE_CONFIG.discounts.length >= 2);
 });
 
-test('påsk: onsdagen före skärtorsdag–annandag påsk (2026–2028)', () => {
+test('påsk: skärtorsdagen–annandag påsk (2026–2028)', () => {
   assert.equal(pricing.nightRate('2026-04-01').type, 'weekday');
   assert.equal(pricing.nightRate('2026-04-02').type, 'peak');
   assert.equal(pricing.nightRate('2026-04-06').type, 'peak');
