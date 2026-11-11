@@ -1,25 +1,38 @@
-// Prislogik för bokningsflödet.
+// Prislogik för bokningsflödet (klientsidan).
 //
-// ENDAST verifierade priser används (oktober 2026, uppgivna av Skadevi):
+// Endast verifierade tillvalspriser används (oktober 2026, uppgivna av Skadevi):
 //   Slutstädning (exklusive kök) 2 500 kr, lakan/handdukar 200 kr per person,
 //   ved 350 kr, tidig incheckning 500 kr, sen utcheckning 500 kr.
-// Grundpriset för boendet beror på vistelsetyp (semester/företag/event enligt
-// prissidan) och kan inte beräknas säkert av formuläret — därför visas aldrig
-// något totalpris för boendet, endast summan av tillvalen.
+// Nattpriser, rabatter och högtidsperioder läses från shared/pricing-config.json
+// — samma konfigurationskälla som serverns auktoritativa beräkning
+// (server/booking/pricing.js). Klientens totalpris är en beräknad offert;
+// servern räknar alltid om priset vid bokningsförfrågan.
+//
+// Prioritetsordning per natt: godkänt högtidspris (12 000 kr) > helgpris
+// (fredag/lördag 10 000 kr) > vardags-/söndagspris (7 000 kr). Högtidspriset
+// ERSÄTTER ordinarie nattpris och gäller endast godkända perioder — förslag
+// påverkar inte priset. Avresedagen är inte en debiterad natt.
 
+import config from '../../../shared/pricing-config.json' with { type: 'json' };
+import { eachNight } from './dates.js';
+
+export const PRICE_CONFIG = config;
+export const PRICE_VERSION = config.version;
+
+// Tillval (priser från den gemensamma konfigurationen).
 export const ADDONS = [
   {
     id: 'slutstad',
     label: 'Slutstädning (exklusive kök)',
-    price: 2500,
+    price: config.addons.slutstad,
     unit: 'engångspris',
-    note: 'Städningen omfattar inte köket.',
+    note: 'Ett engångspris per vistelse. Köket ingår inte i städningen.',
     request: false
   },
   {
     id: 'lakan',
     label: 'Hyra lakan och handdukar',
-    price: 200,
+    price: config.addons.lakan,
     unit: 'per person',
     note: 'Ange hur många personer som behöver lakan och handdukar.',
     request: false,
@@ -28,7 +41,7 @@ export const ADDONS = [
   {
     id: 'ved',
     label: 'Köpa ved',
-    price: 350,
+    price: config.addons.ved,
     unit: 'engångspris',
     note: 'Ett engångspris per beställning.',
     request: false
@@ -36,32 +49,51 @@ export const ADDONS = [
   {
     id: 'tidigIncheckning',
     label: 'Tidig incheckning',
-    price: 500,
+    price: config.addons.tidigIncheckning,
     unit: 'engångspris',
-    note: 'Önskemål som behöver bekräftas av Skadevi Herrgård.',
+    note: 'Ordinarie incheckning är kl. 14.00. Med tidig incheckning kan ni checka in redan kl. 09.00. Önskemål som behöver bekräftas av Skadevi Herrgård — bekräftas inte enbart genom betalning eller inskickad bokningsförfrågan.',
     request: true
   },
   {
     id: 'senUtcheckning',
     label: 'Sen utcheckning',
-    price: 500,
+    price: config.addons.senUtcheckning,
     unit: 'engångspris',
-    note: 'Önskemål som behöver bekräftas av Skadevi Herrgård.',
+    note: 'Ordinarie utcheckning är kl. 11.00. Med sen utcheckning kan ni stanna till kl. 16.00. Önskemål som behöver bekräftas av Skadevi Herrgård — bekräftas inte enbart genom betalning eller inskickad bokningsförfrågan.',
     request: true
   }
 ];
 
-// Rabatter (beslutade av Skadevi): veckorabatt 30 % för vistelser på 7
-// nätter eller mer, månadsrabatt 69 % för 28 nätter eller mer. Månadsrabatten
-// ersätter veckorabatten när båda uppfylls. Rabatterna gäller boendepriset —
-// som ännu inte kan beräknas säkert i formuläret (vistelsetyp avgör grundpriset)
-// — och presenteras därför som rabattinfo, aldrig som falska totalsummor.
-export const DISCOUNTS = [
-  { id: 'veckorabatt', label: 'Veckorabatt', percent: 30, minNights: 7 },
-  { id: 'manadsrabatt', label: 'Månadsrabatt', percent: 69, minNights: 28 }
-];
+export const DISCOUNTS = config.discounts;
 
-// Bästa (största) rabatt som gäller för antalet nätter, eller null.
+export const NIGHT_RATES = config.nightRates;
+
+// 0 = söndag … 6 = lördag (nattens startdatum avgör priset).
+export function weekdayOf(dateKey) {
+  const timestamp = Date.parse(`${dateKey}T12:00:00Z`);
+  return new Date(timestamp).getUTCDay();
+}
+
+export function peakPeriodFor(dateKey) {
+  for (const period of config.peakPeriods) {
+    if (!period.approved) continue;
+    if (dateKey >= period.start && dateKey <= period.end) return period;
+  }
+  return null;
+}
+
+// Priset för en enskild natt enligt prioriteringsordningen ovan.
+export function nightRate(dateKey) {
+  const peak = peakPeriodFor(dateKey);
+  if (peak) return { rate: config.nightRates.peak, type: 'peak', periodId: peak.id, periodLabel: peak.label };
+  const weekday = weekdayOf(dateKey);
+  if (weekday === 5) return { rate: config.nightRates.friday, type: 'friday' };
+  if (weekday === 6) return { rate: config.nightRates.saturday, type: 'saturday' };
+  return { rate: config.nightRates.weekday, type: 'weekday' };
+}
+
+// Bästa (största) rabatt som gäller för antalet nätter, eller null. Rabatterna
+// ersätter varandra och staplas aldrig (28 nätter ger månadsrabatten 69 %).
 export function bestDiscount(nights) {
   let best = null;
   for (const discount of DISCOUNTS) {
@@ -72,29 +104,27 @@ export function bestDiscount(nights) {
   return best;
 }
 
-// Tillämpar en rabatt på ett grundbelopp (används när boendepris kan beräknas).
-export function applyDiscount(baseAmount, discount) {
-  if (!discount) return baseAmount;
-  return Math.round(baseAmount * (1 - discount.percent / 100));
+// Rabatten gäller den sammanlagda boendesumman (inklusive högtidsnätter) före
+// tillval. Om peakExemptFromDiscounts sätts till true i konfigurationen
+// undantas godkända högtidsnätter i stället — undantaget förberett men inte
+// aktiverat.
+function applyDiscountToLodging(lodgingBase, peakBase, discount) {
+  if (!discount) return { discountedBase: lodgingBase, discountAmount: 0 };
+  const exempt = Boolean(config.peakExemptFromDiscounts) && peakBase > 0;
+  const eligible = lodgingBase - (exempt ? peakBase : 0);
+  const discountedBase = Math.round(eligible * (1 - discount.percent / 100)) + (exempt ? peakBase : 0);
+  return { discountedBase, discountAmount: lodgingBase - discountedBase };
 }
 
-// Tekst för UI: rabatten gäller boendepriset som bekräftas i offerten.
-export function discountNote(nights) {
-  const discount = bestDiscount(nights);
-  if (!discount) return null;
-  return `${discount.label} ${discount.percent} % gäller för vistelser på ${discount.minNights} nätter eller fler och dras av från boendepriset i offerten.`;
-}
-
-export function formatSek(amount) {
-  return `${new Intl.NumberFormat('sv-SE').format(amount)} kr`;
-}
-
-// Beräknar prisraderna för valda tillval.
+// Tillvalsrader. Lakan/handdukar beräknas på antalet personer som faktiskt
+// behöver tjänsten (0 till antal gäster), övriga tillval per vistelse.
 export function addonLines(selection) {
   const lines = [];
   for (const addon of ADDONS) {
     if (!selection[addon.id]) continue;
-    const quantity = addon.perPerson ? Math.max(1, Number(selection.linenCount) || 1) : 1;
+    const quantity = addon.perPerson
+      ? Math.min(Math.max(0, Number(selection.linenCount) || 0), Math.max(0, Number(selection.guests) || 0))
+      : 1;
     lines.push({
       id: addon.id,
       label: addon.perPerson
@@ -110,4 +140,55 @@ export function addonLines(selection) {
 
 export function sumAddons(lines) {
   return lines.reduce((total, line) => total + line.amount, 0);
+}
+
+// Full offert för en vistelse (identisk med serverns quote()). Returnerar
+// { incomplete: true } om förutsättningarna saknas — inget missvisande
+// totalpris får visas.
+export function quote({ arrival, departure, addons = {}, guests = 0 }) {
+  if (!arrival || !departure) return { incomplete: true };
+  const nights = eachNight(arrival, departure).length;
+  if (nights < 1) return { incomplete: true };
+  const breakdown = eachNight(arrival, departure).map((date) => {
+    const { rate, type, periodId, periodLabel } = nightRate(date);
+    return { date, type, rate, periodId: periodId ?? null, periodLabel: periodLabel ?? null };
+  });
+  const lodgingBase = breakdown.reduce((sum, night) => sum + night.rate, 0);
+  const peakNights = breakdown.filter((night) => night.type === 'peak');
+  const peakBase = peakNights.reduce((sum, night) => sum + night.rate, 0);
+  const discount = bestDiscount(nights);
+  const { discountedBase, discountAmount } = applyDiscountToLodging(lodgingBase, peakBase, discount);
+  const discountInfo = discount && discountAmount > 0
+    ? { id: discount.id, label: discount.label, percent: discount.percent, amount: discountAmount }
+    : null;
+  const linenCount = Math.min(Math.max(0, Number(addons.linenCount) || 0), Math.max(0, Number(guests) || 0));
+  const addonResult = addonLines({ ...addons, linenCount, guests }).map((line) => ({
+    id: line.id, label: line.label, amount: line.amount, request: line.request
+  }));
+  const addonsTotal = addonResult.reduce((total, line) => total + line.amount, 0);
+  return {
+    nights,
+    nightlyBreakdown: breakdown,
+    lodgingBase,
+    peakNights: peakNights.length,
+    peakBase,
+    discount: discountInfo,
+    discountAmount,
+    lodgingAfterDiscount: discountedBase,
+    addonLines: addonResult,
+    addonsTotal,
+    total: discountedBase + addonsTotal,
+    priceVersion: PRICE_VERSION
+  };
+}
+
+export function formatSek(amount) {
+  return `${new Intl.NumberFormat('sv-SE').format(amount)} kr`;
+}
+
+// Tekst för UI: rabatten gäller boendepriset i offerten.
+export function discountNote(nights) {
+  const discount = bestDiscount(nights);
+  if (!discount) return null;
+  return `${discount.label} ${discount.percent} % gäller för vistelser på ${discount.minNights} nätter eller fler och dras av från boendepriset i offerten.`;
 }

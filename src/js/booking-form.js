@@ -1,4 +1,4 @@
-import { formatSek, ADDONS, addonLines, sumAddons, discountNote } from './booking/pricing.js';
+import { formatSek, ADDONS, addonLines, sumAddons, discountNote, quote, NIGHT_RATES } from './booking/pricing.js';
 
 // Bokningsflödet: formulär, tillval, prisöversikt, bokningsregler och inskick.
 // Formuläret görs synligt när kalendern skickar 'booking:dates'.
@@ -50,20 +50,63 @@ function selectedAddons() {
 }
 
 function updatePrices() {
-  const lines = addonLines(selectedAddons());
-  const total = sumAddons(lines);
-  els.priceList.innerHTML = lines.map((line) => `
-    <li class="price-line${line.request ? ' price-line-request' : ''}">
-      <span>${line.label}${line.request ? ' <em>(önskemål — bekräftas av Skadevi)</em>' : ''}</span>
-      <span>${formatSek(line.amount)}</span>
-    </li>`).join('') ||
-    '<li class="price-line price-line-empty"><span>Inga tillval valda</span><span>0 kr</span></li>';
-  els.priceTotal.textContent = formatSek(total);
-  els.priceTotalRow.hidden = lines.length === 0;
-  // Rabattinfo: gäller boendepriset som bekräftas i offerten — ingen
-  // falsk totalsumma visas.
-  const nights = Number(els.nights.value) || 0;
-  const note = discountNote(nights);
+  const selection = selectedAddons();
+  const guests = Number(els.guests.value) || 0;
+  // Full prisoffert: boende (nattpriser, högtidspriser, rabatter) + tillval.
+  // Servern räknar alltid om priset vid inskick — klientens siffra är en
+  // beräknad offert, inte det slutliga priset.
+  const q = quote({ arrival: els.arrival.value, departure: els.departure.value, addons: selection, guests });
+  if (q.incomplete) {
+    // Saknas datum kan inget missvisande totalpris visas.
+    els.priceList.innerHTML = '<li class="price-line price-line-empty"><span>Välj ankomst- och avresedatum för prisberäkning</span><span>–</span></li>';
+    els.priceTotalRow.hidden = true;
+    els.discountNote.hidden = true;
+    return;
+  }
+  const lines = [];
+  lines.push(`
+    <li class="price-line">
+      <span>Boende (${q.nights} ${q.nights === 1 ? 'natt' : 'nätter'})</span>
+      <span>${formatSek(q.lodgingBase)}</span>
+    </li>`);
+  if (q.peakNights > 0) {
+    lines.push(`
+      <li class="price-line price-line-sub">
+        <span>varav ${q.peakNights} ${q.peakNights === 1 ? 'natt' : 'nätter'} med högtidspris (${formatSek(NIGHT_RATES.peak)}/natt)</span>
+        <span>${formatSek(q.peakBase)}</span>
+      </li>`);
+  }
+  if (q.discount) {
+    lines.push(`
+      <li class="price-line price-line-discount">
+        <span>${q.discount.label} ${q.discount.percent} %</span>
+        <span>&minus; ${formatSek(q.discountAmount)}</span>
+      </li>
+      <li class="price-line price-line-sub">
+        <span>Boendepris efter rabatt</span>
+        <span>${formatSek(q.lodgingAfterDiscount)}</span>
+      </li>`);
+  }
+  const addonRows = addonLines({ ...selection, guests });
+  for (const line of addonRows) {
+    lines.push(`
+      <li class="price-line${line.request ? ' price-line-request' : ''}">
+        <span>${line.label}${line.request ? ' <em>(önskemål — bekräftas av Skadevi)</em>' : ''}</span>
+        <span>${formatSek(line.amount)}</span>
+      </li>`);
+  }
+  if (addonRows.length === 0) {
+    lines.push('<li class="price-line price-line-empty"><span>Inga tillval valda</span><span>0 kr</span></li>');
+  }
+  lines.push(`
+    <li class="price-line price-line-sub">
+      <span>Summa tillval</span>
+      <span>${formatSek(q.addonsTotal)}</span>
+    </li>`);
+  els.priceList.innerHTML = lines.join('');
+  els.priceTotal.textContent = formatSek(q.total);
+  els.priceTotalRow.hidden = false;
+  const note = discountNote(q.nights);
   els.discountNote.textContent = note ?? '';
   els.discountNote.hidden = !note;
 }
@@ -74,8 +117,9 @@ function syncLinenCount() {
     return;
   }
   els.linenCount.disabled = false;
-  if (!els.linenCount.value || Number(els.linenCount.value) < 1) {
-    els.linenCount.value = els.guests.value || '1';
+  const guests = Number(els.guests.value) || 0;
+  if (!els.linenCount.value || Number(els.linenCount.value) < 0 || Number(els.linenCount.value) > guests) {
+    els.linenCount.value = String(guests);
   }
   updatePrices();
 }
@@ -111,7 +155,8 @@ function validateForm() {
   check(els.guests, Number.isInteger(guests) && guests >= 1 && guests <= 24, 'Ange antal gäster (1–24).');
   if (els.lakan.checked) {
     const linen = Number(els.linenCount.value);
-    check(els.linenCount, Number.isInteger(linen) && linen >= 1 && linen <= 40, 'Ange hur många personer som behöver lakan och handdukar.');
+    check(els.linenCount, Number.isInteger(linen) && linen >= 0 && linen <= guests,
+      `Ange hur många personer som behöver lakan och handdukar (0–${guests}).`);
   } else {
     setError(els.linenCount, '');
   }
@@ -188,7 +233,8 @@ async function submitBooking(event) {
     company: els.company.value.trim(),
     message: els.message.value.trim(),
     addons: selectedAddons(),
-    totalAddons: sumAddons(addonLines(selectedAddons())),
+    // Info till servern — servern beräknar alltid om och ignorerar belopp.
+    totalAddons: sumAddons(addonLines({ ...selectedAddons(), guests: Number(els.guests.value) || 0 })),
     rulesVersion: els.rules?.version ?? '',
     consentRules: els.consentRules.checked,
     consentContact: els.consentContact.checked
