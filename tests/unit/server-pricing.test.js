@@ -32,54 +32,94 @@ test('varje veckodags nattpris: söndag–torsdag 7 000 kr, fredag och lördag 1
   }
 });
 
-test('högpris prioriteras före helgpris: fredag/lördag i godkänd högtidsperiod = 12 000 kr', () => {
-  // Konfigurationen saknar godkända perioder — utövar logiken med en tillfällig.
-  const period = { id: 'testperiod', label: 'Test', start: '2026-06-01', end: '2026-06-30', approved: true };
-  CONFIG.peakPeriods.push(period);
-  try {
-    assert.equal(nightRate('2026-06-19').rate, RATES.peak); // fredag
-    assert.equal(nightRate('2026-06-20').rate, RATES.peak); // lördag
-    assert.equal(nightRate('2026-06-16').rate, RATES.peak); // tisdag
-    assert.equal(nightRate('2026-06-19').type, 'peak');
-    assert.equal(nightRate('2026-05-15').rate, RATES.friday); // utanför perioden
-  } finally {
-    CONFIG.peakPeriods.pop();
+test('godkända högtidsperioder ger 12 000 kr oavsett veckodag', () => {
+  // Midsommar 2026 (godkänd): fredag och lördag ersätts av högtidspriset.
+  assert.equal(nightRate('2026-06-19').rate, RATES.peak); // fredag
+  assert.equal(nightRate('2026-06-20').rate, RATES.peak); // lördag
+  assert.equal(nightRate('2026-06-16').rate, RATES.weekday); // tisdag utanför perioden
+  assert.equal(nightRate('2026-06-18').rate, RATES.peak); // torsdag: periodens första natt
+  assert.equal(nightRate('2026-06-19').type, 'peak');
+  assert.equal(nightRate('2026-11-16').rate, RATES.weekday); // utanför alla perioder
+});
+
+test('varje högprisperiod: första och sista debiterade natt samt omgivande nätter', () => {
+  const periods = CONFIG.peakPeriods.filter((p) => p.approved);
+  assert.ok(periods.length > 0);
+  for (const period of periods) {
+    // start och end är INKLUSIVA nättnycklar.
+    assert.equal(nightRate(period.start).type, 'peak', `${period.id}: första natten ska ha högpris`);
+    assert.equal(nightRate(period.end).type, 'peak', `${period.id}: sista natten ska ha högpris`);
+    // Natten före och dagen efter perioden ska ha ordinarie pris.
+    const dayBefore = keyFromDayNumber(dayNumber(period.start) - 1);
+    const dayAfter = keyFromDayNumber(dayNumber(period.end) + 1);
+    const rateBefore = nightRate(dayBefore);
+    const rateAfter = nightRate(dayAfter);
+    assert.notEqual(rateBefore.type, 'peak', `${period.id}: natten ${dayBefore} ska inte ha högpris`);
+    assert.notEqual(rateAfter.type, 'peak', `${period.id}: natten ${dayAfter} ska inte ha högpris`);
   }
 });
 
-test('föreslagna men ännu inte godkända högprisperioder påverkar inte totalpriset', () => {
-  // Samtliga perioder i konfigurationen är förslag (approved: false).
-  assert.equal(CONFIG.peakPeriods.filter((p) => p.approved).length, 0);
-  // Midsommarhelgen 2026 (föreslagen) prisas därför ordinarie: fre/lör 10 000.
-  assert.equal(nightRate('2026-06-19').rate, RATES.friday);
-  assert.equal(nightRate('2026-06-20').rate, RATES.saturday);
-  const q = quote({ arrival: '2026-06-19', departure: '2026-06-21' });
-  assert.equal(q.lodgingBase, 20000);
+test('påsk 2026–2028 omfattar endast skärtorsdag–annandag påsk', () => {
+  // 2026: påskdagen 5 april; skärtorsdag 3/4, annandag 6/4.
+  assert.equal(nightRate('2026-04-02').type, 'weekday'); // dag före skärtorsdag
+  assert.equal(nightRate('2026-04-03').type, 'peak');
+  assert.equal(nightRate('2026-04-06').type, 'peak'); // annandag påsk
+  assert.equal(nightRate('2026-04-07').type, 'weekday'); // dag efter annandag
+  // 2027: påskdagen 28 mars; 26–29 mars.
+  assert.equal(nightRate('2027-03-25').type, 'weekday');
+  assert.equal(nightRate('2027-03-26').type, 'peak');
+  assert.equal(nightRate('2027-03-29').type, 'peak');
+  assert.equal(nightRate('2027-03-30').type, 'weekday');
+  // 2028: påskdagen 16 april; 14–17 april.
+  assert.equal(nightRate('2028-04-13').type, 'weekday');
+  assert.equal(nightRate('2028-04-14').type, 'peak');
+  assert.equal(nightRate('2028-04-17').type, 'peak');
+  assert.equal(nightRate('2028-04-18').type, 'weekday');
+});
+
+test('vistelse över nyår 2026–2027: samtliga nätter i godkänd jul-/nyårsperiod', () => {
+  const q = quote({ arrival: '2026-12-30', departure: '2027-01-02' });
+  assert.deepEqual(q.nightlyBreakdown.map((n) => n.rate), [RATES.peak, RATES.peak, RATES.peak]);
+  assert.equal(q.lodgingBase, 36000);
+  // Sista godkända natten är 2027-01-04; 2027-01-05 är ordinarie vardag.
+  assert.equal(nightRate('2027-01-04').type, 'peak');
+  assert.equal(nightRate('2027-01-05').rate, RATES.weekday);
+});
+
+test('högprisreglerna överlappar inte — varje natt får exakt ett pris', () => {
+  const periods = CONFIG.peakPeriods.filter((p) => p.approved);
+  for (let i = 0; i < periods.length; i++) {
+    for (let j = i + 1; j < periods.length; j++) {
+      const a = periods[i];
+      const b = periods[j];
+      assert.ok(a.end < b.start || b.end < a.start,
+        `${a.id} och ${b.id} överlappar`);
+    }
+  }
+  // nightRate returnerar alltid exakt ett pris per natt.
+  for (const period of periods) {
+    for (let day = dayNumber(period.start); day <= dayNumber(period.end); day++) {
+      const rate = nightRate(keyFromDayNumber(day));
+      assert.ok(Number.isFinite(rate.rate) && rate.rate > 0);
+    }
+  }
+});
+
+test('blandade vardags-, helg- och högtidsnätter i november 2026 (utanför perioderna)', () => {
+  const q = quote({ arrival: '2026-11-16', departure: '2026-11-23' }); // må–sö (7 nätter)
+  assert.deepEqual(q.nightlyBreakdown.map((n) => n.rate),
+    [RATES.weekday, RATES.weekday, RATES.weekday, RATES.weekday, RATES.friday, RATES.saturday, RATES.weekday]);
   assert.equal(q.peakNights, 0);
-});
-
-test('blandade vardags-, helg- och högtidsnätter med godkänd period', () => {
-  // Godkänd period som täcker vardag + helg.
-  const period = { id: 'test-blandad', label: 'Test', start: '2026-11-16', end: '2026-11-22', approved: true };
-  CONFIG.peakPeriods.push(period);
-  try {
-    const q = quote({ arrival: '2026-11-16', departure: '2026-11-23' }); // må–sö (7 nätter)
-    assert.equal(q.peakNights, 7);
-    assert.equal(q.lodgingBase, 7 * RATES.peak);
-    assert.deepEqual(q.discount, { id: 'veckorabatt', label: 'Veckorabatt', percent: 30, amount: Math.round(7 * RATES.peak * 0.3) });
-    assert.equal(q.lodgingAfterDiscount, Math.round(7 * RATES.peak * 0.7));
-  } finally {
-    CONFIG.peakPeriods.pop();
-  }
+  assert.deepEqual(q.discount, { id: 'veckorabatt', label: 'Veckorabatt', percent: 30, amount: Math.round(q.lodgingBase * 0.3) });
+  assert.equal(q.lodgingAfterDiscount, Math.round(q.lodgingBase * 0.7));
 });
 
 test('vistelser över nyår (årsskifte) räknas med avresedagen odebiterad', () => {
   assert.deepEqual(nightKeys('2026-12-30', '2027-01-02'), ['2026-12-30', '2026-12-31', '2027-01-01']);
   assert.equal(nightsBetween('2026-12-31', '2027-01-01'), 1);
-  // Fredag 1 januari 2027 → helgpris, nätterna 30–31 december 2026: ons/tors 7 000.
+  // Godkänd jul-/nyårsperiod: alla tre nätterna har högtidspris.
   const q = quote({ arrival: '2026-12-30', departure: '2027-01-02' });
-  assert.deepEqual(q.nightlyBreakdown.map((n) => n.rate), [RATES.weekday, RATES.weekday, RATES.friday]);
-  assert.equal(q.total, RATES.weekday * 2 + RATES.friday);
+  assert.equal(q.lodgingBase, 3 * RATES.peak);
 });
 
 test('skottår och sommartidsomställningar räknas kalenderdag-precist', () => {
@@ -191,24 +231,25 @@ test('peakExemptFromDiscounts-flaggan kan aktivera undantag utan ombyggnad', () 
   }
 });
 
-test('högprisperioder i konfigurationen är förslag tills de godkänts', () => {
-  for (const period of CONFIG.peakPeriods) {
-    assert.equal(period.approved, false, `${period.id} ska vara ombeslutat (approved: false)`);
+test('högprisperioderna är godkända och strukturellt korrekta', () => {
+  const periods = CONFIG.peakPeriods;
+  assert.ok(periods.length > 0);
+  for (const period of periods) {
+    assert.equal(period.approved, true, `${period.id} ska vara godkänd (approved: true)`);
     assert.ok(period.start && period.end && period.label, `${period.id} saknar datum/etikett`);
     assert.ok(period.end >= period.start, `${period.id} har omvänd ordning`);
     assert.ok(Number.isFinite(Number(period.year)));
   }
   // Periodelängden är rimlig (upp till 3 veckor för jul/mellandagarna).
-  for (const period of CONFIG.peakPeriods) {
+  for (const period of periods) {
     assert.ok(nightsBetween(period.start, period.end) + 1 <= 21, `${period.id} är orealistiskt lång`);
   }
 });
 
-test('högprisperioderna för 2026–2028 täcker förväntade högtider (förslag)', () => {
-  const periods = CONFIG.peakPeriods.filter((p) => p.approved === false);
+test('högprisperioderna för 2026–2028 täcker de godkända högtiderna', () => {
   for (const year of [2026, 2027, 2028]) {
-    const ids = periods.filter((p) => p.year === year).map((p) => p.id);
-    assert.ok(ids.some((id) => id.startsWith('pasklov')), `påsk ${year} saknas`);
+    const ids = CONFIG.peakPeriods.filter((p) => p.year === year).map((p) => p.id);
+    assert.ok(ids.some((id) => id.startsWith('pask-')), `påsk ${year} saknas`);
     assert.ok(ids.some((id) => id.startsWith('midsommar')), `midsommar ${year} saknas`);
     assert.ok(ids.some((id) => id.startsWith('jul-nyar')), `jul/nyår ${year} saknas`);
     assert.ok(ids.some((id) => id.startsWith('hostlov')), `höstlov ${year} saknas`);
@@ -216,4 +257,23 @@ test('högprisperioderna för 2026–2028 täcker förväntade högtider (försl
     assert.ok(ids.some((id) => id.startsWith('nationaldag')), `nationaldag ${year} saknas`);
     assert.ok(ids.some((id) => id.startsWith('valborg')), `valborg/första maj ${year} saknas`);
   }
+});
+
+test('räkneexempel: måndag till söndag = 6 nätter = 48 000 kr, ingen rabatt', () => {
+  // Mån 16 nov – avresa sön 22 nov 2026 (utanför högtidsperioder).
+  const q = quote({ arrival: '2026-11-16', departure: '2026-11-22' });
+  assert.equal(q.nights, 6);
+  assert.deepEqual(q.nightlyBreakdown.map((n) => n.rate),
+    [7000, 7000, 7000, 7000, 10000, 10000]);
+  assert.equal(q.lodgingBase, 48000);
+  assert.equal(q.discount, null);
+  assert.equal(q.total, 48000);
+});
+
+test('räkneexempel: måndag till måndag = 7 nätter = 55 000 kr före rabatt, 38 500 kr efter 30 %', () => {
+  const q = quote({ arrival: '2026-11-16', departure: '2026-11-23' });
+  assert.equal(q.nights, 7);
+  assert.equal(q.lodgingBase, 55000);
+  assert.equal(q.discountAmount, 16500);
+  assert.equal(q.lodgingAfterDiscount, 38500);
 });

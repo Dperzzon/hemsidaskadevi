@@ -90,11 +90,16 @@ test('högpris ersätter ordinarie pris i godkända perioder (prioritetsordninge
   }
 });
 
-test('föreslagna men ännu inte godkända högprisperioder påverkar inte totalpriset', () => {
-  assert.equal(pricing.PRICE_CONFIG.peakPeriods.every((p) => !p.approved), true);
-  const q = pricing.quote({ arrival: '2026-06-19', departure: '2026-06-21' }); // midsommar (förslag)
-  assert.equal(q.lodgingBase, 20000);
-  assert.equal(q.peakNights, 0);
+test('godkända högtidsperioder påverkar totalpriset', () => {
+  assert.equal(pricing.PRICE_CONFIG.peakPeriods.every((p) => p.approved), true);
+  // Midsommar 2026 (godkänd, torsdag–söndag): fre + lör = 2 × 12 000.
+  const q = pricing.quote({ arrival: '2026-06-19', departure: '2026-06-21' });
+  assert.equal(q.lodgingBase, 24000);
+  assert.equal(q.peakNights, 2);
+  // Utanför alla perioder: ordinarie helgpris.
+  const q2 = pricing.quote({ arrival: '2026-11-20', departure: '2026-11-22' });
+  assert.equal(q2.lodgingBase, 20000);
+  assert.equal(q2.peakNights, 0);
 });
 
 test('totalpris: vanlig helg — ankomst fredag, avresa söndag = 20 000 kr', () => {
@@ -140,10 +145,14 @@ test('rabatter dras endast på boendepriset', () => {
   assert.equal(q.total, 41400);
 });
 
-test('totalpris: vistelse över nyår', () => {
+test('totalpris: vistelse över nyår (godkänd jul-/nyårsperiod)', () => {
   const q = pricing.quote({ arrival: '2026-12-30', departure: '2027-01-02' });
-  assert.deepEqual(q.nightlyBreakdown.map((n) => n.rate), [7000, 7000, 10000]);
-  assert.equal(q.total, 24000);
+  assert.deepEqual(q.nightlyBreakdown.map((n) => n.rate), [12000, 12000, 12000]);
+  assert.equal(q.peakNights, 3);
+  assert.equal(q.total, 36000);
+  // Sista godkända natten 2027-01-04, därefter ordinarie vardagspris.
+  assert.equal(pricing.nightRate('2027-01-04').type, 'peak');
+  assert.equal(pricing.nightRate('2027-01-05').rate, 7000);
 });
 
 test('skottår och sommartidsomställningar ger korrekt nattantal', () => {
@@ -157,8 +166,21 @@ test('ofullständig vistelse visar aldrig missvisande totalpris', () => {
 });
 
 test('klienten och servern använder samma prisreglerversion', () => {
-  assert.equal(pricing.PRICE_VERSION, '2026-11-11.1');
+  assert.equal(pricing.PRICE_VERSION, '2026-11-11.2');
   assert.ok(pricing.PRICE_CONFIG.discounts.length >= 2);
+});
+
+test('påsk omfattar endast skärtorsdag–annandag påsk (2026–2028)', () => {
+  assert.equal(pricing.nightRate('2026-04-02').type, 'weekday');
+  assert.equal(pricing.nightRate('2026-04-03').type, 'peak');
+  assert.equal(pricing.nightRate('2026-04-06').type, 'peak');
+  assert.equal(pricing.nightRate('2026-04-07').type, 'weekday');
+  assert.equal(pricing.nightRate('2027-03-26').type, 'peak');
+  assert.equal(pricing.nightRate('2027-03-29').type, 'peak');
+  assert.equal(pricing.nightRate('2027-03-30').type, 'weekday');
+  assert.equal(pricing.nightRate('2028-04-14').type, 'peak');
+  assert.equal(pricing.nightRate('2028-04-17').type, 'peak');
+  assert.equal(pricing.nightRate('2028-04-18').type, 'weekday');
 });
 
 test('rabattinfo beskriver rabatten diskret', () => {
