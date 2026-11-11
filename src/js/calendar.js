@@ -126,8 +126,9 @@ function renderMonth(y, m) {
     if (cell.today) classes.push('cal-today');
     classes.push(...selectionClasses(cell.key));
     const selectable = !cell.past && (!cell.blocked || (state.selection.arrival && !state.selection.departure && cell.key > state.selection.arrival));
+    const selected = cell.key === state.selection.arrival || cell.key === state.selection.departure;
     const tabindex = selectable ? ' tabindex="0"' : '';
-    return `<span class="${classes.join(' ')}" data-date="${cell.key}" role="button"${tabindex} aria-pressed="false" aria-label="${cell.day} ${title}, ${dayStatus(cell)}">${cell.day}</span>`;
+    return `<span class="${classes.join(' ')}" data-date="${cell.key}" role="button"${tabindex} aria-pressed="${selected}" aria-label="${cell.day} ${title}, ${dayStatus(cell)}">${cell.day}</span>`;
   }).join('');
   return `
     <div class="cal-month">
@@ -145,28 +146,51 @@ function selectionNotice() {
   return { text: `${formatDay(arrival)} – ${formatDay(departure)} · ${nights} ${nights === 1 ? 'natt' : 'nätter'}. Fyll i bokningsförfrågan nedan.`, error: false };
 }
 
-function setSelection(arrival, departure) {
-  state.selection = { arrival, departure };
-  state.message = selectionNotice();
-}
-
-function openBookingForm() {
+function notifySelection() {
   const { arrival, departure } = state.selection;
-  document.dispatchEvent(new CustomEvent('booking:dates', {
+  document.dispatchEvent(new CustomEvent('booking:selection', {
     detail: { arrival, departure, nights: nightsBetween(arrival, departure) }
   }));
 }
 
+function setSelection(arrival, departure) {
+  state.selection = { arrival, departure };
+  state.message = selectionNotice();
+  notifySelection();
+}
+
+function invalidArrivalMessage(reason) {
+  return reason === 'past'
+    ? { text: 'Det datumet har redan varit. Välj ett datum framåt i tiden.', error: true }
+    : { text: 'Det datumet är bokat. Välj ett av de guldfärgade datumen.', error: true };
+}
+
 function handleDayClick(day) {
-  const { arrival } = state.selection;
+  const { arrival, departure } = state.selection;
   const blocked = state.blocked;
+  const today = stockholmTodayKey();
+
+  // En komplett period är alltid ett avslutat val: nästa klick på ett ledigt
+  // datum blir ny ankomst och det tidigare avresedatumet rensas. Därmed
+  // fungerar också uppmaningen "klicka på ett ledigt datum för att börja om".
+  if (arrival && departure) {
+    if (day === arrival) {
+      setSelection(null, null);
+      return;
+    }
+    const check = validateArrival(day, blocked, today);
+    if (!check.ok) {
+      state.message = invalidArrivalMessage(check.reason);
+      return;
+    }
+    setSelection(day, null);
+    return;
+  }
 
   if (!arrival) {
-    const check = validateArrival(day, blocked, stockholmTodayKey());
+    const check = validateArrival(day, blocked, today);
     if (!check.ok) {
-      state.message = check.reason === 'past'
-        ? { text: 'Det datumet har redan varit. Välj ett datum framåt i tiden.', error: true }
-        : { text: 'Det datumet är bokat. Välj ett av de guldfärgade datumen.', error: true };
+      state.message = invalidArrivalMessage(check.reason);
       return;
     }
     setSelection(day, null);
@@ -179,11 +203,9 @@ function handleDayClick(day) {
   }
 
   if (day < arrival) {
-    const check = validateArrival(day, blocked, stockholmTodayKey());
+    const check = validateArrival(day, blocked, today);
     if (!check.ok) {
-      state.message = check.reason === 'past'
-        ? { text: 'Det datumet har redan varit. Välj ett datum framåt i tiden.', error: true }
-        : { text: 'Det datumet är bokat. Välj ett av de guldfärgade datumen.', error: true };
+      state.message = invalidArrivalMessage(check.reason);
       return;
     }
     setSelection(day, null);
@@ -192,6 +214,9 @@ function handleDayClick(day) {
 
   const check = validateRange(arrival, day, blocked);
   if (!check.ok) {
+    // En ogiltig period får aldrig ligga kvar som vald. Nollställ valet men
+    // behåll feltexten så att nästa klick på ett ledigt datum börjar om.
+    setSelection(null, null);
     state.message = {
       text: `Perioden innehåller bokade nätter (först den ${formatDay(check.firstBlocked)}). Välj ett annat avresedatum, eller klicka på ett ledigt datum för att börja om.`,
       error: true
@@ -199,7 +224,6 @@ function handleDayClick(day) {
     return;
   }
   setSelection(arrival, day);
-  openBookingForm();
 }
 
 function render() {
