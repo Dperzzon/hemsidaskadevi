@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.49.2.45890",
-      "templateHash": "18324874171809736559"
+      "templateHash": "11484060297614236124"
     }
   },
   "parameters": {
@@ -773,7 +773,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.49.2.45890",
-              "templateHash": "16159920729250425664"
+              "templateHash": "14362222072196641622"
             }
           },
           "parameters": {
@@ -801,6 +801,27 @@
               "type": "string",
               "metadata": {
                 "description": "Namn på bokningslagringskontot (befintligt, deployat av storage-tables-modulen)."
+              }
+            },
+            "tableName": {
+              "type": "string",
+              "defaultValue": "bookingrequests",
+              "metadata": {
+                "description": "Namn på bokningstabellen som flödet läser/skriver. Produktion: bookingrequests. Test: bookingrequeststest."
+              }
+            },
+            "resendApiUrl": {
+              "type": "string",
+              "defaultValue": "https://api.resend.com/emails",
+              "metadata": {
+                "description": "Resend-API-slutpunkt. Produktion: https://api.resend.com/emails. Test kan peka på en mock-endpoint."
+              }
+            },
+            "assignTableRole": {
+              "type": "bool",
+              "defaultValue": true,
+              "metadata": {
+                "description": "Sätt till false i testwrappern när tabellrollen skapas separat mot en nyskapad testtabell."
               }
             },
             "bookingTableResourceId": {
@@ -892,10 +913,10 @@
                     "value": "[parameters('storageEndpoint')]"
                   },
                   "tableName": {
-                    "value": "bookingrequests"
+                    "value": "[parameters('tableName')]"
                   },
                   "resendApiUrl": {
-                    "value": "https://api.resend.com/emails"
+                    "value": "[parameters('resendApiUrl')]"
                   },
                   "mailFrom": {
                     "value": "[parameters('mailFrom')]"
@@ -913,9 +934,10 @@
               }
             },
             {
+              "condition": "[parameters('assignTableRole')]",
               "type": "Microsoft.Authorization/roleAssignments",
               "apiVersion": "2022-04-01",
-              "scope": "[resourceId('Microsoft.Storage/storageAccounts/tableServices/tables', parameters('storageAccountName'), 'default', 'bookingrequests')]",
+              "scope": "[resourceId('Microsoft.Storage/storageAccounts/tableServices/tables', parameters('storageAccountName'), 'default', parameters('tableName'))]",
               "name": "[guid(parameters('bookingTableResourceId'), 'logicapp-table-contributor')]",
               "properties": {
                 "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', parameters('tableDataContributorRoleId'))]",
@@ -939,6 +961,14 @@
             "state": {
               "type": "string",
               "value": "[reference(resourceId('Microsoft.Logic/workflows', parameters('workflowName')), '2019-05-01').state]"
+            },
+            "tableName": {
+              "type": "string",
+              "value": "[parameters('tableName')]"
+            },
+            "tableRoleAssigned": {
+              "type": "bool",
+              "value": "[parameters('assignTableRole')]"
             },
             "keyVaultSecretUri": {
               "type": "string",

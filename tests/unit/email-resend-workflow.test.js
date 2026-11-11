@@ -120,6 +120,20 @@ test('ETag-kontroll och statusmarkering: skickas-aldrig-två-gånger-garantin', 
   }
 });
 
+test('HTTP 429/500/401/403/409/timeout har täckning i flödet', () => {
+  const send = byName('Skicka_mejl_resend');
+  assert.equal(send.inputs.retryPolicy.type, 'exponential');
+  assert.ok(send.inputs.retryPolicy.count >= 4, '429/5xx/timeout ska återförsökas');
+  assert.equal(send.inputs.retryPolicy.interval, 'PT30S');
+  const conflict = byName('Resend_konflikt');
+  assert.deepEqual(conflict.runAfter.Skicka_mejl_resend, ['Failed', 'TimedOut']);
+  assert.ok(conflict.expression.includes('409'), '409 ska hanteras separat som manuell kontroll');
+  const failure = byName('Markera_som_misslyckad');
+  assert.ok(failure.inputs.body.status.includes("parameters('maxAttempts')"));
+  assert.ok(failure.inputs.body.status.includes('Kräver manuell kontroll'));
+  assert.ok(failure.inputs.body.status.includes('Misslyckad'));
+});
+
 test('osäker leveransstatus eller maxförsök i Skickar flaggas för manuell kontroll — aldrig automatiskt dubblettutskick', () => {
   const guard = byName('Osaker_dubbelutskick');
   assert.ok(guard, 'skydd mot dubblettutskick saknas');
@@ -291,9 +305,12 @@ test('Logic App-modulen: systemidentitet, Disabled-läge och tabellroll; KV-roll
   assert.equal(moduleJson.parameters.keyVaultSecretsUserRoleId, undefined, 'Key Vault-rollen får inte ligga i fas A');
   // Tilldelning på tabellnivå (scope sätts via resourceId till tabellen).
   const tableScoped = roleAssignments.find(
-    (r) => typeof r.scope === 'string' && r.scope.includes('tableServices') && r.scope.includes('bookingrequests')
+    (r) => typeof r.scope === 'string'
+      && r.scope.includes('tableServices/tables')
+      && r.scope.includes("parameters('tableName')")
   );
   assert.ok(tableScoped, 'tabellscope saknas');
+  assert.equal(moduleJson.parameters.tableName.defaultValue, 'bookingrequests');
   assert.ok(tableScoped.properties.roleDefinitionId.startsWith('[subscriptionResourceId'), 'rolldefinition ska refereras per tenant');
 
   const phaseB = JSON.parse(fs.readFileSync(path.join(__dirname, '../../infra/modules/keyvault-secret-role.json'), 'utf8'));

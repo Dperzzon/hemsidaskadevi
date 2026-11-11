@@ -25,7 +25,7 @@ Produktionsworkflowet pollar `bookingrequests`/`outbox` och använder produktion
 Testworkflowet ska ha:
 
 1. Egen Logic App, t.ex. `logic-skadevi-bokningsnotis-test`, skapad i Disabled-läge.
-2. Egen tabell, t.ex. `bookingrequests-test`, eller egen storage-account. Produktionstabellen får inte användas.
+2. Egen tabell, t.ex. `bookingrequeststest`, eller egen storage-account. Produktionstabellen får inte användas.
 3. Egen testnyckel i Key Vault, t.ex. `resend-api-key-test`, med `Key Vault Secrets User` endast på det sekretet. Produktionsnyckeln `resend-api-key` ska inte användas för negativa tester.
 4. `mailFrom`:
    - före domänverifiering: `onboarding@resend.dev` och mottagare = Resend-kontots ägarmejl (Resend tillåter endast kontots egen adress då),
@@ -169,3 +169,60 @@ Före domänverifiering gäller: `onboarding@resend.dev` får endast skicka till
 2. DNS-posterna för Resend måste finnas; offentlig DNS visar ännu Wix-namnservrar och saknar `resend._domainkey` samt `send` TXT/MX.
 3. Ett separat testworkflow med testtabell och testnyckel behöver förberedas.
 4. Produktionsworkflowet ska förbli Disabled till dess att ett isolerat test är godkänt.
+
+## Steg 7J — testmiljö som kod
+
+Testmiljön är förberedd men **inte deployad**:
+
+- `infra/test/logic-app-notify-test.bicep` + `.bicepparam`
+- `infra/test/keyvault-secret-role-test.bicepparam`
+- `scripts/test-outbox-seed.mjs`
+- `npm run seed:test-outbox` (dry-run som standard)
+
+Resurser som skapas vid en godkänd fas A-deployment:
+
+1. Testtabellen `bookingrequeststest` i befintligt lagringskonto.
+   Azure Table-namn får inte innehålla bindestreck, därför valdes
+   `bookingrequeststest` i stället för `bookingrequests-test`.
+2. Logic App `logic-skadevi-bokningsnotis-test` i `Disabled`-läge.
+3. `Storage Table Data Contributor` för test-Logic Appens managed identity på
+   **endast** `bookingrequeststest`.
+4. Valfri `Storage Table Data Contributor` för testoperatören på **endast**
+   `bookingrequeststest` (krävs för lokal seedning).
+
+Fas B (`infra/test/keyvault-secret-role-test.bicepparam`) skapar endast
+`Key Vault Secrets User` på `secrets/resend-api-key-test`. Testsekretet måste
+skapas manuellt först och får aldrig innehålla produktionsnyckeln.
+
+Testharnesket:
+
+```powershell
+# Visar planerade testposter, skriver ingenting
+npm run seed:test-outbox
+
+# Skriver två syntetiska outbox-poster till bookingrequeststest
+npm run seed:test-outbox -- --commit
+```
+
+Harnesket vägrar allt utom `bookingrequeststest`/`stskadevibokningprod`, skapar
+endast partition `outbox`, skickar inga mejl och kräver Storage Table Data
+Contributor på testtabellen. Testoperatörens objekt-ID läggs in som
+`testOperatorPrincipalId` vid deployment/what-if.
+
+För HTTP-fel och timeout används en mock-endpoint via `resendApiUrl`. Använd ett
+falskt testnyckelvärde i `resend-api-key-test` för mock-testerna så att ingen
+riktig nyckel exponeras. Riktig sändning testas först mot Resends testadresser
+efter domänverifiering.
+
+Kostnad: ingen ny storage-account och inget nytt Key Vault. Testtabellen är
+några KB, test-Logic Appen kostar inget när den är Disabled och enstaka
+testkörningar ligger långt under en krona. Uppskattad merkostnad är i praktiken
+**0–0,05 USD/månad**.
+
+What-if (förberett, ej deployat):
+
+- Fas A: **4 att skapa** (testtabell, testworkflow, test-MI:ns tabellroll,
+  valfri operatörsroll), **8 Ignore**, **0 Modify/Delete**.
+- Fas B: **1 att skapa** (testsekretets roll), **8 Ignore**, **0 Modify/Delete**.
+
+Produktionsresurserna visas endast som `Ignore` i testmiljöns what-if.

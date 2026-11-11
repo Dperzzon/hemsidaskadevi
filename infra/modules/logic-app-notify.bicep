@@ -36,6 +36,15 @@ param storageEndpoint string
 @description('Namn på bokningslagringskontot (befintligt, deployat av storage-tables-modulen).')
 param storageAccountName string
 
+@description('Namn på bokningstabellen som flödet läser/skriver. Produktion: bookingrequests. Test: bookingrequeststest.')
+param tableName string = 'bookingrequests'
+
+@description('Resend-API-slutpunkt. Produktion: https://api.resend.com/emails. Test kan peka på en mock-endpoint.')
+param resendApiUrl string = 'https://api.resend.com/emails'
+
+@description('Sätt till false i testwrappern när tabellrollen skapas separat mot en nyskapad testtabell.')
+param assignTableRole bool = true
+
 @description('Fullständigt resurs-ID till bokningstabellen (används för deterministiskt rolltilldelningsnamn).')
 param bookingTableResourceId string
 
@@ -91,7 +100,7 @@ resource bookingTableService 'Microsoft.Storage/storageAccounts/tableServices@20
 
 resource bookingsTable 'Microsoft.Storage/storageAccounts/tableServices/tables@2023-05-01' existing = {
   parent: bookingTableService
-  name: 'bookingrequests'
+  name: tableName
 }
 
 resource workflow 'Microsoft.Logic/workflows@2019-05-01' = {
@@ -109,10 +118,10 @@ resource workflow 'Microsoft.Logic/workflows@2019-05-01' = {
         value: storageEndpoint
       }
       tableName: {
-        value: 'bookingrequests'
+        value: tableName
       }
       resendApiUrl: {
-        value: 'https://api.resend.com/emails'
+        value: resendApiUrl
       }
       mailFrom: {
         value: mailFrom
@@ -133,8 +142,9 @@ resource workflow 'Microsoft.Logic/workflows@2019-05-01' = {
 // Lägsta möjliga behörighet: Storage Table Data Contributor endast på
 // bokningstabellen. Roll-GUID är tenantverifierad (se param-kommentar).
 // Tabellen deployas inte i denna modul (den ägs av storage-tables-modulen),
-// så scope sätts till tabellens resurs-ID.
-resource tableContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+// så scope sätts till tabellens resurs-ID. I testwrappern sätts
+// assignTableRole=false och rollen skapas i stället mot den nyskapade testtabellen.
+resource tableContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (assignTableRole) {
   name: guid(bookingTableResourceId, 'logicapp-table-contributor')
   scope: bookingsTable
   properties: {
@@ -151,4 +161,6 @@ resource tableContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' =
 output workflowId string = workflow.id
 output principalId string = workflow.identity.principalId
 output state string = workflow.properties.state
+output tableName string = tableName
+output tableRoleAssigned bool = assignTableRole
 output keyVaultSecretUri string = '${keyVault.properties.vaultUri}secrets/${keyVaultSecretName}'
