@@ -55,8 +55,8 @@ param hostRecipient string = 'skadevigard@gmail.com'
 @description('Rolldefinitions-ID för Storage Table Data Contributor i SKADEVIS tenant (verifierat 2026-11-11 — avviker från välkänd global GUID).')
 param tableDataContributorRoleId string = '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3'
 
-@description('Rolldefinitions-ID för Key Vault Secrets User. VERIFIERA i tenant med: az role definition list --query "[?roleName==\'Key Vault Secrets User\'].name" innan deployment (tenantens GUID kan avvika).')
-param keyVaultSecretsUserRoleId string = '463345b1-4a02-4e88-8387-b6bedff38f6b'
+@description('Rolldefinitions-ID för Key Vault Secrets User i SKADEVIS tenant (verifierat 2026-11-11 via az role definition list — dataActions: secrets/getSecret + readMetadata endast).')
+param keyVaultSecretsUserRoleId string = '4633458b-17de-408a-b874-0445c86b69e6'
 
 @description('Miljötagg.')
 param environment string = 'prod'

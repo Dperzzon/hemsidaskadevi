@@ -89,34 +89,63 @@ Googles kvoter för den kontotypen räcker (de gör det med god marginal).
 - **"Visas aldrig som mottagen om lagringen misslyckas":** misslyckat sparande
   kastar → HTTP 500 och ingen bekräftelse visas (tester bekräftar).
 
-## Logic Apps och Gmail (förberett, ej deployerat)
+## E-postutskick: Resend via Logic Apps (steg 4B/4C, ej aktiverat)
 
-Fil: `infra/logicapp/email-notifier.workflow.json` + modul
-`infra/modules/logic-app-notify.bicep`.
+Beslut 2026-11-11: Gmail-connectorn (privata Gmail-konton begränsar HTTP-actions)
+och Azure Communication Services Email (pensioneras 2028-09-30) avvisades.
+**Resend** används för transaktionsmejl.
 
-- **Trigger:** Recurrence var 5:e minut (ingen HTTP-trigger/webbhook alls —
-  det finns ingen publikt oskyddad ingång).
-- **Flöde:** hämta utkorgsposter (`PartitionKey eq 'outbox' and status eq
-  'Utkorg' and attemptCount lt 5`) → markera "Skickar" (If-Match, räknare +
-  1) → **Send email (V2)** via den befintliga Gmail-anslutningen (till
-  skadevigard@gmail.com, reply-to samma adress) → markera "Skickad" (sentAt).
-  Vid fel: markera "Misslyckad"; försöksräknaren förhindrar oändliga
-  återförsök, och exponentiell retry-policy (4 försök) hanterar tillfälliga
-  fel inom körningen.
-- **Idempotens/undvik duplicering:** en post i "Skickar" plockas aldrig igen
-  av pågående pollning; "Skickad"/"Misslyckad" plockas aldrig. Om körningen
-  kraschar mellan sändning och statusuppdatering kan mejlet i värsta fall
-  skickas en gång till vid manuell omkörning — residuerlig risk som är
-  dokumenterad och rimlig för denna volym.
-- **Personuppgifter i körhistorik:** känsliga in/utdata döljs med
-  `secureData` på HTTP- och mejlaktionerna; HTML-bodyn är servergenererad och
-  HTML-escapad (`escapeHtml` i `server/booking/requests.js`, tester bekräftar)
-  så Logic Apps aldrig tolkar gästuppgifter som HTML. Rekommendation:
-  begränsa läsbehörigheten till resursgruppen (RBAC).
-- **Källmål för mejlen:** värdnotis till skadevigard@gmail.com med referens,
-  datum, gäster, tillval, rabatt, överlappsvarningar och kontaktuppgifter;
-  mottagningsbekräftelse till gästens e-postadress (reply-to
-  skadevigard@gmail.com). Båda märkta tydligt: "inte en bekräftad bokning".
+- **Arkitektur:** utkorgsposter i `bookingrequests` (PartitionKey `outbox`) →
+  Logic App `logic-skadevi-bokningsnotis` (Recurrence 5 min, concurrency 1,
+  skapas Disabled) → hämtar API-nyckeln från Key Vault-sekret
+  `resend-api-key` med Managed Identity (audience `https://vault.azure.net`,
+  rollen Key Vault Secrets User — endast getSecret) → POST
+  `https://api.resend.com/emails` med `Authorization: Bearer` och
+  `Idempotency-Key` = utkorgspostens RowKey.
+- **Avsändare:** bokning@skadeviherrgard.com (kräver domänverifiering hos
+  Resend: TXT `resend._domainkey` DKIM, TXT `send` SPF, MX `send` — alla
+  subdomän-scopade, rör inte befintliga poster). Mottagare för värdenotiser och
+  reply-to: skadevigard@gmail.com. Gästbekräftelser till gästens angivna
+  adress.
+- **API-acceptans ≠ leverans:** status "Skickad" betyder endast att Resend
+  accepterat anropet; `resendId` och `deliveryStatus = "Inväntar
+  leveranskontroll"` sparas separat. Verklig leverans/studs följs upp via
+  Resends webhooks (`email.delivered/bounced/failed/complained`) eller
+  `GET /emails/:id` (`last_event`) — implementeras som eget steg före
+  aktivering.
+- **Skydd mot dubbla utskick:** Logic Apps ETag-anspråk ("Skickar") +
+  Resends idempotensnyckel. Resends skydd gäller dock endast 24 timmar —
+  därför flaggas en post som legat i "Skickar" utan bekräftat resultat i mer
+  än 24 timmar som **"Kräver manuell kontroll"** i stället för att skickas
+  igen. HTTP 409 (idempotenskonflikt) flaggas också för manuell kontroll, liksom
+  det sista återförsöket (`attemptCount` uppnått `maxAttempts`) — ingen post
+  dör tyst.
+
+### GDPR — Resends personuppgiftsbehandling (kräver godkännande före aktivering)
+
+- **Lagringsplats:** all kontodata (metadata, loggar, API-poster) lagras i
+  **USA** oavsett vald sändningsregion (eu-west-1 är valbar för själva
+  sändningen). Import till USA sker enligt EU-US Data Privacy Framework /
+  standardavtalsklausuler i Resends DPA.
+- **DPA:** finns i Resend Dashboard under Settings → Documents
+  (resend.com/legal/dpa); förtecknad underkonsulenter på
+  resend.com/legal/subprocessors. SOC 2 Type II-rapport finns i samma sektion.
+- **Innehållslagring:** Resend lagrar skickat innehåll; det kan stängas av
+  (kräver Pro-plan ≥ 1 månad + tillägg 50 USD/mån + minst 3 000 skickade mejl
+  med < 5 % bounce). Vid låg volym är avstängning alltså inte möjlig från
+  start — acceptera att sända mejl lagras hos Resend (i USA) eller välj annan
+  leverantör.
+- **Dataminimering:** endast referens, datum, nätter, gästantal, tillval och
+  kontaktuppgifter skickas; ingen IP, inga interna ID:n, inga extra fält
+  (verifierat i `tests/unit/email-resend-workflow.test.js`).
+- **Åtgärder före aktivering (godkännande krävs):**
+  1. Signera/granska Resends DPA (ingens contrasignering krävs — gäller vid
+     kontoansvariga).
+  2. Välj sändningsregion (förslag: eu-west-1, Irland).
+  3. Acceptera innehållslagring i USA tills volymkraven för avstängning är
+     uppfyllda, eller välj EU-alternativ hos annan leverantör.
+  4. Planera radering: utkorgsposter gallras enligt 24-månadersrutinen;
+     Resends lagrade mejl kvarstår tills kontot stängs/renas.
 
 ## Kill switch (inskick avstängt tills vidare)
 
