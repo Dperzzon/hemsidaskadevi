@@ -1,0 +1,271 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.49.2.45890",
+      "templateHash": "4367219593159711237"
+    }
+  },
+  "parameters": {
+    "zoneName": {
+      "type": "string",
+      "defaultValue": "skadeviherrgard.com",
+      "metadata": {
+        "description": "Zonnamn (måste matcha domänen exakt)."
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "global",
+      "metadata": {
+        "description": "Azure DNS-zoner är globala resurser; platsen ska vara \"global\"."
+      }
+    },
+    "apexIpAddresses": {
+      "type": "array",
+      "defaultValue": [
+        "51.12.73.240"
+      ],
+      "metadata": {
+        "description": "App Service AKTUELLA inbound-IP (A-post för rotdomänen). Hämtas från properties.inboundIpAddress — endast denna, inte possibleInboundIpAddresses."
+      }
+    },
+    "webAppHostName": {
+      "type": "string",
+      "defaultValue": "hemsida-skadevi-prod.azurewebsites.net",
+      "metadata": {
+        "description": "Webbappens standardvärdnamn (CNAME-mål för www)."
+      }
+    },
+    "customDomainVerificationId": {
+      "type": "string",
+      "metadata": {
+        "description": "App Service custom domain verification ID (properties.customDomainVerificationId). Inte en hemlighet — används som TXT-värde för asuid-poster."
+      }
+    },
+    "ttl": {
+      "type": "int",
+      "defaultValue": 300,
+      "minValue": 60,
+      "maxValue": 86400,
+      "metadata": {
+        "description": "TTL i sekunder för migreringsposterna (300 under cutover, 3600 efter)."
+      }
+    },
+    "enableResend": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Sätt true först när Resend-domänen ska verifieras (värdena hämtas från Resends dashboard)."
+      }
+    },
+    "resendDkimValue": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Resends DKIM-värde för resend._domainkey (hela \"p=...\"-strängen från dashboarden)."
+      }
+    },
+    "resendSpfValue": {
+      "type": "string",
+      "defaultValue": "v=spf1 include:amazonses.com ~all",
+      "metadata": {
+        "description": "Resends SPF-post för send-subdomänen (från dashboarden)."
+      }
+    },
+    "resendMxExchange": {
+      "type": "string",
+      "defaultValue": "feedback-smtp.eu-west-1.amazonses.com",
+      "metadata": {
+        "description": "Resends MX-värd för send-subdomänen (regionens feedback-SMTP, från dashboarden)."
+      }
+    },
+    "resendMxPreference": {
+      "type": "int",
+      "defaultValue": 10,
+      "metadata": {
+        "description": "MX-prioritet för Resends återstudspost."
+      }
+    },
+    "environment": {
+      "type": "string",
+      "defaultValue": "prod",
+      "metadata": {
+        "description": "Miljötagg."
+      }
+    },
+    "owner": {
+      "type": "string",
+      "defaultValue": "Skadevi Herrgård",
+      "metadata": {
+        "description": "Ägartagg."
+      }
+    }
+  },
+  "variables": {
+    "tags": {
+      "Owner": "[parameters('owner')]",
+      "Environment": "[parameters('environment')]",
+      "ManagedBy": "Bicep (Skadevi)"
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Network/dnsZones",
+      "apiVersion": "2018-05-01",
+      "name": "[parameters('zoneName')]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]"
+    },
+    {
+      "type": "Microsoft.Network/dnsZones/A",
+      "apiVersion": "2018-05-01",
+      "name": "[format('{0}/{1}', parameters('zoneName'), '@')]",
+      "properties": {
+        "copy": [
+          {
+            "name": "ARecords",
+            "count": "[length(parameters('apexIpAddresses'))]",
+            "input": {
+              "ipv4Address": "[parameters('apexIpAddresses')[copyIndex('ARecords')]]"
+            }
+          }
+        ],
+        "TTL": "[parameters('ttl')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/dnsZones', parameters('zoneName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Network/dnsZones/CNAME",
+      "apiVersion": "2018-05-01",
+      "name": "[format('{0}/{1}', parameters('zoneName'), 'www')]",
+      "properties": {
+        "TTL": "[parameters('ttl')]",
+        "CNAMERecord": {
+          "cname": "[parameters('webAppHostName')]"
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/dnsZones', parameters('zoneName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Network/dnsZones/TXT",
+      "apiVersion": "2018-05-01",
+      "name": "[format('{0}/{1}', parameters('zoneName'), 'asuid')]",
+      "properties": {
+        "TTL": "[parameters('ttl')]",
+        "TXTRecords": [
+          {
+            "value": [
+              "[parameters('customDomainVerificationId')]"
+            ]
+          }
+        ]
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/dnsZones', parameters('zoneName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Network/dnsZones/TXT",
+      "apiVersion": "2018-05-01",
+      "name": "[format('{0}/{1}', parameters('zoneName'), 'asuid.www')]",
+      "properties": {
+        "TTL": "[parameters('ttl')]",
+        "TXTRecords": [
+          {
+            "value": [
+              "[parameters('customDomainVerificationId')]"
+            ]
+          }
+        ]
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/dnsZones', parameters('zoneName'))]"
+      ]
+    },
+    {
+      "condition": "[and(parameters('enableResend'), not(empty(parameters('resendDkimValue'))))]",
+      "type": "Microsoft.Network/dnsZones/TXT",
+      "apiVersion": "2018-05-01",
+      "name": "[format('{0}/{1}', parameters('zoneName'), 'resend._domainkey')]",
+      "properties": {
+        "TTL": "[parameters('ttl')]",
+        "TXTRecords": [
+          {
+            "value": [
+              "[parameters('resendDkimValue')]"
+            ]
+          }
+        ]
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/dnsZones', parameters('zoneName'))]"
+      ]
+    },
+    {
+      "condition": "[parameters('enableResend')]",
+      "type": "Microsoft.Network/dnsZones/TXT",
+      "apiVersion": "2018-05-01",
+      "name": "[format('{0}/{1}', parameters('zoneName'), 'send')]",
+      "properties": {
+        "TTL": "[parameters('ttl')]",
+        "TXTRecords": [
+          {
+            "value": [
+              "[parameters('resendSpfValue')]"
+            ]
+          }
+        ]
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/dnsZones', parameters('zoneName'))]"
+      ]
+    },
+    {
+      "condition": "[parameters('enableResend')]",
+      "type": "Microsoft.Network/dnsZones/MX",
+      "apiVersion": "2018-05-01",
+      "name": "[format('{0}/{1}', parameters('zoneName'), 'send')]",
+      "properties": {
+        "TTL": "[parameters('ttl')]",
+        "MXRecords": [
+          {
+            "preference": "[parameters('resendMxPreference')]",
+            "exchange": "[parameters('resendMxExchange')]"
+          }
+        ]
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/dnsZones', parameters('zoneName'))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "zoneId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.Network/dnsZones', parameters('zoneName'))]"
+    },
+    "zoneName": {
+      "type": "string",
+      "value": "[parameters('zoneName')]"
+    },
+    "nameServers": {
+      "type": "array",
+      "value": "[reference(resourceId('Microsoft.Network/dnsZones', parameters('zoneName')), '2018-05-01').nameServers]"
+    },
+    "apexFqdn": {
+      "type": "string",
+      "value": "[if(equals('@', '@'), parameters('zoneName'), format('{0}.{1}', '@', parameters('zoneName')))]"
+    },
+    "wwwFqdn": {
+      "type": "string",
+      "value": "[format('www.{0}', parameters('zoneName'))]"
+    }
+  }
+}

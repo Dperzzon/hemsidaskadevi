@@ -221,6 +221,13 @@ function createRequestListener(options = {}) {
     ((request, context) => handleBookingRequest(request, context, { ...options, store: createStore(options) }));
   const rulesHandler = options.rulesHandler ?? (async () => publicRules(await loadRules(options)));
   const warn = options.warn ?? ((message) => console.error(message));
+  // Kanoniskt värdnamn: rotdomänen 301-omdirigeras till www. Endast exakt
+  // angivna apex-värdnamn påverkas — azurewebsites.net, localhost och övriga
+  // värdar serveras som vanligt, så redirect-loops kan inte uppstå. API-anrop
+  // omdirigeras aldrig (POST måste nå rätt endpoint utan metodbyte).
+  const canonicalHost = (options.canonicalHost ?? 'www.skadeviherrgard.com').toLowerCase();
+  const apexHosts = (options.apexHosts ?? ['skadeviherrgard.com']).map((h) => h.toLowerCase());
+  const canonicalRedirect = options.canonicalRedirect ?? true;
 
   return async function requestListener(req, res) {
     let url;
@@ -228,6 +235,17 @@ function createRequestListener(options = {}) {
       url = new URL(req.url, 'http://localhost');
     } catch {
       sendJson(res, 400, { error: 'Ogiltig förfrågan.' });
+      return;
+    }
+
+    const host = String(req.headers.host ?? '').toLowerCase().replace(/:\d+$/, '');
+    if (
+      canonicalRedirect &&
+      apexHosts.includes(host) &&
+      (req.method === 'GET' || req.method === 'HEAD') &&
+      !url.pathname.startsWith('/api/')
+    ) {
+      redirect(res, `https://${canonicalHost}${url.pathname}${url.search}`);
       return;
     }
 

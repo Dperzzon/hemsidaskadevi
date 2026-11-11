@@ -277,20 +277,27 @@ function buildNotifications(record) {
     record.message ? `Önskemål: ${escapeHtml(record.message)}` : null
   ].filter(Boolean).map((row) => `<li>${row}</li>`).join('');
   const disclaimer = 'OBS: Detta är en bokningsförfrågan (status: Inväntar godkännande) — inte en bekräftad bokning.';
+  const guestLines = [
+    `Referens: ${record.reference}`,
+    `Vistelse: ${record.arrival} → ${record.departure} (${record.nights} nätter)`,
+    `Gäster: ${record.guests}`,
+    record.total != null ? `Beräknat totalpris: ${record.total} kr` : null
+  ].filter(Boolean);
+  const guestIntro = 'Tack för din bokningsförfrågan! Vi har tagit emot dina önskemål och återkommer med besked om tillgänglighet och bokning.';
   return {
     host: {
       to: MAIL.hostRecipient,
       replyTo: MAIL.replyTo,
-      subject: `Bokningsförfrågan ${record.reference} — Inväntar godkännande`,
-      body: summary,
-      html: `<h2>Bokningsförfrågan ${escapeHtml(record.reference)}</h2><p><strong>${disclaimer}</strong></p><ul>${htmlRows}</ul>`
+      subject: `Ny bokningsförfrågan ${record.reference} — Inväntar godkännande`,
+      body: `${summary}\n\n${disclaimer}`,
+      html: `<h2>Ny bokningsförfrågan ${escapeHtml(record.reference)}</h2><p><strong>${disclaimer}</strong></p><ul>${htmlRows}</ul>`
     },
     guest: {
       to: record.email,
       replyTo: MAIL.replyTo,
       subject: `Vi har tagit emot din bokningsförfrågan (${record.reference})`,
-      body: `Tack för din bokningsförfrågan! Vi har tagit emot dina önskemål och återkommer med besked om tillgänglighet och bokning. Din vistelse är ännu inte bekräftad. ${disclaimer}`,
-      html: `<p>Tack för din bokningsförfrågan! Vi har tagit emot dina önskemål och återkommer med besked om tillgänglighet och bokning. <strong>Din vistelse är ännu inte bekräftad.</strong></p><p>${disclaimer}</p>`
+      body: `${guestIntro} Din vistelse är ännu inte bekräftad.\n\n${guestLines.join('\n')}\n\n${disclaimer}`,
+      html: `<p>${guestIntro} <strong>Din vistelse är ännu inte bekräftad.</strong></p><ul>${guestLines.map((row) => `<li>${escapeHtml(row)}</li>`).join('')}</ul><p>${disclaimer}</p>`
     }
   };
 }
@@ -306,6 +313,7 @@ async function saveOutbox(store, record, context) {
         mailReplyTo: notification.replyTo ?? '',
         mailSubject: notification.subject,
         mailHtml: notification.html,
+        mailText: notification.body,
         attemptCount: 0,
         createdAt: record.createdAt
       }, context);

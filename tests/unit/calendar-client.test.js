@@ -36,7 +36,9 @@ function createCalendar(fetch, timer = setTimeout) {
   vm.runInContext(inlineSource, context);
   return {
     context, container, description, handlers,
-    load: () => vm.runInContext('loadAvailability()', context)
+    load: () => vm.runInContext('loadAvailability()', context),
+    click: (day) => vm.runInContext(`handleDayClick(${JSON.stringify(day)})`, context),
+    stateJSON: () => JSON.parse(vm.runInContext('JSON.stringify({ selection: state.selection, message: state.message })', context))
   };
 }
 
@@ -137,4 +139,66 @@ test('ett gammalt svar skriver inte över ett nyare (race)', async () => {
   await first;
   assert.match(calendar.container.innerHTML, /December 2026/);
   assert.doesNotMatch(calendar.container.innerHTML, /November 2026/);
+});
+
+// --- Datumvalets tillstånd (buggfix: nytt datum ska ersätta tidigare val) ---
+
+function dayKey(offset = 0) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Stockholm', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(new Date(Date.now() + offset * 86400000));
+}
+
+test('nytt ledigt datum ersätter en komplett period med ny ankomst', () => {
+  const calendar = createCalendar(async () => response({ blocked: [] }));
+  const arrival = dayKey(10);
+  const departure = dayKey(14);
+  const next = dayKey(20);
+  vm.runInContext(`state.selection = { arrival: '${arrival}', departure: '${departure}' }`, calendar.context);
+
+  calendar.click(next);
+
+  const state = calendar.stateJSON();
+  assert.equal(state.selection.arrival, next);
+  assert.equal(state.selection.departure, null);
+  assert.equal(state.message.error, false);
+});
+
+test('ogiltig period behålls aldrig och nästa klick börjar om', () => {
+  const calendar = createCalendar(async () => response({ blocked: [] }));
+  const arrival = dayKey(10);
+  const blockedNight = dayKey(12);
+  vm.runInContext(
+    `state.selection = { arrival: '${arrival}', departure: null }; state.blocked = new Set(['${blockedNight}'])`,
+    calendar.context
+  );
+
+  calendar.click(dayKey(15));
+
+  let state = calendar.stateJSON();
+  assert.equal(state.selection.arrival, null);
+  assert.equal(state.selection.departure, null);
+  assert.equal(state.message.error, true);
+  assert.match(state.message.text, /innehåller bokade nätter/);
+
+  const restart = dayKey(20);
+  calendar.click(restart);
+  state = calendar.stateJSON();
+  assert.equal(state.selection.arrival, restart);
+  assert.equal(state.selection.departure, null);
+  assert.equal(state.message.error, false);
+});
+
+test('giltigt senare datum blir avresa när bara ankomst är vald', () => {
+  const calendar = createCalendar(async () => response({ blocked: [] }));
+  const arrival = dayKey(10);
+  const departure = dayKey(12);
+  vm.runInContext(`state.selection = { arrival: '${arrival}', departure: null }`, calendar.context);
+
+  calendar.click(departure);
+
+  const state = calendar.stateJSON();
+  assert.equal(state.selection.arrival, arrival);
+  assert.equal(state.selection.departure, departure);
+  assert.equal(state.message.error, false);
 });

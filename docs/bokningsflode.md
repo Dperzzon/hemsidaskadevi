@@ -119,7 +119,48 @@ och Azure Communication Services Email (pensioneras 2028-09-30) avvisades.
   än 24 timmar som **"Kräver manuell kontroll"** i stället för att skickas
   igen. HTTP 409 (idempotenskonflikt) flaggas också för manuell kontroll, liksom
   det sista återförsöket (`attemptCount` uppnått `maxAttempts`) — ingen post
-  dör tyst.
+  dör tyst. Både Resends `invalid_idempotent_request` (avvikande innehåll) och
+  `concurrent_idempotent_requests` (samtidigt pågående anrop) behandlas
+  konservativt som manuell kontroll; det senare kan skickas om manuellt utan
+  risk för dubblett. `Skickar` hämtas alltid av filtret (även vid `attemptCount
+  >= maxAttempts`) så att en kvarglömd post kan flaggas manuellt i stället för
+  att bli osynlig för all framtid.
+
+### Steg 7A — två förberedda mejltyper
+
+Båda mejlen skapas som separata utkorgsposter med komplett HTML **och**
+plaintext (`mailHtml`/`mailText`); Logic App skickar båda fälten till Resend.
+
+- **A. Ny bokningsförfrågan till Skadevi** — mottagare
+  `skadevigard@gmail.com`, reply-to samma adress. Ämne: `Ny bokningsförfrågan
+  SK-… — Inväntar godkännande`. Innehåller referens, status, vistelse, gäster,
+  kontaktuppgifter, serverberäknad prisöversikt (nattpriser, rabatt, tillval,
+  totalpris, prisversion), regelversion, överlappsvarning och gästens
+  önskemål. Alla gästfält HTML-escapas.
+- **B. Mottagningsbekräftelse till gästen** — mottagare gästens e-post,
+  reply-to `skadevigard@gmail.com`. Ämne: `Vi har tagit emot din
+  bokningsförfrågan (SK-…)`. Innehåller referens, vistelse, gästantal och
+  beräknat totalpris samt en tydlig markering att vistelsen **ännu inte är
+  bekräftad**.
+
+**Status 2026-11-11 (steg 7A, före aktivering):**
+
+- `integration/resend-bokning` är sammanslagen med senaste `main`; pris-,
+  kalender- och bokningsändringarna är identiska med `main` (verifierat med
+  diff och 216 enhetstester).
+- Logic App-mallen är byggd utan fel och anropar Resends aktuella
+  `POST /emails` (fälten `from`, `to`, `reply_to`, `subject`, `html`, `text`
+  och `Idempotency-Key`). API-nyckeln hämtas per körning från Key Vault.
+- Key Vault `kv-skadevi-prod` har RBAC aktiverat. **Sekretet `resend-api-key`
+  finns ännu inte** (endast `airbnb-ical-url`) — det måste skapas manuellt
+  innan aktivering; inga behörigheter ändras i detta steg.
+- Ingen Logic App är driftsatt i `rg-skadevi-prod`; modulen skapar den i
+  `Disabled`-läge först vid en godkänd deployment.
+- `BOOKING_REQUESTS_ENABLED` är fortsatt avstängt: live-appen saknar
+  inställningen (standard = av) och Bicep sätter `'0'` vid nästa deployment.
+- Domänen ligger fortfarande på Wix namnservrar och Resend-posterna
+  (`resend._domainkey`, `send` TXT/MX) finns inte i DNS. Domänverifiering hos
+  Resend kan därför inte slutföras förrän överföringen till GoDaddy är klar.
 
 ### GDPR — Resends personuppgiftsbehandling (kräver godkännande före aktivering)
 

@@ -380,12 +380,17 @@ test('utkorgspost innehåller komplett mejlmall för Logic Apps', async () => {
     assert.equal(row.status, 'Utkorg');
     assert.ok(row.mailSubject.includes('SK-2026-'));
     assert.ok(row.mailHtml.includes('inte en bekräftad bokning'));
+    assert.ok(row.mailText.includes('inte en bekräftad bokning'), 'plaintext-version saknas');
     assert.equal(row.attemptCount, 0);
+    assert.ok(row.idempotencyKey.length <= 256, 'Resends idempotensnyckel får vara max 256 tecken');
   }
   const host = outbox.find((item) => item.mailTo === 'skadevigard@gmail.com');
   assert.equal(host.mailReplyTo, 'skadevigard@gmail.com');
+  assert.ok(host.mailSubject.includes('Ny bokningsförfrågan'));
   const guest = outbox.find((item) => item.mailTo === 'anna@example.com');
   assert.ok(guest.mailHtml.includes('Tack för din bokningsförfrågan'));
+  assert.ok(guest.mailHtml.includes('Referens:'));
+  assert.ok(guest.mailHtml.includes('ännu inte bekräftad'));
 });
 
 test('misslyckad utkorgssparning stoppar inte registreringen', async () => {

@@ -21,6 +21,10 @@ param owner = 'Skadevi Herrgård'
 
 param customDomain = 'www.skadeviherrgard.com'
 
+// Rotdomänen binds i samma steg som www och 301-omdirigeras i servern till www.
+// Tomt värde = rotdomänen hanteras inte (nuvarande läge tills DNS/cert är klart).
+param apexDomain = 'skadeviherrgard.com'
+
 // Måste vara globalt unikt i Azure. Byt om namnet är upptaget.
 param keyVaultName = 'kv-skadevi-prod'
 

@@ -68,10 +68,12 @@ test('Resend-anropet har idempotensnyckel och korrekt e-postfältuppsättning', 
   const body = send.inputs.body;
   assert.ok(body.from.includes("@{parameters('mailFrom')}"));
   assert.ok(body.to.includes("items('Behandla_varje_post')"));
-  assert.ok(body.reply_to.includes("@{parameters('mailReplyTo')}"));
+  assert.ok(body.reply_to.includes("items('Behandla_varje_post')?['mailReplyTo']"));
+  assert.ok(body.reply_to.includes("parameters('mailReplyTo')"), 'saknad reply-to faller tillbaka på parametern');
   assert.ok(body.html.includes('mailHtml'));
+  assert.ok(body.text.includes('mailText'), 'plaintext-versionen skickas med');
   // Minimerad datamängd: inga extra gästuppgifter skickas till Resend.
-  assert.deepEqual(Object.keys(body).sort(), ['from', 'html', 'reply_to', 'subject', 'to']);
+  assert.deepEqual(Object.keys(body).sort(), ['from', 'html', 'reply_to', 'subject', 'text', 'to']);
 });
 
 test('återförsök: exponentiell retry-policy (429/5xx/timeout), ändlig antal försök', () => {
@@ -93,6 +95,8 @@ test('alla HTTP-actions döljer känsliga in- och utdata (secureData)', () => {
 });
 
 test('ETag-kontroll och statusmarkering: skickas-aldrig-två-gånger-garantin', () => {
+  const fetch = byName('Haemta_utkorg');
+  assert.equal(fetch.inputs.headers.Accept, 'application/json;odata=minimalmetadata', 'ETag kräver minimalmetadata');
   const claim = byName('Markera_som_under_skickning');
   assert.deepEqual(claim.inputs.headers['If-Match'], "@{items('Behandla_varje_post')?['odata.etag']}");
   assert.deepEqual(claim.runAfter.Hamta_api_nyckel, ['Succeeded']);
@@ -152,10 +156,13 @@ test('semantik: vitlistan släpper endast igenom återförsöksbara poster', () 
   const uri = decodeURIComponent(byName('Haemta_utkorg').inputs.uri);
   const allowed = [...uri.matchAll(/status eq '([^']+)'/g)].map((m) => m[1]);
   assert.deepEqual(allowed.sort(), ['Misslyckad', 'Skickar', 'Utkorg']);
-  const eligible = (row) => allowed.includes(row.status) && row.attemptCount < 5;
+  const eligible = (row) => row.status === 'Skickar'
+    || (['Utkorg', 'Misslyckad'].includes(row.status) && row.attemptCount < 5);
   const rows = [
     { status: 'Utkorg', attemptCount: 0, send: true },
     { status: 'Skickar', attemptCount: 1, send: true },
+    { status: 'Skickar', attemptCount: 5, send: true },
+    { status: 'Skickar', attemptCount: 9, send: true },
     { status: 'Misslyckad', attemptCount: 4, send: true },
     { status: 'Skickad', attemptCount: 1, send: false },
     { status: 'Kräver manuell kontroll', attemptCount: 1, send: false },
@@ -176,6 +183,9 @@ test('utkorgsfiltern: endast återförsöksbara statusar hämtas — manuell kon
   assert.ok(uri.includes("status eq 'Utkorg'"));
   assert.ok(uri.includes("status eq 'Skickar'"));
   assert.ok(uri.includes("status eq 'Misslyckad'"));
+  // 'Skickar' hämtas även när attemptCount nått max, så att 24h-skyddet kan
+  // flagga en kvarglömd post för manuell kontroll i stället för att den blir kvar för alltid.
+  assert.ok(uri.includes("status eq 'Skickar' or"), 'Skickar måste ligga utanför attemptCount-gränsen');
   // Fail-safe: ingen ne-only-logik som släpper igenom okända statusar.
   assert.ok(!uri.includes('status ne'), 'ne-filter släpper igenom manuell kontroll/nya statusar');
   assert.ok(!uri.includes("status eq 'Skickad'"), 'Skickad får aldrig hämtas igen');

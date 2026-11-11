@@ -144,12 +144,14 @@ test('utkorgsentiteten innehåller mejlmall och försöksräknare', () => {
     mailReplyTo: 'skadevigard@gmail.com',
     mailSubject: 'Bokningsförfrågan SK-2026-TEST01',
     mailHtml: '<p>Hej</p>',
+    mailText: 'Hej',
     attemptCount: 0,
     createdAt: '2026-11-10T12:00:00.000Z'
   };
   const round = fromOutboxEntity(toOutboxEntity(record));
   assert.equal(round.mailTo, record.mailTo);
   assert.equal(round.mailHtml, record.mailHtml);
+  assert.equal(round.mailText, record.mailText);
   assert.equal(round.attemptCount, 0);
   assert.equal(toOutboxEntity(record).PartitionKey, 'outbox');
 });

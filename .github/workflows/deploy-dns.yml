@@ -1,0 +1,98 @@
+﻿name: Azure DNS (manuell, separat)
+
+# DriftsÃ¤tter ENDAST DNS-zonen infra/dns-skadeviherrgard.bicep.
+# KÃ¶rs aldrig automatiskt: krÃ¤ver workflow_dispatch och ett manuellt
+# godkÃ¤nnande via GitHub-miljÃ¶n "azure-dns-prod" (Environment med
+# protection rule "Required reviewers"). Den vanliga app-deploymenten
+# (.github/workflows/deploy.yml) rÃ¶r aldrig DNS.
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: 'what-if (fÃ¶rhandsgranska) eller deploy (genomfÃ¶r)'
+        required: true
+        default: what-if
+        type: choice
+        options:
+          - what-if
+          - deploy
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: azure-dns-prod
+  cancel-in-progress: false
+
+env:
+  AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  RESOURCE_GROUP: rg-skadevi-prod
+  DEPLOYMENT_NAME: dns-skadeviherrgard
+
+jobs:
+  dns:
+    name: Azure DNS-zon
+    runs-on: ubuntu-latest
+    # Manuell godkÃ¤nnandepunkt: miljÃ¶n mÃ¥ste ha "Required reviewers" i
+    # GitHub-instÃ¤llningarna innan jobbet fÃ¥r starta.
+    environment: azure-dns-prod
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Kontrollera OIDC-konfiguration
+        run: |
+          if [ -z "$AZURE_CLIENT_ID" ] || [ -z "$AZURE_TENANT_ID" ] || [ -z "$AZURE_SUBSCRIPTION_ID" ]; then
+            echo "::error::AZURE_CLIENT_ID/AZURE_TENANT_ID/AZURE_SUBSCRIPTION_ID saknas som repo-variabler."
+            exit 1
+          fi
+
+      - name: Logga in pÃ¥ Azure via OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Bygg och verifiera att mallen ENDAST innehÃ¥ller DNS-resurser
+        run: |
+          set -e
+          az bicep build --file infra/dns-skadeviherrgard.bicep --outfile infra/dns-skadeviherrgard.json
+          node scripts/verify-dns-template.js
+
+      - name: FÃ¶rhandsgranska (what-if)
+        if: ${{ inputs.operation == 'what-if' }}
+        run: |
+          az deployment group what-if \
+            --resource-group "$RESOURCE_GROUP" \
+            --subscription "$AZURE_SUBSCRIPTION_ID" \
+            --name "$DEPLOYMENT_NAME" \
+            --template-file infra/dns-skadeviherrgard.bicep \
+            --parameters infra/dns-skadeviherrgard.bicepparam
+
+      - name: DriftsÃ¤tt DNS-zonen
+        if: ${{ inputs.operation == 'deploy' }}
+        run: |
+          set -e
+          az deployment group create \
+            --resource-group "$RESOURCE_GROUP" \
+            --subscription "$AZURE_SUBSCRIPTION_ID" \
+            --name "$DEPLOYMENT_NAME" \
+            --template-file infra/dns-skadeviherrgard.bicep \
+            --parameters infra/dns-skadeviherrgard.bicepparam \
+            --query "{state:properties.provisioningState, nameServers:properties.outputs.nameServers.value}" \
+            -o json
+
+      - name: Kontrollera delegeringsinformation efter driftsÃ¤ttning
+        if: ${{ inputs.operation == 'deploy' }}
+        run: |
+          echo "Byt namnservrar hos registraren till de fyra NS-vÃ¤rdena i utdata ovan."
+          az network dns zone show \
+            --resource-group "$RESOURCE_GROUP" \
+            --subscription "$AZURE_SUBSCRIPTION_ID" \
+            --name skadeviherrgard.com \
+            --query "{name:name, nameServers:nameServers, recordSets:numberOfRecordSets}" \
+            -o json

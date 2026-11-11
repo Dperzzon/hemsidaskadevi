@@ -166,21 +166,30 @@ test('ofullständig vistelse visar aldrig missvisande totalpris', () => {
 });
 
 test('klienten och servern använder samma prisreglerversion', () => {
-  assert.equal(pricing.PRICE_VERSION, '2026-11-11.2');
+  assert.equal(pricing.PRICE_VERSION, '2026-11-11.4');
   assert.ok(pricing.PRICE_CONFIG.discounts.length >= 2);
 });
 
-test('påsk omfattar endast skärtorsdag–annandag påsk (2026–2028)', () => {
-  assert.equal(pricing.nightRate('2026-04-02').type, 'weekday');
-  assert.equal(pricing.nightRate('2026-04-03').type, 'peak');
+test('påsk: skärtorsdagen–annandag påsk (2026–2028)', () => {
+  assert.equal(pricing.nightRate('2026-04-01').type, 'weekday');
+  assert.equal(pricing.nightRate('2026-04-02').type, 'peak');
   assert.equal(pricing.nightRate('2026-04-06').type, 'peak');
   assert.equal(pricing.nightRate('2026-04-07').type, 'weekday');
-  assert.equal(pricing.nightRate('2027-03-26').type, 'peak');
+  assert.equal(pricing.nightRate('2027-03-25').type, 'peak');
   assert.equal(pricing.nightRate('2027-03-29').type, 'peak');
   assert.equal(pricing.nightRate('2027-03-30').type, 'weekday');
-  assert.equal(pricing.nightRate('2028-04-14').type, 'peak');
+  assert.equal(pricing.nightRate('2028-04-13').type, 'peak');
   assert.equal(pricing.nightRate('2028-04-17').type, 'peak');
   assert.equal(pricing.nightRate('2028-04-18').type, 'weekday');
+});
+
+test('inkluderande slutdatum: söndagsnatt vid midsommar och måndagsnatt vid påsk får högpris', () => {
+  assert.equal(pricing.nightRate('2026-06-21').type, 'peak'); // söndag
+  assert.equal(pricing.nightRate('2026-04-06').type, 'peak'); // måndag, annandag påsk
+  assert.equal(pricing.nightRate('2027-06-27').type, 'peak');
+  assert.equal(pricing.nightRate('2027-03-29').type, 'peak');
+  assert.equal(pricing.nightRate('2028-06-25').type, 'peak');
+  assert.equal(pricing.nightRate('2028-04-17').type, 'peak');
 });
 
 test('rabattinfo beskriver rabatten diskret', () => {

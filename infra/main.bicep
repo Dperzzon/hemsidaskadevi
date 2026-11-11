@@ -36,6 +36,9 @@ param owner string
 @description('Domän som planeras kopplas till webbappen.')
 param customDomain string
 
+@description('Rotdomän som ska bindas och 301-omdirigeras till customDomain (www). Tomt = rotdomänen hanteras inte. Kräver A-post + TXT asuid i DNS innan bindning.')
+param apexDomain string = ''
+
 @description('Namn på Key Vault som lagrar kalenderhemligheten. Hemliga värdet sätts aldrig via Bicep.')
 param keyVaultName string
 
@@ -66,7 +69,7 @@ param secretAdminPrincipalId string = ''
 @description('Namn på lagringskontot för bokningsförfrågningar (Azure Table Storage, Sweden Central). Tomt = bokningslagring förbereds ännu inte. Sätts först efter Skadevis godkännande.')
 param bookingStorageAccountName string = ''
 
-@description('Objekt-ID (principalId) för Logic Appens system-assigned managed identity i Splat Reality-prenumerationen. Får Storage Table Data Contributor på bokningstabellen. Fylls i FÖRST efter att Logic App-flödet har deployerats i Splat Reality (tvåfas: deploya Logic App → hämta principalId → skicka hit).')
+@description('Objekt-ID (principalId) för Logic Appens system-assigned managed identity. Lämnas tom: Logic Appens tabellroll tilldelas i logic-app-notify-modulen (samma tenant). Parametern finns kvar endast för bakåtkompatibilitet med storage-tables-modulen.')
 #disable-next-line secure-secrets-in-params
 param logicAppPrincipalId string = ''
 
@@ -96,6 +99,7 @@ module webapp 'modules/webapp.bicep' = {
     environment: environment
     owner: owner
     customDomain: customDomain
+    apexDomain: apexDomain
     customDomainStage: customDomainStage
     keyVaultName: keyVaultName
     keyVaultSecretName: keyVaultSecretName
@@ -106,9 +110,8 @@ module webapp 'modules/webapp.bicep' = {
 
 // Permanent lagring för bokningsförfrågningar (Azure Table Storage).
 // Skapas bara när bookingStorageAccountName är angivet — inga nya resurser
-// skapas utan Skadevis uttryckliga godkännande. Logic Appens identitet finns
-// i en annan prenumeration (Splat Reality, där Gmail-anslutningen bor) och
-// tilldelas sin RBAC-roll separat när Logic App-flödet har deployerats.
+// skapas utan Skadevis uttryckliga godkännande. Logic Appens identitet skapas
+// i logicAppNotify-modulen (samma tenant) och får sin tabellroll där.
 module bookingStorage 'modules/storage-tables.bicep' = if (!empty(bookingStorageAccountName)) {
   name: 'booking-storage'
   scope: rg

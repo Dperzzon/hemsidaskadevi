@@ -59,22 +59,36 @@ test('varje högprisperiod: första och sista debiterade natt samt omgivande nä
   }
 });
 
-test('påsk 2026–2028 omfattar endast skärtorsdag–annandag påsk', () => {
-  // 2026: påskdagen 5 april; skärtorsdag 3/4, annandag 6/4.
-  assert.equal(nightRate('2026-04-02').type, 'weekday'); // dag före skärtorsdag
-  assert.equal(nightRate('2026-04-03').type, 'peak');
-  assert.equal(nightRate('2026-04-06').type, 'peak'); // annandag påsk
-  assert.equal(nightRate('2026-04-07').type, 'weekday'); // dag efter annandag
-  // 2027: påskdagen 28 mars; 26–29 mars.
-  assert.equal(nightRate('2027-03-25').type, 'weekday');
-  assert.equal(nightRate('2027-03-26').type, 'peak');
-  assert.equal(nightRate('2027-03-29').type, 'peak');
+test('påsk 2026–2028: skärtorsdagen till och med annandag påsk', () => {
+  // 2026: påskdagen 5 april; natten 2/4 (skärtorsdag) – natten 6/4 (måndag, annandag påsk).
+  assert.equal(nightRate('2026-04-01').type, 'weekday'); // natten före perioden
+  assert.equal(nightRate('2026-04-02').type, 'peak');
+  assert.equal(nightRate('2026-04-06').type, 'peak'); // annandag påsk (måndag)
+  assert.equal(nightRate('2026-04-07').type, 'weekday'); // natten efter perioden
+  // 2027: påskdagen 28 mars; 25–29 mars.
+  assert.equal(nightRate('2027-03-24').type, 'weekday');
+  assert.equal(nightRate('2027-03-25').type, 'peak');
+  assert.equal(nightRate('2027-03-29').type, 'peak'); // annandag påsk (måndag)
   assert.equal(nightRate('2027-03-30').type, 'weekday');
-  // 2028: påskdagen 16 april; 14–17 april.
-  assert.equal(nightRate('2028-04-13').type, 'weekday');
-  assert.equal(nightRate('2028-04-14').type, 'peak');
-  assert.equal(nightRate('2028-04-17').type, 'peak');
+  // 2028: påskdagen 16 april; 13–17 april.
+  assert.equal(nightRate('2028-04-12').type, 'weekday');
+  assert.equal(nightRate('2028-04-13').type, 'peak');
+  assert.equal(nightRate('2028-04-17').type, 'peak'); // annandag påsk (måndag)
   assert.equal(nightRate('2028-04-18').type, 'weekday');
+});
+
+test('inkluderande slutdatum: söndagsnatt vid midsommar och måndagsnatt vid påsk får högpris', () => {
+  // Midsommar 2026: torsdag 18/6 – söndag 21/6 (söndagsnatten ingår).
+  assert.equal(nightRate('2026-06-21').type, 'peak');
+  assert.equal(weekdayOf('2026-06-21'), 0); // söndag
+  // Påsk 2026: annandag påsk måndag 6/4 (måndagsnatten ingår).
+  assert.equal(nightRate('2026-04-06').type, 'peak');
+  assert.equal(weekdayOf('2026-04-06'), 1); // måndag
+  // Samma sak 2027 och 2028.
+  assert.equal(nightRate('2027-06-27').type, 'peak'); // söndag
+  assert.equal(nightRate('2027-03-29').type, 'peak'); // måndag
+  assert.equal(nightRate('2028-06-25').type, 'peak'); // söndag
+  assert.equal(nightRate('2028-04-17').type, 'peak'); // måndag
 });
 
 test('vistelse över nyår 2026–2027: samtliga nätter i godkänd jul-/nyårsperiod', () => {

@@ -39,7 +39,10 @@ param keyVaultSecretName string
 @description('Domän som planeras kopplas; används som tagg och i domänstegen.')
 param customDomain string
 
-@description('Domänaktivering sker i separata deployment-steg: "binding" (hostname utan SSL), "certificate" (gratis hanterat certifikat, kräver verifierad binding), "tlsBinding" (SNI + thumbprint).')
+@description('Rotdomän som ska bindas och 301-omdirigeras till customDomain (www). Tomt = rotdomänen hanteras inte. Kräver A-post mot appens inbound-IP samt TXT asuid i DNS.')
+param apexDomain string = ''
+
+@description('Domänaktivering sker i separata deployment-steg: "binding" (hostname utan SSL), "certificate" (gratis hanterat certifikat, kräver verifierad binding), "tlsBinding" (SNI + thumbprint). Managed Certificate kan enligt Microsofts dokumentation utfärdas först EFTER att DNS pekar på appen (manage-custom-dns-migrate-domain) — binda därför hostnames före cutover och certifikatet efter.')
 @allowed([
   'disabled'
   'binding'
@@ -177,7 +180,7 @@ resource keyVaultSecretsOfficer 'Microsoft.Authorization/roleAssignments@2022-04
 }
 
 // Steg 2: hostname-binding UTAN SSL — verifierar och registrerar domänen
-// på webbappen. Kräver CNAME (och TXT vid apex) i DNS sedan tidigare.
+// på webbappen. Kräver CNAME (www) respektive A + TXT asuid (apex) i DNS.
 resource domainBinding 'Microsoft.Web/sites/hostNameBindings@2024-11-01' = if (customDomainStage != 'disabled') {
   parent: webApp
   name: customDomain
@@ -188,10 +191,26 @@ resource domainBinding 'Microsoft.Web/sites/hostNameBindings@2024-11-01' = if (c
   }
 }
 
+// Steg 2b: hostname-binding för rotdomänen (samma steg som www).
+resource apexDomainBinding 'Microsoft.Web/sites/hostNameBindings@2024-11-01' = if (customDomainStage != 'disabled' && !empty(apexDomain)) {
+  parent: webApp
+  name: apexDomain
+  properties: {
+    hostNameType: 'Verified'
+    sslState: customDomainStage == 'tlsBinding' ? 'SniEnabled' : 'Disabled'
+    thumbprint: customDomainStage == 'tlsBinding' ? managedCertificateApex!.properties.thumbprint : null
+  }
+}
+
 // Steg 3: gratis App Service Managed Certificate. Kräver att hostname-
 // bindningen är verifierad (steg 'binding' i ett tidigare deployment) och
 // att TXT-posten asuid.<domän> finns i DNS. Följ därför steg-ordningen —
 // hoppa inte direkt till 'certificate' eller 'tlsBinding' från 'disabled'.
+// OBS: enligt Microsofts migreringsdokumentation kan managed certificate för
+// en aktiv domän utfärdas först efter att DNS pekar på appen. För att undvika
+// HTTPS-avbrott vid cutover: bind hostnames före cutover och ladda upp ett
+// eget PFX-certifikat som binds med SNI (manuellt steg), eller acceptera en
+// kort HTTPS-lucka mellan cutover och certifikatutfärdande.
 resource managedCertificate 'Microsoft.Web/certificates@2024-11-01' = if (customDomainStage == 'certificate' || customDomainStage == 'tlsBinding') {
   name: '${webAppName}-managed-cert'
   location: location
@@ -199,6 +218,18 @@ resource managedCertificate 'Microsoft.Web/certificates@2024-11-01' = if (custom
   properties: {
     serverFarmId: plan.id
     canonicalName: customDomain
+    domainValidationMethod: 'dns-txt-token'
+  }
+}
+
+// Steg 3b: motsvarande managed certificate för rotdomänen.
+resource managedCertificateApex 'Microsoft.Web/certificates@2024-11-01' = if ((customDomainStage == 'certificate' || customDomainStage == 'tlsBinding') && !empty(apexDomain)) {
+  name: '${webAppName}-managed-cert-apex'
+  location: location
+  tags: tags
+  properties: {
+    serverFarmId: plan.id
+    canonicalName: apexDomain
     domainValidationMethod: 'dns-txt-token'
   }
 }

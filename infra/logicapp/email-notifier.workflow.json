@@ -55,9 +55,10 @@
       "type": "Http",
       "inputs": {
         "method": "GET",
-        "uri": "@{parameters('storageEndpoint')}/@{parameters('tableName')}()?$filter=PartitionKey%20eq%20%27outbox%27%20and%20(status%20eq%20%27Utkorg%27%20or%20status%20eq%20%27Skickar%27%20or%20status%20eq%20%27Misslyckad%27)%20and%20attemptCount%20lt%20@{parameters('maxAttempts')}",
+        "uri": "@{parameters('storageEndpoint')}/@{parameters('tableName')}()?$filter=PartitionKey%20eq%20%27outbox%27%20and%20%28status%20eq%20%27Skickar%27%20or%20%28%28status%20eq%20%27Utkorg%27%20or%20status%20eq%20%27Misslyckad%27%29%20and%20attemptCount%20lt%20@{parameters('maxAttempts')}%29%29",
         "headers": {
-          "x-ms-version": "2019-02-02"
+          "x-ms-version": "2019-02-02",
+          "Accept": "application/json;odata=minimalmetadata"
         },
         "authentication": {
           "type": "ManagedServiceIdentity",
@@ -173,9 +174,10 @@
                       "body": {
                         "from": "@{parameters('mailFrom')}",
                         "to": "@{items('Behandla_varje_post')?['mailTo']}",
-                        "reply_to": "@{parameters('mailReplyTo')}",
+                        "reply_to": "@{if(empty(items('Behandla_varje_post')?['mailReplyTo']), parameters('mailReplyTo'), items('Behandla_varje_post')?['mailReplyTo'])}",
                         "subject": "@{items('Behandla_varje_post')?['mailSubject']}",
-                        "html": "@{items('Behandla_varje_post')?['mailHtml']}"
+                        "html": "@{items('Behandla_varje_post')?['mailHtml']}",
+                        "text": "@{coalesce(items('Behandla_varje_post')?['mailText'], '')}"
                       }
                     },
                     "retryPolicy": {

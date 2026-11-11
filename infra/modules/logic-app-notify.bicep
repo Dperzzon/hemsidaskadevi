@@ -56,6 +56,7 @@ param hostRecipient string = 'skadevigard@gmail.com'
 param tableDataContributorRoleId string = '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3'
 
 @description('Rolldefinitions-ID för Key Vault Secrets User i SKADEVIS tenant (verifierat 2026-11-11 via az role definition list — dataActions: secrets/getSecret + readMetadata endast).')
+#disable-next-line secure-secrets-in-params
 param keyVaultSecretsUserRoleId string = '4633458b-17de-408a-b874-0445c86b69e6'
 
 @description('Miljötagg.')
@@ -106,25 +107,25 @@ resource workflow 'Microsoft.Logic/workflows@2019-05-01' = {
     state: 'Disabled' // aktiveras först efter verifiering (godkännande krävs)
     definition: workflowDefinition
     parameters: {
-      'storageEndpoint': {
+      storageEndpoint: {
         value: storageEndpoint
       }
-      'tableName': {
+      tableName: {
         value: 'bookingrequests'
       }
-      'resendApiUrl': {
+      resendApiUrl: {
         value: 'https://api.resend.com/emails'
       }
-      'mailFrom': {
+      mailFrom: {
         value: mailFrom
       }
-      'mailReplyTo': {
+      mailReplyTo: {
         value: mailReplyTo
       }
-      'hostRecipient': {
+      hostRecipient: {
         value: hostRecipient
       }
-      'keyVaultSecretUri': {
+      keyVaultSecretUri: {
         value: '${keyVault.properties.vaultUri}secrets/${keyVaultSecretName}?api-version=7.4'
       }
     }
