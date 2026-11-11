@@ -14,6 +14,8 @@
     "start": "node server/index.js",
     "admin": "node server/admin/index.js",
     "admin:dev": "node server/admin/index.js --demo --dev-auth",
+    "package:admin": "node scripts/package-admin.mjs",
+    "smoke:admin": "node scripts/smoke-admin-package.mjs",
     "test": "node --test \"tests/unit/*.test.js\" \"tests/unit/*.test.mjs\"",
     "test:smoke": "node scripts/smoke-test.mjs",
     "seed:test-outbox": "node scripts/test-outbox-seed.mjs",

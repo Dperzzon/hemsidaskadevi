@@ -446,6 +446,7 @@ test('Table-adaptern gör endast read-only GET med managed identity', async () =
 test('admin-Bicep använder endast läsroll på tabellen och inga hemligheter', () => {
   const template = fs.readFileSync(path.join(__dirname, '../../infra/admin-webapp.bicep'), 'utf8');
   assert.match(template, /76199698-9eea-4c19-bc75-cec21354c6b6/);
+  assert.match(template, /de139f84-1756-47ae-9be6-808fbbe84772/);
   assert.doesNotMatch(template, /0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3/);
   assert.doesNotMatch(template, /Microsoft\.Network\/dnsZones/);
   assert.doesNotMatch(template, /re_[A-Za-z0-9]/);

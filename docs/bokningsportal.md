@@ -64,9 +64,10 @@ Alla `/api/admin/*` kräver autentisering och administratörsroll:
 | Custom domain | `bokning.skadeviherrgard.com` först efter DNS-cutover |
 
 Den fristående mallen `infra/admin-webapp.bicep` skapar appen, managed
-identity och läsrollen på tabellen. Den deployas inte av `infra/main.bicep`
-och körs inte automatiskt. `infra/admin-webapp.bicepparam` innehåller samma
-värden utan hemligheter.
+identity, läsrollen på tabellen och en `Website Contributor`-roll för den
+befintliga GitHub Actions-identiteten, begränsad till den nya adminappen.
+Den deployas inte av `infra/main.bicep` och körs inte automatiskt.
+`infra/admin-webapp.bicepparam` innehåller samma värden utan hemligheter.
 
 Mallen sätter `ADMIN_TRUST_EASY_AUTH=1`. Appen fail-closed om Easy Auth inte
 är aktiverad och verifierad; den startar då inte. Aktivera därför Easy Auth
@@ -218,8 +219,19 @@ Publicera endast adminappens paket:
 
 Startkommandot ska vara `node server/admin/index.js`, inte den publika
 serverns `npm start`. Den publika appen och dess deployment ska inte ändras.
-Använd inte den publika deploy-workflowen mot adminappen; skapa en separat,
-manuellt godkänd admin-workflow när appen finns.
+Använd inte den publika deploy-workflowen mot adminappen; använd den separata,
+manuellt godkända `.github/workflows/deploy-admin.yml` när appen finns.
+
+Bygg och verifiera paketet lokalt:
+
+```powershell
+npm run package:admin
+npm run smoke:admin
+```
+
+Paketet hamnar i `package-admin/`, innehåller endast adminens serverfiler,
+`store.js`, `pricing.js`, nödvändiga statiska resurser och `shared/`. Det
+innehåller inte den publika sajten, Resend/Logic App-koden eller hemligheter.
 
 ## 5. Datakälla och verkliga bokningar
 
@@ -333,8 +345,11 @@ DNS-zonen ska inte flyttas som en del av denna publicering.
 server/admin/                 admin-server, auth, domän, vyer och demorepository
 server/admin/repository/table.js   read-only Table Storage med managed identity
 server/admin/public/          admin-CSS och minimal browser-JS
-infra/admin-webapp.bicep      förberedd app, managed identity och Reader-roll
+infra/admin-webapp.bicep      förberedd app, managed identity, Reader-roll och deployroll
 infra/admin-webapp.bicepparam parametervärden utan hemligheter
+scripts/package-admin.mjs      separat publiceringspaket för adminappen
+scripts/smoke-admin-package.mjs minimal paketkontroll
+.github/workflows/deploy-admin.yml manuellt godkänd adminpublicering
 tests/unit/admin-portal.test.js
 docs/bokningsportal.md
 ```

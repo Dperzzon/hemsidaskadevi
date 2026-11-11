@@ -29,6 +29,9 @@ param environment string = 'prod'
 @description('Ägartagg.')
 param owner string = 'Skadevi'
 
+@description('Principal-ID för GitHub Actions OIDC-identiteten. Tomt = ingen deployroll. Rollen begränsas till den nya adminappen.')
+param githubDeployPrincipalId string = ''
+
 @description('Sätts till 1 först när App Service Authentication är aktiverad och verifierad. Appen fail-closed utan denna.')
 param adminTrustEasyAuth string = '1'
 
@@ -107,7 +110,24 @@ resource tableReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   }
 }
 
+// Ger GitHub Actions-identiteten rätt att deploya endast till den nya
+// adminappen. Den publika appens befintliga roll och workflow påverkas inte.
+// Roll-ID = inbyggda "Website Contributor".
+resource githubDeployRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(githubDeployPrincipalId)) {
+  name: guid(adminApp.id, githubDeployPrincipalId, 'website-contributor')
+  scope: adminApp
+  properties: {
+    roleDefinitionId: subscriptionResourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      'de139f84-1756-47ae-9be6-808fbbe84772'
+    )
+    principalId: githubDeployPrincipalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
 output adminAppId string = adminApp.id
 output adminAppDefaultHostname string = adminApp.properties.defaultHostName
 output adminAppPrincipalId string = adminApp.identity.principalId
 output tableReaderRoleAssignmentId string = tableReader.id
+output githubDeployPrincipalId string = githubDeployPrincipalId
