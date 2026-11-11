@@ -209,10 +209,13 @@ endast partition `outbox`, skickar inga mejl och kräver Storage Table Data
 Contributor på testtabellen. Testoperatörens objekt-ID läggs in som
 `testOperatorPrincipalId` vid deployment/what-if.
 
-För HTTP-fel och timeout används en mock-endpoint via `resendApiUrl`. Använd ett
-falskt testnyckelvärde i `resend-api-key-test` för mock-testerna så att ingen
-riktig nyckel exponeras. Riktig sändning testas först mot Resends testadresser
-efter domänverifiering.
+För HTTP-fel och timeout används en mock-endpoint via `resendApiUrl`. Standard-
+parameterfilen använder den icke-routbara adressen
+`https://mock-resend.invalid/emails`, så ett mocktest kan aldrig nå Resends
+riktiga API av misstag. Använd ett tydligt ogiltigt testnyckelvärde i
+`resend-api-key-test` för mock-testerna. Riktig sändning kräver den separata
+filen `infra/test/logic-app-notify-test-real.bicepparam`, verifierad domän och
+en giltig Resend-nyckel med endast Sending access.
 
 Kostnad: ingen ny storage-account och inget nytt Key Vault. Testtabellen är
 några KB, test-Logic Appen kostar inget när den är Disabled och enstaka
@@ -223,6 +226,25 @@ What-if (förberett, ej deployat):
 
 - Fas A: **4 att skapa** (testtabell, testworkflow, test-MI:ns tabellroll,
   valfri operatörsroll), **8 Ignore**, **0 Modify/Delete**.
-- Fas B: **1 att skapa** (testsekretets roll), **8 Ignore**, **0 Modify/Delete**.
+- Fas B: **1 att skapa** (testsekretets roll), **9 Ignore**, **0 Modify/Delete**.
 
 Produktionsresurserna visas endast som `Ignore` i testmiljöns what-if.
+
+## Steg 7L — mocktest kontra riktigt test
+
+- Den **driftsatta** testworkflowen skapades före 7L och har fortfarande
+  `https://api.resend.com/emails` som `resendApiUrl`. Den är **Disabled** och
+  får inte aktiveras för mocktester förrän den redeployats med standardfilen
+  (mock-URL). Detta kräver ett separat godkännande.
+- Lokal kod/parameterfil använder nu `https://mock-resend.invalid/emails`.
+  Det är en icke-routbar reservdomän och kan inte nå Resend.
+- `infra/test/logic-app-notify-test-real.bicepparam` är den enda filen som
+  pekar på Resends riktiga API. Den kräver verifierad domän, giltig testnyckel
+  med Sending access och uttryckligt godkännande.
+- Testsekretet `resend-api-key-test` finns ännu inte. Fas B kan inte deployas
+  förrän det skapats manuellt. Det får aldrig innehålla produktionsnyckeln.
+- Harnesket begränsar mottagare till Resends testadresser eller Skadevis
+  kontrollerade brevlåda. En manuell tabellskrivning med en annan principal är
+  teoretiskt möjlig för den som har tabellrollen. För ett hårdare skydd kan
+  testworkflowet senare kompletteras med en uttrycklig mottagarallowlist före
+  sändning; det är inte infört i detta steg.

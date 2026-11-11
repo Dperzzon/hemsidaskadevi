@@ -42,8 +42,8 @@ param keyVaultName string = 'kv-skadevi-prod'
 ])
 param testSecretName string = 'resend-api-key-test'
 
-@description('Resend-slutpunkt. Använd mock-URL för fel- och timeouttester.')
-param resendApiUrl string = 'https://api.resend.com/emails'
+@description('Resend-slutpunkt. Default är en icke-routbar mock-URL. Riktig Resend-URL får endast användas i ett separat, godkänt realt test med giltig testnyckel.')
+param resendApiUrl string = 'https://mock-resend.invalid/emails'
 
 @description('Testavsändare. onboarding@resend.dev får endast skicka till Resend-kontots ägarmejl före domänverifiering.')
 param mailFrom string = 'onboarding@resend.dev'

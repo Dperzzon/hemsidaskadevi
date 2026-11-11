@@ -12,6 +12,7 @@ const root = path.join(__dirname, '..', '..');
 const testTemplate = JSON.parse(fs.readFileSync(path.join(root, 'infra', 'test', 'logic-app-notify-test.json'), 'utf8'));
 const prodModule = JSON.parse(fs.readFileSync(path.join(root, 'infra', 'modules', 'logic-app-notify.json'), 'utf8'));
 const testParams = fs.readFileSync(path.join(root, 'infra', 'test', 'logic-app-notify-test.bicepparam'), 'utf8');
+const realTestParams = fs.readFileSync(path.join(root, 'infra', 'test', 'logic-app-notify-test-real.bicepparam'), 'utf8');
 const testPhaseBParams = fs.readFileSync(path.join(root, 'infra', 'test', 'keyvault-secret-role-test.bicepparam'), 'utf8');
 
 const nested = testTemplate.resources.find((resource) => resource.type === 'Microsoft.Resources/deployments');
@@ -46,6 +47,21 @@ test('testtabellen och testsekretet är låsta till testvärden', () => {
   assert.equal(testTemplate.parameters.testSecretName.defaultValue, 'resend-api-key-test');
   assert.ok(testParams.includes("param testTableName = 'bookingrequeststest'"));
   assert.ok(testParams.includes("param testSecretName = 'resend-api-key-test'"));
+});
+
+test('mocktestet använder icke-routbar mock-URL som standard – aldrig produktions-URL', () => {
+  assert.equal(testTemplate.parameters.resendApiUrl.defaultValue, 'https://mock-resend.invalid/emails');
+  assert.ok(testParams.includes("param resendApiUrl = 'https://mock-resend.invalid/emails'"));
+  assert.ok(!testParams.includes("param resendApiUrl = 'https://api.resend.com/emails'"));
+  assert.equal(prodModule.parameters.resendApiUrl.defaultValue, 'https://api.resend.com/emails');
+});
+
+test('den separata real-testfilen är explicit och använder testadresser', () => {
+  assert.ok(realTestParams.includes("param resendApiUrl = 'https://api.resend.com/emails'"));
+  assert.ok(realTestParams.includes("param testSecretName = 'resend-api-key-test'"));
+  assert.ok(realTestParams.includes("param mailFrom = 'bokning@skadeviherrgard.com'"));
+  assert.ok(realTestParams.includes("param hostRecipient = 'delivered+host@resend.dev'"));
+  assert.ok(!realTestParams.includes("param testSecretName = 'resend-api-key'"));
 });
 
 test('testworkflowet pekar på testtabellen, testsekretet och mockbar Resend-URL', () => {
