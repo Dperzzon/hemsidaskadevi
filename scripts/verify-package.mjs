@@ -71,6 +71,7 @@ const required = [
   'server/booking/mail.js',
   'server/booking/refund.js',
   'server/booking/house-rules.json',
+  'shared/pricing-config.json',
   'dist/index.html',
   'package.json',
 ];
