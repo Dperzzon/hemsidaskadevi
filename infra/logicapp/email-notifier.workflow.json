@@ -2,10 +2,6 @@
   "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
   "contentVersion": "1.0.0.0",
   "parameters": {
-    "$connections": {
-      "defaultValue": {},
-      "type": "Object"
-    },
     "storageEndpoint": {
       "defaultValue": "https://SKADEVI-LAGRINGSKONTO.table.core.windows.net",
       "type": "String"
@@ -17,6 +13,26 @@
     "maxAttempts": {
       "defaultValue": 5,
       "type": "Int"
+    },
+    "resendApiUrl": {
+      "defaultValue": "https://api.resend.com/emails",
+      "type": "String"
+    },
+    "mailFrom": {
+      "defaultValue": "bokning@skadeviherrgard.com",
+      "type": "String"
+    },
+    "mailReplyTo": {
+      "defaultValue": "skadevigard@gmail.com",
+      "type": "String"
+    },
+    "hostRecipient": {
+      "defaultValue": "skadevigard@gmail.com",
+      "type": "String"
+    },
+    "keyVaultSecretUri": {
+      "defaultValue": "https://SKADEVI-KEYVAULT.vault.azure.net/secrets/resend-api-key?api-version=7.4",
+      "type": "String"
     }
   },
   "triggers": {
@@ -65,8 +81,27 @@
           "type": "Foreach",
           "foreach": "@body('Haemta_utkorg')?['value']",
           "actions": {
+            "Hamta_api_nyckel": {
+              "type": "Http",
+              "inputs": {
+                "method": "GET",
+                "uri": "@{parameters('keyVaultSecretUri')}",
+                "authentication": {
+                  "type": "ManagedServiceIdentity",
+                  "audience": "https://vault.azure.net"
+                }
+              },
+              "runtimeConfiguration": {
+                "secureData": {
+                  "properties": ["inputs", "outputs"]
+                }
+              }
+            },
             "Markera_som_under_skickning": {
               "type": "Http",
+              "runAfter": {
+                "Hamta_api_nyckel": ["Succeeded"]
+              },
               "inputs": {
                 "method": "PATCH",
                 "uri": "@{parameters('storageEndpoint')}/@{parameters('tableName')}(PartitionKey='@{items('Behandla_varje_post')?['PartitionKey']}',RowKey='@{items('Behandla_varje_post')?['RowKey']}')",
@@ -91,29 +126,44 @@
                 }
               }
             },
-            "Skicka_mejl_(V2)": {
-              "type": "ApiConnection",
+            "Skicka_mejl_resend": {
+              "type": "Http",
+              "runAfter": {
+                "Markera_som_under_skickning": ["Succeeded"]
+              },
               "inputs": {
-                "host": {
-                  "connection": {
-                    "name": "@parameters('$connections')['gmail']['connectionId']"
-                  }
+                "method": "POST",
+                "uri": "@{parameters('resendApiUrl')}",
+                "headers": {
+                  "Content-Type": "application/json",
+                  "Authorization": "Bearer @{body('Hamta_api_nyckel')?['value']}",
+                  "Idempotency-Key": "@{items('Behandla_varje_post')?['RowKey']}"
                 },
-                "method": "post",
-                "path": "/v2/Mail",
                 "body": {
-                  "To": "@{items('Behandla_varje_post')?['mailTo']}",
-                  "Subject": "@{items('Behandla_varje_post')?['mailSubject']}",
-                  "Body": "@{items('Behandla_varje_post')?['mailHtml']}",
-                  "IsHtml": true
+                  "from": "@{parameters('mailFrom')}",
+                  "to": "@{items('Behandla_varje_post')?['mailTo']}",
+                  "reply_to": "@{parameters('mailReplyTo')}",
+                  "subject": "@{items('Behandla_varje_post')?['mailSubject']}",
+                  "html": "@{items('Behandla_varje_post')?['mailHtml']}"
+                }
+              },
+              "retryPolicy": {
+                "type": "exponential",
+                "count": 4,
+                "minimumInterval": "PT30S",
+                "maximumInterval": "PT10M"
+              },
+              "runtimeConfiguration": {
+                "secureData": {
+                  "properties": ["inputs", "outputs"]
                 }
               }
-              // OBS: explicit retryPolicy stöds inte av Logic Apps-schemat
-              // för ApiConnection-actions i Foreach. Logic Apps standard-
-              // återförsökspolicy gäller (exponentiell, 4 försök, 5 s–1 h).
             },
             "Markera_som_skickad": {
               "type": "Http",
+              "runAfter": {
+                "Skicka_mejl_resend": ["Succeeded"]
+              },
               "inputs": {
                 "method": "PATCH",
                 "uri": "@{parameters('storageEndpoint')}/@{parameters('tableName')}(PartitionKey='@{items('Behandla_varje_post')?['PartitionKey']}',RowKey='@{items('Behandla_varje_post')?['RowKey']}')",
@@ -123,15 +173,14 @@
                 },
                 "body": {
                   "status": "Skickad",
-                  "sentAt": "@{utcNow()}"
+                  "sentAt": "@{utcNow()}",
+                  "resendId": "@{body('Skicka_mejl_resend')?['id']}",
+                  "deliveryStatus": "Inväntar leveranskontroll"
                 },
                 "authentication": {
                   "type": "ManagedServiceIdentity",
                   "audience": "https://storage.azure.com/"
                 }
-              },
-              "runAfter": {
-                "Skicka_mejl_(V2)": ["Succeeded"]
               },
               "runtimeConfiguration": {
                 "secureData": {
@@ -141,6 +190,9 @@
             },
             "Markera_som_misslyckad": {
               "type": "Http",
+              "runAfter": {
+                "Skicka_mejl_resend": ["Failed", "TimedOut"]
+              },
               "inputs": {
                 "method": "PATCH",
                 "uri": "@{parameters('storageEndpoint')}/@{parameters('tableName')}(PartitionKey='@{items('Behandla_varje_post')?['PartitionKey']}',RowKey='@{items('Behandla_varje_post')?['RowKey']}')",
@@ -149,15 +201,14 @@
                   "If-Match": "*"
                 },
                 "body": {
-                  "status": "Misslyckad"
+                  "status": "Misslyckad",
+                  "failedAt": "@{utcNow()}",
+                  "deliveryStatus": "Skick misslyckades"
                 },
                 "authentication": {
                   "type": "ManagedServiceIdentity",
                   "audience": "https://storage.azure.com/"
                 }
-              },
-              "runAfter": {
-                "Skicka_mejl_(V2)": ["Failed", "TimedOut"]
               },
               "runtimeConfiguration": {
                 "secureData": {

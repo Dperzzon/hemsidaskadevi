@@ -122,6 +122,23 @@ module bookingStorage 'modules/storage-tables.bicep' = if (!empty(bookingStorage
   }
 }
 
+// Logic App för bokningsnotiser (Resend via HTTP, API-nyckel i Key Vault).
+// Skapas bara när bokningslagringen är beslutad — samma villkor som
+// bookingStorage. Deployas i Disabled-läge; aktivering kräver godkännande.
+module logicAppNotify 'modules/logic-app-notify.bicep' = if (!empty(bookingStorageAccountName)) {
+  name: 'logic-app-notify'
+  scope: rg
+  params: {
+    location: location
+    storageAccountName: bookingStorageAccountName
+    storageEndpoint: 'https://${bookingStorageAccountName}.table.core.windows.net'
+    bookingTableResourceId: subscriptionResourceId('Microsoft.Storage/storageAccounts', bookingStorageAccountName, 'tableServices', 'default', 'tables', 'bookingrequests')
+    keyVaultName: keyVaultName
+    environment: environment
+    owner: owner
+  }
+}
+
 module githubOidc 'modules/github-oidc.bicep' = {
   name: 'github-oidc'
   scope: rg
