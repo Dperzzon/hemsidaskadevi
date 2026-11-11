@@ -163,6 +163,41 @@ plaintext (`mailHtml`/`mailText`); Logic App skickar båda fälten till Resend.
   (`resend._domainkey`, `send` TXT/MX) finns inte i DNS. Domänverifiering hos
   Resend kan därför inte slutföras förrän överföringen till GoDaddy är klar.
 
+### Steg 7C — isolerad deployment av Logic App
+
+Den isolerade deploymenten använder endast `infra/modules/logic-app-notify.bicep`
+med `infra/logic-app-notify.bicepparam` och skapar exakt:
+
+1. `logic-skadevi-bokningsnotis` (`state: Disabled`, system-assigned identity)
+2. `Storage Table Data Contributor` på tabellnivån `bookingrequests`
+3. `Key Vault Secrets User` på `kv-skadevi-prod`
+
+Ingen App Service, lagringskonto, Key Vault-konfiguration eller DNS ingår i
+deploymenten; befintliga resurser refereras endast som `existing`.
+
+Kör alltid validate och what-if före en godkänd deployment:
+
+```powershell
+az deployment group validate -g rg-skadevi-prod `
+  --template-file infra/modules/logic-app-notify.bicep `
+  --parameters infra/logic-app-notify.bicepparam
+
+az deployment group what-if -g rg-skadevi-prod `
+  --template-file infra/modules/logic-app-notify.bicep `
+  --parameters infra/logic-app-notify.bicepparam
+```
+
+What-if ska visa **3 att skapa** och övriga befintliga resurser som `Ignore`.
+Om något befintligt visas som `Modify` eller `Delete` ska deploymenten avbrytas.
+
+**RBAC-scope:** Azure RBAC kan inte begränsa en Key Vault-roll till ett enskilt
+sekretessnamn. Minsta möjliga RBAC-scope är valvet; även Key Vault access
+policies gäller på valvnivå. Därför används `Key Vault Secrets User` (endast
+`secrets/getSecret` + metadata) på `kv-skadevi-prod`. Flödet refererar bara
+`resend-api-key`, men identiteten kan tekniskt läsa valvets övriga hemligheter.
+Det är en känd kvarstående risk som accepteras tills ett separat Key Vault för
+Resend eventuellt införs.
+
 ### GDPR — Resends personuppgiftsbehandling (kräver godkännande före aktivering)
 
 - **Lagringsplats:** all kontodata (metadata, loggar, API-poster) lagras i
