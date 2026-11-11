@@ -105,6 +105,9 @@ jobs:
           rsync -a --exclude='*.test.js' --exclude='*.spec.js' \
             --exclude='__tests__/' --exclude='*.md' --exclude='.env*' \
             server/ package/server/
+          # Delad prisdefinition som servern läser vid start
+          # (server/booking/pricing.js kräver ../../shared/pricing-config.json).
+          cp -r shared package/shared
           cp -r dist/. package/dist/
           # Regressionskontroll: saknade servermoduler får aldrig nå Azure.
           node scripts/verify-package.mjs ./package

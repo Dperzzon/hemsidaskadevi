@@ -59,8 +59,8 @@ test('varje högprisperiod: första och sista debiterade natt samt omgivande nä
   }
 });
 
-test('påsk 2026–2028: onsdagen före skärtorsdag till och med annandag påsk', () => {
-  // 2026: påskdagen 5 april; natten 2/4 (onsdag) – natten 6/4 (måndag, annandag påsk).
+test('påsk 2026–2028: skärtorsdagen till och med annandag påsk', () => {
+  // 2026: påskdagen 5 april; natten 2/4 (skärtorsdag) – natten 6/4 (måndag, annandag påsk).
   assert.equal(nightRate('2026-04-01').type, 'weekday'); // natten före perioden
   assert.equal(nightRate('2026-04-02').type, 'peak');
   assert.equal(nightRate('2026-04-06').type, 'peak'); // annandag påsk (måndag)
