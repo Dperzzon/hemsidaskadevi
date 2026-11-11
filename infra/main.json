@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.49.2.45890",
-      "templateHash": "1426291537968215162"
+      "templateHash": "7070105931141248763"
     }
   },
   "parameters": {
@@ -73,6 +73,13 @@
       "type": "string",
       "metadata": {
         "description": "Domän som planeras kopplas till webbappen."
+      }
+    },
+    "apexDomain": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Rotdomän som ska bindas och 301-omdirigeras till customDomain (www). Tomt = rotdomänen hanteras inte. Kräver A-post + TXT asuid i DNS innan bindning."
       }
     },
     "keyVaultName": {
@@ -190,6 +197,9 @@
           "customDomain": {
             "value": "[parameters('customDomain')]"
           },
+          "apexDomain": {
+            "value": "[parameters('apexDomain')]"
+          },
           "customDomainStage": {
             "value": "[parameters('customDomainStage')]"
           },
@@ -213,7 +223,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.49.2.45890",
-              "templateHash": "14901013172366391805"
+              "templateHash": "2866168765345082724"
             }
           },
           "parameters": {
@@ -289,6 +299,13 @@
                 "description": "Domän som planeras kopplas; används som tagg och i domänstegen."
               }
             },
+            "apexDomain": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Rotdomän som ska bindas och 301-omdirigeras till customDomain (www). Tomt = rotdomänen hanteras inte. Kräver A-post mot appens inbound-IP samt TXT asuid i DNS."
+              }
+            },
             "customDomainStage": {
               "type": "string",
               "defaultValue": "disabled",
@@ -299,7 +316,7 @@
                 "tlsBinding"
               ],
               "metadata": {
-                "description": "Domänaktivering sker i separata deployment-steg: \"binding\" (hostname utan SSL), \"certificate\" (gratis hanterat certifikat, kräver verifierad binding), \"tlsBinding\" (SNI + thumbprint)."
+                "description": "Domänaktivering sker i separata deployment-steg: \"binding\" (hostname utan SSL), \"certificate\" (gratis hanterat certifikat, kräver verifierad binding), \"tlsBinding\" (SNI + thumbprint). Managed Certificate kan enligt Microsofts dokumentation utfärdas först EFTER att DNS pekar på appen (manage-custom-dns-migrate-domain) — binda därför hostnames före cutover och certifikatet efter."
               }
             },
             "secretAdminPrincipalId": {
@@ -434,6 +451,21 @@
               ]
             },
             {
+              "condition": "[and(not(equals(parameters('customDomainStage'), 'disabled')), not(empty(parameters('apexDomain'))))]",
+              "type": "Microsoft.Web/sites/hostNameBindings",
+              "apiVersion": "2024-11-01",
+              "name": "[format('{0}/{1}', parameters('webAppName'), parameters('apexDomain'))]",
+              "properties": {
+                "hostNameType": "Verified",
+                "sslState": "[if(equals(parameters('customDomainStage'), 'tlsBinding'), 'SniEnabled', 'Disabled')]",
+                "thumbprint": "[if(equals(parameters('customDomainStage'), 'tlsBinding'), reference(resourceId('Microsoft.Web/certificates', format('{0}-managed-cert-apex', parameters('webAppName'))), '2024-11-01').thumbprint, null())]"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Web/certificates', format('{0}-managed-cert-apex', parameters('webAppName')))]",
+                "[resourceId('Microsoft.Web/sites', parameters('webAppName'))]"
+              ]
+            },
+            {
               "condition": "[or(equals(parameters('customDomainStage'), 'certificate'), equals(parameters('customDomainStage'), 'tlsBinding'))]",
               "type": "Microsoft.Web/certificates",
               "apiVersion": "2024-11-01",
@@ -443,6 +475,22 @@
               "properties": {
                 "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', parameters('planName'))]",
                 "canonicalName": "[parameters('customDomain')]",
+                "domainValidationMethod": "dns-txt-token"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Web/serverfarms', parameters('planName'))]"
+              ]
+            },
+            {
+              "condition": "[and(or(equals(parameters('customDomainStage'), 'certificate'), equals(parameters('customDomainStage'), 'tlsBinding')), not(empty(parameters('apexDomain'))))]",
+              "type": "Microsoft.Web/certificates",
+              "apiVersion": "2024-11-01",
+              "name": "[format('{0}-managed-cert-apex', parameters('webAppName'))]",
+              "location": "[parameters('location')]",
+              "tags": "[variables('tags')]",
+              "properties": {
+                "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', parameters('planName'))]",
+                "canonicalName": "[parameters('apexDomain')]",
                 "domainValidationMethod": "dns-txt-token"
               },
               "dependsOn": [
@@ -512,7 +560,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.49.2.45890",
-              "templateHash": "2780946466414345243"
+              "templateHash": "5376919099869805879"
             }
           },
           "parameters": {
@@ -563,7 +611,7 @@
               "type": "string",
               "defaultValue": "",
               "metadata": {
-                "description": "Objekt-ID (principalId) för Logic Appens system-assigned managed identity — får Storage Table Data Contributor på tabellen."
+                "description": "Objekt-ID (principalId) för Logic Appens system-assigned managed identity — ska ligga i SAMMA Entra-tenant som lagringen (Skadevi-tenant 7169feeb-…). Kors-tenant fungerar inte: Entra-only-lagring avvisar token från annan tenant, och Azure RBAC kan inte tilldela principals från en annan tenant. Får Storage Table Data Contributor på tabellen."
               }
             },
             "retentionDays": {

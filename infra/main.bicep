@@ -36,6 +36,9 @@ param owner string
 @description('Domän som planeras kopplas till webbappen.')
 param customDomain string
 
+@description('Rotdomän som ska bindas och 301-omdirigeras till customDomain (www). Tomt = rotdomänen hanteras inte. Kräver A-post + TXT asuid i DNS innan bindning.')
+param apexDomain string = ''
+
 @description('Namn på Key Vault som lagrar kalenderhemligheten. Hemliga värdet sätts aldrig via Bicep.')
 param keyVaultName string
 
@@ -96,6 +99,7 @@ module webapp 'modules/webapp.bicep' = {
     environment: environment
     owner: owner
     customDomain: customDomain
+    apexDomain: apexDomain
     customDomainStage: customDomainStage
     keyVaultName: keyVaultName
     keyVaultSecretName: keyVaultSecretName
