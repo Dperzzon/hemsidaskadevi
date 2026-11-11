@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.49.2.45890",
-      "templateHash": "2780946466414345243"
+      "templateHash": "15757490413319174979"
     }
   },
   "parameters": {
@@ -56,7 +56,7 @@
       "type": "string",
       "defaultValue": "",
       "metadata": {
-        "description": "Objekt-ID (principalId) för Logic Appens system-assigned managed identity — får Storage Table Data Contributor på tabellen."
+        "description": "Objekt-ID (principalId) för Logic Appens system-assigned managed identity — ska ligga i SAMMA Entra-tenant som lagringen (Skadevi-tenant 7169feeb-…). Kors-tenant fungerar inte: Entra-only-lagring avvisar token från annan tenant, och Azure RBAC kan inte tilldela principals från en annan tenant. Får Storage Table Data Contributor på tabellen."
       }
     },
     "retentionDays": {
@@ -77,7 +77,8 @@
       "Owner": "[parameters('owner')]",
       "Environment": "[parameters('environment')]",
       "ManagedBy": "Bicep (Skadevi)"
-    }
+    },
+    "tableDataContributorRoleId": "0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3"
   },
   "resources": [
     {
@@ -123,7 +124,7 @@
       "scope": "[resourceId('Microsoft.Storage/storageAccounts/tableServices/tables', parameters('storageAccountName'), 'default', parameters('tableName'))]",
       "name": "[guid(resourceId('Microsoft.Storage/storageAccounts/tableServices/tables', parameters('storageAccountName'), 'default', parameters('tableName')), 'webapp-table-contributor')]",
       "properties": {
-        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '0a9a7301-4a41-4b5c-82ff-4aeefea27a5a')]",
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('tableDataContributorRoleId'))]",
         "principalId": "[parameters('webAppPrincipalId')]",
         "principalType": "ServicePrincipal"
       },
@@ -138,7 +139,7 @@
       "scope": "[resourceId('Microsoft.Storage/storageAccounts/tableServices/tables', parameters('storageAccountName'), 'default', parameters('tableName'))]",
       "name": "[guid(resourceId('Microsoft.Storage/storageAccounts/tableServices/tables', parameters('storageAccountName'), 'default', parameters('tableName')), 'logicapp-table-contributor')]",
       "properties": {
-        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '0a9a7301-4a41-4b5c-82ff-4aeefea27a5a')]",
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('tableDataContributorRoleId'))]",
         "principalId": "[parameters('logicAppPrincipalId')]",
         "principalType": "ServicePrincipal"
       },

@@ -73,13 +73,20 @@ resource bookingsTable 'Microsoft.Storage/storageAccounts/tableServices/tables@2
 }
 
 // RBAC med minsta möjliga behörighet: dataplansrollen "Storage Table Data
-// Contributor" (0a9a7301-4a41-4b5c-82ff-4aeefea27a5a), tilldelad på TABELLNIVÅ
-// (endast den här tabellen — inte hela kontot, inte management-plan).
+// Contributor", tilldelad på TABELLNIVÅ (endast den här tabellen — inte hela
+// kontot, inte management-plan).
+// OBS: rollens välkända globala GUID (0a9a7301-4a41-4b5c-82ff-4aeefea27a5a)
+// finns INTE i Skadevis tenant (deployment "booking-storage" 2026-11-11:
+// RoleDefinitionDoesNotExist). Tenantens faktiska definition-ID är
+// 0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3 (az role definition list, roleName
+// "Storage Table Data Contributor") och används därför här.
+var tableDataContributorRoleId = '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3'
+
 resource webAppTableContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(webAppPrincipalId)) {
   name: guid(bookingsTable.id, 'webapp-table-contributor')
   scope: bookingsTable
   properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '0a9a7301-4a41-4b5c-82ff-4aeefea27a5a')
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', tableDataContributorRoleId)
     principalId: webAppPrincipalId
     principalType: 'ServicePrincipal'
   }
@@ -89,7 +96,7 @@ resource logicAppTableContributor 'Microsoft.Authorization/roleAssignments@2022-
   name: guid(bookingsTable.id, 'logicapp-table-contributor')
   scope: bookingsTable
   properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '0a9a7301-4a41-4b5c-82ff-4aeefea27a5a')
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', tableDataContributorRoleId)
     principalId: logicAppPrincipalId
     principalType: 'ServicePrincipal'
   }
