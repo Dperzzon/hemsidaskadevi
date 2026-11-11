@@ -444,3 +444,190 @@ test('okänd tillgänglighet (kalender-API fel) visar aldrig lediga datum', asyn
   await expect(page.locator('#booking-section')).toBeHidden();
   await expect(page.locator('.cal-notice')).toContainText('Tillgängligheten är okänd');
 });
+
+// --- Buggfix: byt datum direkt i kalendern även efter ifyllt formulär ---
+
+async function fillBookingForm(page) {
+  await page.locator('#field-firstname').fill('Anna');
+  await page.locator('#field-lastname').fill('Andersson');
+  await page.locator('#field-email').fill('anna@example.com');
+  await page.locator('#field-phone').fill('+4670123456');
+  await page.locator('#field-company').fill('Exempel AB');
+  await page.locator('#field-guests').selectOption('4');
+  await page.locator('#field-message').fill('Vi vill gärna ha tidig incheckning.');
+  await page.locator('#addon-slutstad').check();
+  await page.locator('#addon-lakan').check();
+  await page.locator('#linen-count').fill('3');
+  await page.locator('#addon-ved').check();
+}
+
+async function expectFormFieldsPreserved(page) {
+  await expect(page.locator('#field-firstname')).toHaveValue('Anna');
+  await expect(page.locator('#field-lastname')).toHaveValue('Andersson');
+  await expect(page.locator('#field-email')).toHaveValue('anna@example.com');
+  await expect(page.locator('#field-phone')).toHaveValue('+4670123456');
+  await expect(page.locator('#field-company')).toHaveValue('Exempel AB');
+  await expect(page.locator('#field-guests')).toHaveValue('4');
+  await expect(page.locator('#field-message')).toHaveValue('Vi vill gärna ha tidig incheckning.');
+  await expect(page.locator('#addon-slutstad')).toBeChecked();
+  await expect(page.locator('#addon-lakan')).toBeChecked();
+  await expect(page.locator('#linen-count')).toHaveValue('3');
+  await expect(page.locator('#addon-ved')).toBeChecked();
+}
+
+test('TEST A: nytt datum ersätter perioden och bevarar hela formuläret', async ({ page }) => {
+  await goto(page);
+  await clickDay(page, '2026-11-15');
+  await clickDay(page, '2026-11-18');
+  await expect(page.locator('#booking-section')).toBeVisible();
+  await fillBookingForm(page);
+
+  // 3 nätter (sön–tis) 21 000 kr + städ 2 500 + lakan 3 × 200 + ved 350.
+  await expect(page.locator('#price-total')).toContainText('24 450 kr');
+  const oldTotal = await page.locator('#price-total').textContent();
+
+  // Klick på ett nytt ledigt datum när hela perioden redan är vald.
+  await clickDay(page, '2026-11-23');
+  await expect(page.locator('#booking-section')).toBeVisible();
+  await expect(page.locator('#summary-arrival')).toHaveText('23 november 2026');
+  await expect(page.locator('#summary-departure')).toHaveText('–');
+  await expect(page.locator('#summary-nights')).toHaveText('–');
+  await expect(page.locator('#price-list')).toContainText('Välj ankomst- och avresedatum');
+  await expect(page.locator('#price-total-row')).toBeHidden();
+  await expect(page.locator('.cal-day.cal-arrival[data-date="2026-11-15"]')).toHaveCount(0);
+  await expect(page.locator('.cal-day.cal-departure[data-date="2026-11-18"]')).toHaveCount(0);
+  await expect(page.locator('.cal-day.cal-in-range[data-date="2026-11-17"]')).toHaveCount(0);
+  await expect(page.locator('.cal-day.cal-arrival[data-date="2026-11-23"]')).toHaveCount(1);
+  await expectFormFieldsPreserved(page);
+
+  // Ny avresa → nytt pris, fortfarande med alla uppgifter kvar.
+  await clickDay(page, '2026-11-25');
+  await expect(page.locator('#summary-departure')).toHaveText('25 november 2026');
+  await expect(page.locator('#summary-nights')).toHaveText('2 nätter');
+  await expect(page.locator('#price-total-row')).toBeVisible();
+  const newTotal = await page.locator('#price-total').textContent();
+  expect(newTotal).not.toBe(oldTotal);
+  // 2 nätter (mån–tis) 14 000 kr + samma tillval 3 450 kr.
+  await expect(page.locator('#price-total')).toContainText('17 450 kr');
+  await expectFormFieldsPreserved(page);
+});
+
+test('TEST B: period med bokade nätter återställs och nästa klick fungerar', async ({ page }) => {
+  await goto(page);
+  await clickDay(page, '2026-11-11');
+  await clickDay(page, '2026-11-15');
+  await expect(page.locator('.cal-selection')).toContainText('innehåller bokade nätter');
+  await expect(page.locator('.cal-selection')).toHaveClass(/cal-selection-error/);
+  await expect(page.locator('#booking-section')).toBeHidden();
+  // Ingen ogiltig period får ligga kvar som vald.
+  await expect(page.locator('.cal-day.cal-arrival')).toHaveCount(0);
+  await expect(page.locator('.cal-day.cal-departure')).toHaveCount(0);
+  await expect(page.locator('.cal-day.cal-in-range')).toHaveCount(0);
+
+  await clickDay(page, '2026-11-16');
+  await expect(page.locator('.cal-selection')).toContainText('Ankomst 16 november');
+  await expect(page.locator('.cal-selection')).not.toHaveClass(/cal-selection-error/);
+  await expect(page.locator('.cal-day.cal-arrival[data-date="2026-11-16"]')).toHaveCount(1);
+
+  await clickDay(page, '2026-11-18');
+  await expect(page.locator('#booking-section')).toBeVisible();
+  await expect(page.locator('#summary-nights')).toHaveText('2 nätter');
+});
+
+test('TEST C: upprepade datumbyten lämnar inga gamla markeringar', async ({ page }) => {
+  await goto(page);
+  await clickDay(page, '2026-11-15');
+  await clickDay(page, '2026-11-18');
+  await expect(page.locator('.cal-day.cal-arrival')).toHaveCount(1);
+  await expect(page.locator('.cal-day.cal-departure')).toHaveCount(1);
+  await expect(page.locator('.cal-day.cal-in-range')).toHaveCount(2);
+
+  await clickDay(page, '2026-11-23');
+  await expect(page.locator('.cal-day.cal-arrival[data-date="2026-11-23"]')).toHaveCount(1);
+  await expect(page.locator('.cal-day.cal-departure')).toHaveCount(0);
+  await expect(page.locator('.cal-day.cal-in-range')).toHaveCount(0);
+
+  await clickDay(page, '2026-11-25');
+  await expect(page.locator('.cal-day.cal-arrival[data-date="2026-11-23"]')).toHaveCount(1);
+  await expect(page.locator('.cal-day.cal-departure[data-date="2026-11-25"]')).toHaveCount(1);
+  await expect(page.locator('.cal-day.cal-in-range[data-date="2026-11-24"]')).toHaveCount(1);
+
+  await clickDay(page, '2026-11-16');
+  await expect(page.locator('.cal-day.cal-arrival[data-date="2026-11-16"]')).toHaveCount(1);
+  await expect(page.locator('.cal-day.cal-arrival')).toHaveCount(1);
+  await expect(page.locator('.cal-day.cal-departure')).toHaveCount(0);
+  await expect(page.locator('.cal-day.cal-in-range')).toHaveCount(0);
+
+  await clickDay(page, '2026-11-19');
+  await expect(page.locator('.cal-day.cal-arrival[data-date="2026-11-16"]')).toHaveCount(1);
+  await expect(page.locator('.cal-day.cal-departure[data-date="2026-11-19"]')).toHaveCount(1);
+  await expect(page.locator('.cal-day.cal-in-range')).toHaveCount(2);
+  await expect(page.locator('.cal-day.cal-in-range[data-date="2026-11-17"]')).toHaveCount(1);
+  await expect(page.locator('.cal-day.cal-in-range[data-date="2026-11-18"]')).toHaveCount(1);
+});
+
+test('TEST D: datumval och pris över månads- och årsskifte', async ({ page }) => {
+  await goto(page);
+  await clickDay(page, '2026-12-30');
+  await page.locator('#cal-next').click();
+  await expect(page.locator('.cal-month h3').first()).toHaveText('December 2026');
+  await expect(page.locator('.cal-month h3').nth(1)).toHaveText('Januari 2027');
+
+  await clickDay(page, '2027-01-02');
+  await expect(page.locator('#booking-section')).toBeVisible();
+  await expect(page.locator('#summary-arrival')).toHaveText('30 december 2026');
+  await expect(page.locator('#summary-departure')).toHaveText('2 januari 2027');
+  await expect(page.locator('#summary-nights')).toHaveText('3 nätter');
+  // Jul/nyår är godkänd högtidsperiod: 3 nätter × 12 000 kr.
+  await expect(page.locator('#price-list')).toContainText('varav 3 nätter med högtidspris');
+  await expect(page.locator('#price-total')).toContainText('36 000 kr');
+
+  // Tillbaka till november (valet ligger kvar) och fram till januari igen.
+  await page.locator('#cal-prev').click();
+  await expect(page.locator('.cal-month h3').first()).toHaveText('November 2026');
+  await expect(page.locator('.cal-day.cal-arrival[data-date="2026-12-30"]')).toHaveCount(1);
+  await expect(page.locator('#price-total')).toContainText('36 000 kr');
+  await page.locator('#cal-next').click();
+  await expect(page.locator('.cal-day.cal-departure[data-date="2027-01-02"]')).toHaveCount(1);
+  await expect(page.locator('#price-total')).toContainText('36 000 kr');
+});
+
+test('TEST E: datumbyte med tangentbord', async ({ page }) => {
+  await goto(page);
+  await page.locator('.cal-day[data-date="2026-11-16"]').focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.cal-day.cal-arrival[data-date="2026-11-16"]')).toHaveCount(1);
+
+  await page.locator('.cal-day[data-date="2026-11-19"]').focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#booking-section')).toBeVisible();
+
+  // Nytt datum med Enter när perioden redan är vald.
+  await page.locator('.cal-day[data-date="2026-11-23"]').focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.cal-day.cal-arrival[data-date="2026-11-23"]')).toHaveCount(1);
+  await expect(page.locator('.cal-day.cal-departure')).toHaveCount(0);
+  await expect(page.locator('#booking-section')).toBeVisible();
+
+  // Piltangenter flyttar fokus till nästa dag, Enter väljer avresa.
+  await page.keyboard.press('ArrowRight');
+  await expect(page.locator('.cal-day[data-date="2026-11-24"]')).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.cal-day.cal-departure[data-date="2026-11-24"]')).toHaveCount(1);
+  await expect(page.locator('#summary-nights')).toHaveText('1 natt');
+});
+
+test('TEST E: datumbyte i mobilvy', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await goto(page);
+  await clickDay(page, '2026-11-15');
+  await clickDay(page, '2026-11-18');
+  await expect(page.locator('#booking-section')).toBeVisible();
+  await page.locator('#field-firstname').fill('Anna');
+  await clickDay(page, '2026-11-23');
+  await expect(page.locator('.cal-day.cal-arrival[data-date="2026-11-23"]')).toHaveCount(1);
+  await expect(page.locator('#booking-section')).toBeVisible();
+  await expect(page.locator('#field-firstname')).toHaveValue('Anna');
+  await clickDay(page, '2026-11-25');
+  await expect(page.locator('#summary-departure')).toHaveText('25 november 2026');
+});
