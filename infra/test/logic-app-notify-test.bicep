@@ -48,11 +48,11 @@ param resendApiUrl string = 'https://mock-resend.invalid/emails'
 @description('Testavsändare. onboarding@resend.dev får endast skicka till Resend-kontots ägarmejl före domänverifiering.')
 param mailFrom string = 'onboarding@resend.dev'
 
-@description('Reply-to för testmejl. Använd endast testadress eller kontrollerad testbrevlåda.')
-param mailReplyTo string = 'delivered+reply@resend.dev'
+@description('Reply-to för testmejl. Endast en av de fyra tillåtna testmottagarna.')
+param mailReplyTo string = 'skadevigard@gmail.com'
 
-@description('Mottagare för testmejl till värden. Använd endast testadress eller kontrollerad testbrevlåda.')
-param hostRecipient string = 'delivered+host@resend.dev'
+@description('Mottagare för testmejl till värden. Endast en av de fyra tillåtna testmottagarna.')
+param hostRecipient string = 'skadevigard@gmail.com'
 
 @description('Objekt-ID för testoperatören som ska kunna seeda testtabellen lokalt. Lämna tom för att inte skapa rollen.')
 param testOperatorPrincipalId string = ''
@@ -108,6 +108,7 @@ module testLogicApp '../modules/logic-app-notify.bicep' = {
     mailReplyTo: mailReplyTo
     hostRecipient: hostRecipient
     assignTableRole: false
+    workflowDefinition: json(loadTextContent('../logicapp/email-notifier-test.workflow.json'))
     environment: environmentName
     owner: owner
   }

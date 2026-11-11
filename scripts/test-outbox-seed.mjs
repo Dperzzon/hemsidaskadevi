@@ -40,14 +40,17 @@ export function assertTestAccount(account) {
   }
 }
 
-// Endast Resends dokumenterade testadresser eller Skadevis kontrollerade
-// testbrevlåda. Inga riktiga gästadresser.
+// Endast de fyra adresser som testworkflowets mottagarspärr tillåter.
+// Inga plusetiketter, kommatecken, CC/BCC eller riktiga gästadresser.
 export function assertTestRecipient(address) {
   const normalized = String(address ?? '').trim().toLowerCase();
-  const resendTest = /^(delivered|bounced|complained|suppressed)(\+[a-z0-9._-]+)?@resend\.dev$/.test(normalized);
-  const controlledMailbox = normalized === 'skadevigard@gmail.com'
-    || /^skadevigard\+[a-z0-9._-]+@gmail\.com$/.test(normalized);
-  if (!resendTest && !controlledMailbox) {
+  const allowed = new Set([
+    'skadevigard@gmail.com',
+    'delivered@resend.dev',
+    'bounced@resend.dev',
+    'complained@resend.dev'
+  ]);
+  if (!allowed.has(normalized)) {
     throw new Error(`Vägrar: ${address} är inte en godkänd testmottagare`);
   }
   return address;

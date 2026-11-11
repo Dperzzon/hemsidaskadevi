@@ -23,18 +23,28 @@ test('harnesket vägrar allt utom den isolerade testtabellen', async () => {
   assert.doesNotThrow(() => h.assertTestAccount('stskadevibokningprod'));
 });
 
-test('harnesket tillåter endast Resend-testadresser eller kontrollerad testbrevlåda', async () => {
+test('harnesket tillåter endast de fyra adresserna i testworkflowets spärr', async () => {
   const h = await harness();
   for (const address of [
-    'delivered+host@resend.dev',
-    'bounced@resend.dev',
-    'complained+test@resend.dev',
     'skadevigard@gmail.com',
-    'skadevigard+resendtest@gmail.com'
+    'delivered@resend.dev',
+    'bounced@resend.dev',
+    'complained@resend.dev',
+    ' DELIVERED@RESEND.DEV '
   ]) {
     assert.doesNotThrow(() => h.assertTestRecipient(address), address);
   }
-  for (const address of ['anna@example.com', 'gast@hotmail.com', 'test@test.com']) {
+  for (const address of [
+    'anna@example.com',
+    'gast@hotmail.com',
+    'test@test.com',
+    'delivered+label@resend.dev',
+    'skadevigard+label@gmail.com',
+    'suppressed@resend.dev',
+    'delivered@resend.dev,attacker@example.com',
+    'delivered@resend.dev attacker@example.com',
+    ''
+  ]) {
     assert.throws(() => h.assertTestRecipient(address), /Vägrar/, address);
   }
 });

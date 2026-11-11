@@ -45,6 +45,9 @@ param resendApiUrl string = 'https://api.resend.com/emails'
 @description('Sätt till false i testwrappern när tabellrollen skapas separat mot en nyskapad testtabell.')
 param assignTableRole bool = true
 
+@description('Workflowdefinition. Produktion använder standardfilen; testwrappern kan skicka en testdefinition med mottagarspärr.')
+param workflowDefinition object = json(loadTextContent('../logicapp/email-notifier.workflow.json'))
+
 @description('Fullständigt resurs-ID till bokningstabellen (används för deterministiskt rolltilldelningsnamn).')
 param bookingTableResourceId string
 
@@ -78,9 +81,9 @@ var tags = {
   ManagedBy: 'Bicep (Skadevi)'
 }
 
-// Logic Apps kräver att definitionen är ett JSON-objekt i resource-payloaden —
-// loadTextContent() ger en sträng, json() tolkar den till objekt.
-var workflowDefinition = json(loadTextContent('../logicapp/email-notifier.workflow.json'))
+// Logic Apps kräver att definitionen är ett JSON-objekt i resource-payloaden.
+// Produktion använder standardparametern; testwrappern skickar testdefinitionen.
+var resolvedWorkflowDefinition = workflowDefinition
 
 // Befintligt Key Vault (skapad av webapp-modulen) refereras — skapas inte här.
 resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
@@ -112,7 +115,7 @@ resource workflow 'Microsoft.Logic/workflows@2019-05-01' = {
   }
   properties: {
     state: 'Disabled' // aktiveras först efter verifiering (godkännande krävs)
-    definition: workflowDefinition
+    definition: resolvedWorkflowDefinition
     parameters: {
       storageEndpoint: {
         value: storageEndpoint

@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.49.2.45890",
-      "templateHash": "14362222072196641622"
+      "templateHash": "13600915420100266533"
     }
   },
   "parameters": {
@@ -54,6 +54,13 @@
       "defaultValue": true,
       "metadata": {
         "description": "Sätt till false i testwrappern när tabellrollen skapas separat mot en nyskapad testtabell."
+      }
+    },
+    "workflowDefinition": {
+      "type": "object",
+      "defaultValue": "[json(variables('$fxv#0'))]",
+      "metadata": {
+        "description": "Workflowdefinition. Produktion använder standardfilen; testwrappern kan skicka en testdefinition med mottagarspärr."
       }
     },
     "bookingTableResourceId": {
@@ -125,7 +132,7 @@
       "Environment": "[parameters('environment')]",
       "ManagedBy": "Bicep (Skadevi)"
     },
-    "workflowDefinition": "[json(variables('$fxv#0'))]"
+    "resolvedWorkflowDefinition": "[parameters('workflowDefinition')]"
   },
   "resources": [
     {
@@ -139,7 +146,7 @@
       },
       "properties": {
         "state": "Disabled",
-        "definition": "[variables('workflowDefinition')]",
+        "definition": "[variables('resolvedWorkflowDefinition')]",
         "parameters": {
           "storageEndpoint": {
             "value": "[parameters('storageEndpoint')]"

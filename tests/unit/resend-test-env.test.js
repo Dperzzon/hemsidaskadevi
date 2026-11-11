@@ -14,6 +14,9 @@ const prodModule = JSON.parse(fs.readFileSync(path.join(root, 'infra', 'modules'
 const testParams = fs.readFileSync(path.join(root, 'infra', 'test', 'logic-app-notify-test.bicepparam'), 'utf8');
 const realTestParams = fs.readFileSync(path.join(root, 'infra', 'test', 'logic-app-notify-test-real.bicepparam'), 'utf8');
 const testPhaseBParams = fs.readFileSync(path.join(root, 'infra', 'test', 'keyvault-secret-role-test.bicepparam'), 'utf8');
+const testWorkflowDefinition = JSON.parse(fs.readFileSync(path.join(root, 'infra', 'logicapp', 'email-notifier-test.workflow.json'), 'utf8'));
+const prodWorkflowDefinition = JSON.parse(fs.readFileSync(path.join(root, 'infra', 'logicapp', 'email-notifier.workflow.json'), 'utf8'));
+const workflowOnlyTemplate = JSON.parse(fs.readFileSync(path.join(root, 'infra', 'test', 'logic-app-notify-test-workflow.json'), 'utf8'));
 
 const nested = testTemplate.resources.find((resource) => resource.type === 'Microsoft.Resources/deployments');
 const testTable = testTemplate.resources.find((resource) => resource.type === 'Microsoft.Storage/storageAccounts/tableServices/tables');
@@ -60,7 +63,8 @@ test('den separata real-testfilen är explicit och använder testadresser', () =
   assert.ok(realTestParams.includes("param resendApiUrl = 'https://api.resend.com/emails'"));
   assert.ok(realTestParams.includes("param testSecretName = 'resend-api-key-test'"));
   assert.ok(realTestParams.includes("param mailFrom = 'bokning@skadeviherrgard.com'"));
-  assert.ok(realTestParams.includes("param hostRecipient = 'delivered+host@resend.dev'"));
+  assert.ok(realTestParams.includes("param mailReplyTo = 'delivered@resend.dev'"));
+  assert.ok(realTestParams.includes("param hostRecipient = 'delivered@resend.dev'"));
   assert.ok(!realTestParams.includes("param testSecretName = 'resend-api-key'"));
 });
 
@@ -100,4 +104,52 @@ test('testfas B använder endast testsekretet – aldrig produktionsnyckeln', ()
   assert.ok(!testPhaseBParams.includes("param keyVaultSecretName = 'resend-api-key'"));
   assert.ok(!/^\s*param\s+keyVaultSecretName\s*=\s*'airbnb-ical-url'/m.test(testPhaseBParams));
   assert.ok(!JSON.stringify(testTemplate).includes('airbnb-ical-url'));
+});
+
+test('testdefinitionen har mottagarspärr före allt Resend-anrop – produktion har det inte', () => {
+  const loop = testWorkflowDefinition.actions.Om_det_finns_poster.actions.Behandla_varje_post.actions;
+  const guard = loop.Tillaten_mottagare;
+  assert.ok(guard, 'testdefinitionen saknar Tillaten_mottagare');
+  assert.equal(guard.type, 'If');
+  for (const address of ['skadevigard@gmail.com', 'delivered@resend.dev', 'bounced@resend.dev', 'complained@resend.dev']) {
+    assert.ok(guard.expression.includes(`'${address}'`), `${address} saknas i spärren`);
+  }
+  assert.ok(guard.expression.includes('toLower(trim(string('), 'normalisering av versaler/blanksteg saknas');
+  assert.ok(guard.expression.includes('not(contains('), 'skydd mot flera mottagare saknas');
+  assert.ok(guard.actions.Osaker_dubbelutskick, 'tillåten gren måste innehålla ordinarie flöde');
+  assert.ok(guard.else.actions.Markera_blockerad_mottagare, 'blockerad gren saknas');
+  const blocked = guard.else.actions.Markera_blockerad_mottagare.inputs.body;
+  assert.equal(blocked.status, 'Kräver manuell kontroll');
+  assert.ok(blocked.manualReviewReason.includes('mottagaren är inte tillåten'));
+  assert.equal(blocked.deliveryStatus, 'Blockerad av testmottagarspärr');
+
+  const prodLoop = prodWorkflowDefinition.actions.Om_det_finns_poster.actions.Behandla_varje_post.actions;
+  assert.equal(prodLoop.Tillaten_mottagare, undefined, 'produktionsdefinitionen får inte ha testspärren');
+  assert.ok(!JSON.stringify(prodWorkflowDefinition).includes('testmottagarspärr'));
+  assert.ok(!JSON.stringify(testWorkflowDefinition).includes('"cc"'));
+  assert.ok(!JSON.stringify(testWorkflowDefinition).includes('"bcc"'));
+});
+
+test('workflow-only-mallen uppdaterar endast testworkflowet', () => {
+  assert.equal(workflowOnlyTemplate.resources.length, 1);
+  const nestedOnly = workflowOnlyTemplate.resources[0];
+  assert.equal(nestedOnly.type, 'Microsoft.Resources/deployments');
+  assert.equal(nestedOnly.properties.parameters.assignTableRole.value, false);
+  assert.ok(String(nestedOnly.properties.parameters.tableName.value).includes("parameters('testTableName')"));
+  assert.ok(String(nestedOnly.properties.parameters.resendApiUrl.value).includes("parameters('resendApiUrl')"));
+  const nestedResources = nestedOnly.properties.template.resources;
+  assert.deepEqual(nestedResources.map((resource) => resource.type).sort(), [
+    'Microsoft.Authorization/roleAssignments',
+    'Microsoft.Logic/workflows'
+  ]);
+  const conditionalRole = nestedResources.find((resource) => resource.type === 'Microsoft.Authorization/roleAssignments');
+  assert.equal(conditionalRole.condition, "[parameters('assignTableRole')]");
+  assert.ok(String(conditionalRole.scope).includes("parameters('tableName')"));
+  assert.ok(!nestedResources.some((resource) => resource.type === 'Microsoft.Storage/storageAccounts/tableServices/tables'));
+  assert.equal(nestedResources[0].properties.state, 'Disabled');
+  const fxvKey = Object.keys(workflowOnlyTemplate.variables).find((key) => key.includes('fxv'));
+  assert.ok(fxvKey, 'inbäddad testdefinition saknas');
+  const embeddedDefinition = workflowOnlyTemplate.variables[fxvKey];
+  assert.ok(embeddedDefinition.includes('Tillaten_mottagare'), 'workflow-only-mallen måste använda testdefinitionen');
+  assert.ok(embeddedDefinition.includes('testmottagarspärr'));
 });

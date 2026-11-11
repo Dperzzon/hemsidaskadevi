@@ -30,7 +30,7 @@ Testworkflowet ska ha:
 4. `mailFrom`:
    - före domänverifiering: `onboarding@resend.dev` och mottagare = Resend-kontots ägarmejl (Resend tillåter endast kontots egen adress då),
    - efter domänverifiering: `bokning@skadeviherrgard.com` och Resends testadresser.
-5. `mailTo`/`hostRecipient` endast testadresser, t.ex. `delivered+host@resend.dev` och `delivered+guest@resend.dev`.
+5. `mailTo`/`hostRecipient` endast de fyra adresser som testspärren tillåter: `skadevigard@gmail.com`, `delivered@resend.dev`, `bounced@resend.dev` eller `complained@resend.dev`.
 6. `resendApiUrl` mot en mock-endpoint för fel- och idempotenstester.
 7. Ingen koppling till produktionswebbappen eller produktionsbokningar.
 
@@ -49,7 +49,7 @@ Enligt Resends dokumentation:
 | `complained@resend.dev` | spammarkering |
 | `suppressed@resend.dev` | suppression |
 
-Adresserna stöder label, t.ex. `delivered+skadevi-test@resend.dev`. Undvik `@example.com` och `@test.com` – Resend blockerar dem med `422`.
+Resend stöder label, men testworkflowets mottagarspärr tillåter endast de fyra exakta adresserna ovan. Plusetiketter som `delivered+test@resend.dev` blockeras. Undvik `@example.com` och `@test.com` – Resend blockerar dem med `422`.
 
 Före domänverifiering gäller: `onboarding@resend.dev` får endast skicka till Resend-kontots egen ägaradress. Därför krävs antingen en verifierad domän eller test till ägarmejlen.
 
@@ -59,7 +59,7 @@ Före domänverifiering gäller: `onboarding@resend.dev` får endast skicka till
 
 **Steg**
 1. Skapa två testposter i testtabellen: en host- och en guest-post med syntetisk referens `TEST-SK-...`.
-2. Använd `delivered+host@resend.dev` och `delivered+guest@resend.dev`.
+2. Använd `delivered@resend.dev` (eller `bounced@resend.dev`/`complained@resend.dev` för leveranshändelser) och `skadevigard@gmail.com`.
 3. Aktivera endast testworkflowet.
 
 **Förväntat**
@@ -245,6 +245,30 @@ Produktionsresurserna visas endast som `Ignore` i testmiljöns what-if.
   förrän det skapats manuellt. Det får aldrig innehålla produktionsnyckeln.
 - Harnesket begränsar mottagare till Resends testadresser eller Skadevis
   kontrollerade brevlåda. En manuell tabellskrivning med en annan principal är
-  teoretiskt möjlig för den som har tabellrollen. För ett hårdare skydd kan
-  testworkflowet senare kompletteras med en uttrycklig mottagarallowlist före
-  sändning; det är inte infört i detta steg.
+  teoretiskt möjlig för den som har tabellrollen.
+
+## Steg 7M — mottagarspärr i testworkflowet
+
+- Testworkflowet använder nu en **separat testdefinition**
+  (`infra/logicapp/email-notifier-test.workflow.json`). Produktionsdefinitionen
+  är oförändrad och innehåller ingen spärr.
+- Spärren `Tillaten_mottagare` ligger först i postloopen, före allt
+  Resend-anrop. Den tillåter endast:
+  - `skadevigard@gmail.com`
+  - `delivered@resend.dev`
+  - `bounced@resend.dev`
+  - `complained@resend.dev`
+- Adressen normaliseras med `toLower(trim(string(...)))`. Tomma värden,
+  plusetiketter, kommatecken, semikolon, mellanslag och andra adresser blockeras.
+  CC/BCC finns inte i anropet.
+- Blockerade poster PATCH:as till `Kräver manuell kontroll` med orsaken
+  `Testworkflow: mottagaren är inte tillåten` och `deliveryStatus`
+  `Blockerad av testmottagarspärr`. Inget Resend-anrop görs.
+- Uppdateringen deployades endast mot `logic-skadevi-bokningsnotis-test` med
+  `infra/test/logic-app-notify-test-workflow.bicepparam`. Testworkflowet är
+  fortfarande `Disabled`.
+- Testworkflowets publicerade `resendApiUrl` är nu
+  `https://mock-resend.invalid/emails`. Det är en **icke-funktionell,
+  icke-routbar reservdomän**, inte en mockserver.
+- Produktionsworkflowet, tabellrollerna, Key Vault-rollerna och DNS är
+  oförändrade. Testsekretet finns fortfarande inte.

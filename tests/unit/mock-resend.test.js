@@ -25,8 +25,8 @@ test('mockens /emails tar emot Resend-payload och returnerar ett id', async () =
   await withMock(async (mock, base) => {
     const payload = {
       from: 'onboarding@resend.dev',
-      to: 'delivered+test@resend.dev',
-      reply_to: 'delivered+reply@resend.dev',
+      to: 'delivered@resend.dev',
+      reply_to: 'skadevigard@gmail.com',
       subject: '[TEST] TEST-SKADEVI-001',
       html: '<p>Test</p>',
       text: 'Test'
