@@ -45,3 +45,8 @@ param githubOidcSubject = 'repo:Dperzzon@33748032/hemsidaskadevi@1436769162:ref:
 // Officer" på kv-skadevi-prod och kan registrera/rotera kalenderhemligheten.
 // (Hittade ditt ID med: az ad signed-in-user show --query id -o tsv)
 param secretAdminPrincipalId = '3e197323-a929-40b0-a164-c8cb5b33b521'
+
+// Table Storage för bokningsförfrågningar — deployad och verifierad 2026-11-11
+// (steg 3). Namnet deklareras nu så att framtida infra-deployments hanterar
+// lagringen idempotent (Nochange). Kör alltid what-if först.
+param bookingStorageAccountName = 'stskadevibokningprod'
