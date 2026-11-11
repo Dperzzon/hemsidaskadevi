@@ -55,7 +55,7 @@
       "type": "Http",
       "inputs": {
         "method": "GET",
-        "uri": "@{parameters('storageEndpoint')}/@{parameters('tableName')}()?$filter=PartitionKey%20eq%20%27outbox%27%20and%20(status%20ne%20%27Skickad%27%20and%20attemptCount%20lt%20@{parameters('maxAttempts')})",
+        "uri": "@{parameters('storageEndpoint')}/@{parameters('tableName')}()?$filter=PartitionKey%20eq%20%27outbox%27%20and%20(status%20eq%20%27Utkorg%27%20or%20status%20eq%20%27Skickar%27%20or%20status%20eq%20%27Misslyckad%27)%20and%20attemptCount%20lt%20@{parameters('maxAttempts')}",
         "headers": {
           "x-ms-version": "2019-02-02"
         },

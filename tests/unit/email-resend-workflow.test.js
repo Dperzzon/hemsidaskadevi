@@ -148,15 +148,65 @@ test('leverantörens meddelande-ID och leveransstatus hanteras separat från API
   assert.ok(!('delivered' in markSent));
 });
 
-test('utkorgsfiltern: misslyckade poster återprovas med begränsat antal försök — inga förfrågningar tappas', () => {
+test('semantik: vitlistan släpper endast igenom återförsöksbara poster', () => {
+  const uri = decodeURIComponent(byName('Haemta_utkorg').inputs.uri);
+  const allowed = [...uri.matchAll(/status eq '([^']+)'/g)].map((m) => m[1]);
+  assert.deepEqual(allowed.sort(), ['Misslyckad', 'Skickar', 'Utkorg']);
+  const eligible = (row) => allowed.includes(row.status) && row.attemptCount < 5;
+  const rows = [
+    { status: 'Utkorg', attemptCount: 0, send: true },
+    { status: 'Skickar', attemptCount: 1, send: true },
+    { status: 'Misslyckad', attemptCount: 4, send: true },
+    { status: 'Skickad', attemptCount: 1, send: false },
+    { status: 'Kräver manuell kontroll', attemptCount: 1, send: false },
+    { status: 'Kräver manuell kontroll', attemptCount: 0, send: false },
+    { status: 'NågonFramtidaStatus', attemptCount: 0, send: false },
+    { status: 'Misslyckad', attemptCount: 5, send: false }
+  ];
+  for (const row of rows) {
+    assert.equal(eligible(row), row.send, `${row.status} med attemptCount=${row.attemptCount}`);
+  }
+});
+
+test('utkorgsfiltern: endast återförsöksbara statusar hämtas — manuell kontroll och Skickad skickas aldrig om', () => {
   const fetchAction = byName('Haemta_utkorg');
-  const uri = fetchAction.inputs.uri;
-  assert.ok(uri.includes('status%20ne%20%27Skickad%27'), 'endast slutförda poster plockas aldrig igen');
-  assert.ok(uri.includes('attemptCount%20lt'), 'antal försök är begränsat (maxAttempts)');
-  assert.ok(uri.includes('PartitionKey%20eq%20%27outbox%27'));
+  const uri = decodeURIComponent(fetchAction.inputs.uri);
+  // Vitlistning: bara Utkorg/Skickar/Misslyckad får plockas.
+  assert.ok(uri.includes("PartitionKey eq 'outbox'"));
+  assert.ok(uri.includes("status eq 'Utkorg'"));
+  assert.ok(uri.includes("status eq 'Skickar'"));
+  assert.ok(uri.includes("status eq 'Misslyckad'"));
+  // Fail-safe: ingen ne-only-logik som släpper igenom okända statusar.
+  assert.ok(!uri.includes('status ne'), 'ne-filter släpper igenom manuell kontroll/nya statusar');
+  assert.ok(!uri.includes("status eq 'Skickad'"), 'Skickad får aldrig hämtas igen');
+  assert.ok(!uri.includes('Kräver manuell kontroll'), 'manuell kontroll får aldrig hämtas igen');
+  assert.ok(uri.includes('attemptCount lt'), 'antal försök är begränsat (maxAttempts)');
   assert.equal(workflow.parameters.maxAttempts.defaultValue, 5);
   assert.equal(workflow.triggers.Recurrence.recurrence.interval, 5);
   assert.equal(workflow.triggers.Recurrence.runtimeConfiguration.concurrency.runs, 1);
+});
+
+test('misslyckade försök försvinner aldrig: ingen DELETE, alltid status+orsak+tid kvar', () => {
+  const raw = fs.readFileSync(workflowPath, 'utf8');
+  assert.ok(!/"method": "DELETE"/.test(raw), 'flödet får aldrig radera utkorgsposter');
+  const failurePaths = [
+    byName('Markera_som_misslyckad'),
+    byName('Markera_konflikt_manuell_kontroll'),
+    byName('Markera_kraever_manuell_kontroll')
+  ];
+  for (const action of failurePaths) {
+    assert.ok(action, 'felväg saknas');
+    assert.ok(action.inputs.body.status, `${action.name} saknar status`);
+    assert.ok(
+      action.inputs.body.failedAt || action.inputs.body.manualReviewReason,
+      `${action.name} saknar tidsstämpel/ororsak`
+    );
+    assert.equal(action.inputs.headers['If-Match'] !== undefined, true);
+  }
+  // Misslyckade försök räknas i anspråket och spåras per post.
+  const claim = byName('Markera_som_under_skickning').inputs.body;
+  assert.ok(claim.attemptedAt.includes('utcNow()'));
+  assert.ok(claim.attemptCount.includes("add(items('Behandla_varje_post')?['attemptCount'], 1)"));
 });
 
 test('en skickad bekräftelse är aldrig en bekräftad bokning', () => {
