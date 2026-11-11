@@ -120,15 +120,18 @@ test('ETag-kontroll och statusmarkering: skickas-aldrig-två-gånger-garantin', 
   }
 });
 
-test('osäker leveransstatus efter 24 timmar flaggas för manuell kontroll — aldrig automatiskt dubblettutskick', () => {
+test('osäker leveransstatus eller maxförsök i Skickar flaggas för manuell kontroll — aldrig automatiskt dubblettutskick', () => {
   const guard = byName('Osaker_dubbelutskick');
   assert.ok(guard, 'skydd mot dubblettutskick saknas');
   assert.ok(guard.expression.includes("'Skickar'"));
   assert.ok(guard.expression.includes('-24'), '24-timmarsgräns saknas');
+  assert.ok(guard.expression.includes("parameters('maxAttempts')"), 'maxAttempts-gräns saknas');
+  assert.ok(guard.expression.includes("?['attemptCount']"), 'försöksräknaren används inte i vakten');
   const manual = byName('Markera_kraever_manuell_kontroll');
   assert.ok(manual, 'manuell-kontroll-markering saknas');
   assert.deepEqual(manual.inputs.headers['If-Match'], "@{items('Behandla_varje_post')?['odata.etag']}");
   assert.equal(manual.inputs.body.status, 'Kräver manuell kontroll');
+  assert.ok(manual.inputs.body.manualReviewReason.includes("parameters('maxAttempts')"));
   // Mejlet ska INTE skickas igen på den grenen — ingen Resend-action i skyddsgrenen.
   const guardActions = allActions(guard.actions).map((a) => a.name);
   assert.ok(!guardActions.includes('Skicka_mejl_resend'));
@@ -152,26 +155,36 @@ test('leverantörens meddelande-ID och leveransstatus hanteras separat från API
   assert.ok(!('delivered' in markSent));
 });
 
-test('semantik: vitlistan släpper endast igenom återförsöksbara poster', () => {
+test('semantik: filter hämtar rätt poster och vakten hindrar osäkra omsändningar', () => {
   const uri = decodeURIComponent(byName('Haemta_utkorg').inputs.uri);
   const allowed = [...uri.matchAll(/status eq '([^']+)'/g)].map((m) => m[1]);
   assert.deepEqual(allowed.sort(), ['Misslyckad', 'Skickar', 'Utkorg']);
-  const eligible = (row) => row.status === 'Skickar'
-    || (['Utkorg', 'Misslyckad'].includes(row.status) && row.attemptCount < 5);
+  const maxAttempts = 5;
+  const old = '2026-11-09T12:00:00Z';
+  const recent = '2026-11-11T12:00:00Z';
+  const threshold = '2026-11-10T13:00:00Z';
+  const isOld = (row) => row.attemptedAt < threshold;
+  const fetched = (row) => row.status === 'Skickar'
+    || (['Utkorg', 'Misslyckad'].includes(row.status) && row.attemptCount < maxAttempts);
+  const manual = (row) => (row.status === 'Skickar' && row.attemptCount >= maxAttempts)
+    || (row.attemptCount > 0 && isOld(row));
+  const autoSend = (row) => fetched(row) && !manual(row);
   const rows = [
-    { status: 'Utkorg', attemptCount: 0, send: true },
-    { status: 'Skickar', attemptCount: 1, send: true },
-    { status: 'Skickar', attemptCount: 5, send: true },
-    { status: 'Skickar', attemptCount: 9, send: true },
-    { status: 'Misslyckad', attemptCount: 4, send: true },
-    { status: 'Skickad', attemptCount: 1, send: false },
-    { status: 'Kräver manuell kontroll', attemptCount: 1, send: false },
-    { status: 'Kräver manuell kontroll', attemptCount: 0, send: false },
-    { status: 'NågonFramtidaStatus', attemptCount: 0, send: false },
-    { status: 'Misslyckad', attemptCount: 5, send: false }
+    { status: 'Utkorg', attemptCount: 0, attemptedAt: '', send: true },
+    { status: 'Skickar', attemptCount: 1, attemptedAt: recent, send: true },
+    { status: 'Skickar', attemptCount: 5, attemptedAt: recent, send: false },
+    { status: 'Skickar', attemptCount: 9, attemptedAt: old, send: false },
+    { status: 'Skickar', attemptCount: 1, attemptedAt: old, send: false },
+    { status: 'Misslyckad', attemptCount: 4, attemptedAt: recent, send: true },
+    { status: 'Misslyckad', attemptCount: 1, attemptedAt: old, send: false },
+    { status: 'Misslyckad', attemptCount: 5, attemptedAt: recent, send: false },
+    { status: 'Skickad', attemptCount: 1, attemptedAt: recent, send: false },
+    { status: 'Kräver manuell kontroll', attemptCount: 1, attemptedAt: recent, send: false },
+    { status: 'Kräver manuell kontroll', attemptCount: 0, attemptedAt: '', send: false },
+    { status: 'NågonFramtidaStatus', attemptCount: 0, attemptedAt: '', send: false }
   ];
   for (const row of rows) {
-    assert.equal(eligible(row), row.send, `${row.status} med attemptCount=${row.attemptCount}`);
+    assert.equal(autoSend(row), row.send, `${row.status} med attemptCount=${row.attemptCount} och attemptedAt=${row.attemptedAt}`);
   }
 });
 
@@ -217,6 +230,24 @@ test('misslyckade försök försvinner aldrig: ingen DELETE, alltid status+orsak
   const claim = byName('Markera_som_under_skickning').inputs.body;
   assert.ok(claim.attemptedAt.includes('utcNow()'));
   assert.ok(claim.attemptCount.includes("add(items('Behandla_varje_post')?['attemptCount'], 1)"));
+});
+
+test('varje utkorgspost behandlas separat — ett misslyckat mejl stoppar inte det andra', () => {
+  const loop = byName('Behandla_varje_post');
+  assert.equal(loop.type, 'Foreach');
+  assert.equal(loop.foreach, "@body('Haemta_utkorg')?['value']");
+  const loopActionNames = allActions(loop.actions).map((action) => action.name);
+  for (const name of [
+    'Osaker_dubbelutskick',
+    'Skicka_mejl_resend',
+    'Markera_som_skickad',
+    'Markera_som_misslyckad',
+    'Markera_konflikt_manuell_kontroll'
+  ]) {
+    assert.ok(loopActionNames.includes(name), `${name} måste hanteras per utkorgspost`);
+  }
+  // Ingen sändning ligger utanför postloopen (då skulle en post kunna påverka en annan).
+  assert.ok(!('Skicka_mejl_resend' in workflow.actions));
 });
 
 test('en skickad bekräftelse är aldrig en bekräftad bokning', () => {

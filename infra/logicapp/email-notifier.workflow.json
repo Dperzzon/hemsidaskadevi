@@ -84,7 +84,7 @@
           "actions": {
             "Osaker_dubbelutskick": {
               "type": "If",
-              "expression": "@and(equals(items('Behandla_varje_post')?['status'], 'Skickar'), less(coalesce(items('Behandla_varje_post')?['attemptedAt'], ''), addHours(utcNow(), -24)))",
+              "expression": "@or(and(equals(items('Behandla_varje_post')?['status'], 'Skickar'), greaterOrEquals(items('Behandla_varje_post')?['attemptCount'], parameters('maxAttempts'))), and(greater(items('Behandla_varje_post')?['attemptCount'], 0), less(coalesce(items('Behandla_varje_post')?['attemptedAt'], ''), addHours(utcNow(), -24))))",
               "actions": {
                 "Markera_kraever_manuell_kontroll": {
                   "type": "Http",
@@ -97,7 +97,7 @@
                     },
                     "body": {
                       "status": "Kräver manuell kontroll",
-                      "manualReviewReason": "Osäker leveransstatus: sändning påbörjad men ej bekräftad i mer än 24 timmar (Resends idempotensnyckel har upphört)"
+                      "manualReviewReason": "@{if(greaterOrEquals(items('Behandla_varje_post')?['attemptCount'], parameters('maxAttempts')), 'Maximalt antal försök uppnått medan status var Skickar — ingen automatisk omsändning; kontrollera leveransen hos Resend', 'Tidigare sändningsförsök är äldre än 24 timmar — Resends idempotensskydd har upphört; kontrollera leveransen innan nytt försök')}"
                     },
                     "authentication": {
                       "type": "ManagedServiceIdentity",

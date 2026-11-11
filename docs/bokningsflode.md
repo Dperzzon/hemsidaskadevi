@@ -124,7 +124,8 @@ och Azure Communication Services Email (pensioneras 2028-09-30) avvisades.
   konservativt som manuell kontroll; det senare kan skickas om manuellt utan
   risk för dubblett. `Skickar` hämtas alltid av filtret (även vid `attemptCount
   >= maxAttempts`) så att en kvarglömd post kan flaggas manuellt i stället för
-  att bli osynlig för all framtid.
+  att bli osynlig för all framtid. En post som står kvar i `Skickar` när
+  `attemptCount` nått `maxAttempts` flaggas manuellt utan omsändning.
 
 ### Steg 7A — två förberedda mejltyper
 

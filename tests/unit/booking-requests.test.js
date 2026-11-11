@@ -175,6 +175,9 @@ test('dubbel inskick med samma idempotensnyckel ger samma referens', async () =>
   assert.equal(second.jsonBody.duplicate, true);
   assert.equal(second.jsonBody.reference, first.jsonBody.reference);
   assert.equal([...stored.values()].filter((item) => item.status === 'Inväntar godkännande').length, 1);
+  const outbox = [...stored.values()].filter((item) => item.partition === 'outbox');
+  assert.equal(outbox.length, 2, 'dubbelinskick får inte skapa fler utkorgsposter');
+  assert.equal(new Set(outbox.map((item) => item.idempotencyKey)).size, 2, 'utkorgsposterna måste ha unika RowKeys');
 });
 
 test('fel vid sparande ger 500 och ingen bekräftelse', async () => {
@@ -316,8 +319,10 @@ test('lagrade priser och e-postnotiser visar samma serverberäknade belopp', asy
   assert.equal(result.status, 201);
   const record = [...stored.values()].find((item) => item.status === 'Inväntar godkännande');
   const host = [...stored.values()].find((item) => item.partition === 'outbox' && item.mailTo === 'skadevigard@gmail.com');
+  const guest = [...stored.values()].find((item) => item.partition === 'outbox' && item.mailTo === 'anna@example.com');
   assert.match(host.mailHtml, new RegExp(`TOTALPRIS FÖR HELA VISTELSEN: ${record.total} kr`));
   assert.match(host.mailHtml, new RegExp(`Boendepris efter rabatt: ${record.lodgingAfterDiscount} kr`));
+  assert.match(guest.mailHtml, new RegExp(`Beräknat totalpris: ${record.total} kr`), 'gästmejlet måste visa samma serverberäknade total');
 });
 
 test('kort vistelse får ingen rabattpost', async () => {
@@ -376,6 +381,9 @@ test('utkorgspost innehåller komplett mejlmall för Logic Apps', async () => {
   await handleBookingRequest(request(), context, options);
   const outbox = [...stored.values()].filter((item) => item.partition === 'outbox');
   assert.equal(outbox.length, 2);
+  assert.equal(new Set(outbox.map((item) => item.idempotencyKey)).size, 2, 'varje mejl måste ha unik RowKey');
+  assert.equal(outbox.filter((item) => item.mailTo === 'skadevigard@gmail.com').length, 1);
+  assert.equal(outbox.filter((item) => item.mailTo === 'anna@example.com').length, 1);
   for (const row of outbox) {
     assert.equal(row.status, 'Utkorg');
     assert.ok(row.mailSubject.includes('SK-2026-'));
@@ -403,4 +411,20 @@ test('misslyckad utkorgssparning stoppar inte registreringen', async () => {
   const result = await handleBookingRequest(request(), context, options);
   assert.equal(result.status, 201, 'förfrågan ska vara registrerad även om utkorgen misslyckas');
   assert.equal([...stored.values()].filter((item) => item.status === 'Inväntar godkännande').length, 1);
+});
+
+test('ett misslyckat mejl påverkar inte det andra utkorgsmejlet', async () => {
+  const { options, stored, context, warn } = setup();
+  const originalSave = options.store.save.bind(options.store);
+  options.store.save = async (record, ctx) => {
+    if (record.partition === 'outbox' && record.mailTo === 'anna@example.com') throw new Error('gästmejl nere');
+    return originalSave(record, ctx);
+  };
+  const result = await handleBookingRequest(request(), context, options);
+  assert.equal(result.status, 201);
+  const outbox = [...stored.values()].filter((item) => item.partition === 'outbox');
+  assert.equal(outbox.length, 1, 'det lyckade mejlet ska finnas kvar');
+  assert.equal(outbox[0].mailTo, 'skadevigard@gmail.com');
+  assert.equal(outbox[0].status, 'Utkorg');
+  assert.ok(warn.some((message) => message.includes('Utkorgspost kunde inte sparas')));
 });
