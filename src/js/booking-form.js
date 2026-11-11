@@ -1,7 +1,9 @@
 import { formatSek, ADDONS, addonLines, sumAddons, discountNote, quote, NIGHT_RATES } from './booking/pricing.js';
 
 // Bokningsflödet: formulär, tillval, prisöversikt, bokningsregler och inskick.
-// Formuläret görs synligt när kalendern skickar 'booking:dates'.
+// Formuläret görs synligt när kalendern skickar 'booking:selection' med en
+// komplett period. Vid byte av datum uppdateras bara datum, tillgänglighet och
+// pris — gästens ifyllda uppgifter och tillval ligger kvar.
 
 const els = {};
 
@@ -29,13 +31,15 @@ function resetIdempotencyKey() {
 
 // --- Sammanfattning och prisöversikt ---
 
-function updateSummary({ arrival, departure, nights }) {
-  els.summaryArrival.textContent = formatDay(arrival);
-  els.summaryDeparture.textContent = formatDay(departure);
-  els.summaryNights.textContent = `${nights} ${nights === 1 ? 'natt' : 'nätter'}`;
-  els.arrival.value = arrival;
-  els.departure.value = departure;
-  els.nights.value = String(nights);
+function updateSummary({ arrival = null, departure = null, nights = 0 }) {
+  const complete = Boolean(arrival && departure && nights > 0);
+  els.summaryArrival.textContent = arrival ? formatDay(arrival) : '–';
+  els.summaryDeparture.textContent = complete ? formatDay(departure) : '–';
+  els.summaryNights.textContent = complete ? `${nights} ${nights === 1 ? 'natt' : 'nätter'}` : '–';
+  // Endast ankomst/avresa får ändras vid datumbyte — aldrig gästens uppgifter.
+  els.arrival.value = arrival ?? '';
+  els.departure.value = complete ? departure : '';
+  els.nights.value = complete ? String(nights) : '';
 }
 
 function selectedAddons() {
@@ -298,16 +302,33 @@ function showConfirmation(data) {
   els.confirmation.focus();
 }
 
-function openForm(detail) {
-  updateSummary(detail);
+function handleSelection(detail) {
+  const { arrival = null, departure = null, nights = 0 } = detail ?? {};
+  const complete = Boolean(arrival && departure && nights > 0);
+  const wasOpen = !els.section.hidden && !els.form.hidden;
+  updateSummary({ arrival, departure, nights });
+  els.formError.hidden = true;
+
+  if (!complete) {
+    // Ett påbörjat datumval får aldrig visa kvarvarande totalpris för den
+    // tidigare perioden. Formuläret (och alla ifyllda uppgifter) ligger kvar
+    // öppet om det redan var öppet — bara datum och pris nollställs.
+    if (!wasOpen) return;
+    updatePrices();
+    return;
+  }
+
   els.section.hidden = false;
   els.confirmation.hidden = true;
   els.form.hidden = false;
   els.summary.hidden = false;
   updatePrices();
-  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  els.section.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'start' });
-  els.heading.focus({ preventScroll: true });
+
+  if (!wasOpen) {
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    els.section.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'start' });
+    els.heading.focus({ preventScroll: true });
+  }
 }
 
 function changeDates() {
@@ -365,7 +386,7 @@ function init() {
   Object.assign(els, queryAll());
   if (!els.section) return;
   els.form.addEventListener('submit', submitBooking);
-  document.addEventListener('booking:dates', (event) => openForm(event.detail));
+  document.addEventListener('booking:selection', (event) => handleSelection(event.detail));
   document.addEventListener('booking:invalidate', () => {
     setSelectionPlaceholder();
   });
