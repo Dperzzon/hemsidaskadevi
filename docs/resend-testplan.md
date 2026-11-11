@@ -272,3 +272,35 @@ Produktionsresurserna visas endast som `Ignore` i testmiljöns what-if.
   icke-routbar reservdomän**, inte en mockserver.
 - Produktionsworkflowet, tabellrollerna, Key Vault-rollerna och DNS är
   oförändrade. Testsekretet finns fortfarande inte.
+
+## Steg 7O — lokala integrationstester
+
+- `scripts/mock-resend.mjs` är en lokal mock som endast lyssnar på
+  `127.0.0.1`. Den skickar inga mejl, kräver ingen riktig nyckel och modellerar
+  Resends idempotens: samma `Idempotency-Key` med samma body ger samma `id` och
+  ingen ny leverans; samma nyckel med annan body ger `409`.
+- `tests/helpers/resend-flow-simulator.js` är en **kontraktssimulator**, inte
+  Azure Logic Apps. Den använder konstanter från den faktiska
+  testdefinitionen: mottagarspärr, `maxAttempts`, `retryPolicy` och
+  `Idempotency-Key`.
+- `tests/unit/resend-flow-integration.test.js` täcker A–L: 200, 429, 500,
+  401/403, 409, förlorat svar/timeout, samma idempotensnyckel, två separata
+  mejl, blockerade mottagare, 24-timmarsgräns, stale ETag och att inga
+  bokningar skapas.
+- Det kritiska förlorade-svar-testet låter mocken registrera leveransen och
+  därefter stänga anslutningen utan svar. Simulatorn återförsöker med samma
+  `Idempotency-Key`; mocken returnerar samma `id` och endast en leverans finns.
+- Simulatorn vägrar alla URL:er utanför `127.0.0.1`/`localhost`, så testerna kan
+  inte nå `api.resend.com`, Azure Storage eller Key Vault.
+
+**Vad som inte kan verifieras lokalt:**
+
+- faktisk Azure Logic Apps-exekvering och utvärdering av alla
+  workflow-uttryck,
+- Managed Identity-token till Key Vault/Table Storage,
+- Azures ETag- och samtidighetsbeteende i den riktiga körningen,
+- Logic Apps inbyggda retry-semantik i praktiken,
+- Resends verkliga idempotens- och leveranssvar (mocken modellerar dem).
+
+Därför är de lokala testerna ett komplement till, inte en ersättning för, ett
+begränsat Azure-E2E-test. Inget Azure-flöde har körts i detta steg.
