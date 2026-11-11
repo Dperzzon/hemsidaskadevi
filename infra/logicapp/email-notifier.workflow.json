@@ -178,13 +178,14 @@
                         "subject": "@{items('Behandla_varje_post')?['mailSubject']}",
                         "html": "@{items('Behandla_varje_post')?['mailHtml']}",
                         "text": "@{coalesce(items('Behandla_varje_post')?['mailText'], '')}"
+                      },
+                      "retryPolicy": {
+                        "type": "exponential",
+                        "count": 4,
+                        "interval": "PT30S",
+                        "minimumInterval": "PT30S",
+                        "maximumInterval": "PT10M"
                       }
-                    },
-                    "retryPolicy": {
-                      "type": "exponential",
-                      "count": 4,
-                      "minimumInterval": "PT30S",
-                      "maximumInterval": "PT10M"
                     },
                     "runtimeConfiguration": {
                       "secureData": {

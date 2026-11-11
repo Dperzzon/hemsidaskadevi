@@ -78,9 +78,9 @@ test('Resend-anropet har idempotensnyckel och korrekt e-postfältuppsättning', 
 
 test('återförsök: exponentiell retry-policy (429/5xx/timeout), ändlig antal försök', () => {
   const send = byName('Skicka_mejl_resend');
-  assert.equal(send.retryPolicy.type, 'exponential');
-  assert.ok(send.retryPolicy.count >= 3 && send.retryPolicy.count <= 6, 'rimligt antal återförsök');
-  assert.ok(send.retryPolicy.minimumInterval && send.retryPolicy.maximumInterval);
+  assert.equal(send.inputs.retryPolicy.type, 'exponential');
+  assert.ok(send.inputs.retryPolicy.count >= 3 && send.inputs.retryPolicy.count <= 6, 'rimligt antal återförsök');
+  assert.ok(send.inputs.retryPolicy.interval && send.inputs.retryPolicy.minimumInterval && send.inputs.retryPolicy.maximumInterval);
 });
 
 test('alla HTTP-actions döljer känsliga in- och utdata (secureData)', () => {
