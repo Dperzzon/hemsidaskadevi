@@ -12,6 +12,8 @@
     "build": "vite build && node scripts/compress.mjs",
     "preview": "node server/index.js",
     "start": "node server/index.js",
+    "admin": "node server/admin/index.js",
+    "admin:dev": "node server/admin/index.js --demo --dev-auth",
     "test": "node --test \"tests/unit/*.test.js\" \"tests/unit/*.test.mjs\"",
     "test:smoke": "node scripts/smoke-test.mjs",
     "seed:test-outbox": "node scripts/test-outbox-seed.mjs",

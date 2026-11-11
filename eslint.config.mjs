@@ -48,6 +48,14 @@ export default [
     }
   },
   {
+    files: ['server/admin/public/**/*.js'],
+    languageOptions: { sourceType: 'module', globals: browserGlobals },
+    rules: {
+      'no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+      'no-undef': 'error'
+    }
+  },
+  {
     files: ['tests/e2e/**/*.js'],
     languageOptions: {
       sourceType: 'module',

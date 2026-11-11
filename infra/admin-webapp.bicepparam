@@ -1,0 +1,11 @@
+using './admin-webapp.bicep'
+
+param adminAppName = 'hemsida-skadevi-admin-prod'
+param planName = 'asp-skadevi-prod'
+param location = 'swedencentral'
+param nodeFxVersion = 'NODE|22-lts'
+param storageAccountName = 'stskadevibokningprod'
+param bookingTableName = 'bookingrequests'
+param environment = 'prod'
+param owner = 'Skadevi'
+param adminTrustEasyAuth = '1'
