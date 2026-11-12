@@ -46,6 +46,11 @@ Alla `/api/admin/*` kräver autentisering och administratörsroll. Alla
 skrivningar kräver dessutom Owner, CSRF-token och (där det är relevant)
 ETag/`If-Match`.
 
+Easy Auth kontrollerar Referer för cookie-autentiserade POST/PATCH/DELETE.
+Därför använder portalen `Referrer-Policy: same-origin` och skickar
+`referrerPolicy: 'same-origin'` i fetch. `no-referrer` gav annars
+`403` med substatus 60 innan appens egen CSRF-kontroll kördes.
+
 | Metod | Endpoint | Beskrivning |
 |---|---|---|
 | GET | `/api/admin/session` | Användare, roller, CSRF-token, datakälla och skrivläge |

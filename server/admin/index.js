@@ -9,6 +9,7 @@
 const http = require('node:http');
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { createAuth, AuthError } = require('./auth');
 const { createAdminRepository } = require('./repository');
 const {
@@ -62,7 +63,10 @@ function securityHeaders(req, options = {}) {
   const headers = {
     'X-Content-Type-Options': 'nosniff',
     'X-Frame-Options': 'DENY',
-    'Referrer-Policy': 'no-referrer',
+    // Easy Auth kräver en same-origin Referer för cookie-autentiserade
+    // POST/PATCH/DELETE. no-referrer gjorde att plattformen svarade 403
+    // (substatus 60) innan appens egen CSRF-kontroll kördes.
+    'Referrer-Policy': 'same-origin',
     'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
     'Cross-Origin-Opener-Policy': 'same-origin',
     'Cross-Origin-Resource-Policy': 'same-origin',
@@ -660,11 +664,13 @@ let calendarParserReady = false;
         }
         return;
       }
-      console.error(`Adminfel på ${pageTitleFor(url.pathname)}: ${error.message}`);
+      const referenceId = crypto.randomUUID().slice(0, 8).toUpperCase();
+      console.error(`Adminfel [${referenceId}] på ${pageTitleFor(url.pathname)}: ${error.stack || error.message}`);
       if (isApi) {
         sendJson(req, res, 503, {
           error: 'Bokningsdata är tillfälligt otillgänglig. Försök igen om en stund.',
-          code: 'STORAGE'
+          code: 'STORAGE',
+          referenceId
         });
       } else {
         sendHtml(req, res, 503, renderErrorPage({

@@ -369,6 +369,7 @@ test('säkerhetsrubriker finns på sidor och API', async () => {
     assert.equal(page.headers['x-frame-options'], 'DENY');
     assert.equal(page.headers['x-robots-tag'], 'noindex, nofollow');
     assert.equal(page.headers['cache-control'], 'no-store');
+    assert.equal(page.headers['referrer-policy'], 'same-origin');
 
     const api = await request(port, '/api/admin/session');
     assert.equal(api.headers['cache-control'], 'no-store');
@@ -498,6 +499,22 @@ function manualBookingBody(overrides = {}) {
   };
 }
 
+test('oväntat serverfel ger STORAGE-kod och kort felreferens', async () => {
+  const repository = createDemoRepository({ now: new Date() });
+  repository.dashboard = async () => { throw new Error('simulerat internt fel'); };
+  const server = await listen(demoServer({ repository }));
+  const port = server.address().port;
+  try {
+    const response = await request(port, '/api/admin/dashboard');
+    assert.equal(response.status, 503);
+    assert.equal(response.json.code, 'STORAGE');
+    assert.match(response.json.referenceId, /^[A-F0-9]{8}$/);
+    assert.doesNotMatch(response.json.error, /simulerat internt fel/);
+  } finally {
+    close(server);
+  }
+});
+
 test('Owner kan skapa manuell bokning som låser kalendern och auditloggas', async () => {
   const server = await listen(demoServer());
   const port = server.address().port;
@@ -533,6 +550,89 @@ test('Owner kan skapa manuell bokning som låser kalendern och auditloggas', asy
     });
     assert.equal(duplicate.status, 200);
     assert.equal(duplicate.json.duplicate, true);
+  } finally {
+    close(server);
+  }
+});
+
+test('PENDING med avtalat pris och betald status sparas utan Airbnb-kontroll eller kalenderlås', async () => {
+  const server = await listen(demoServer({
+    requireAirbnbCheck: true,
+    availabilityHandler: async () => { throw new Error('Airbnb ska inte anropas för PENDING'); }
+  }));
+  const port = server.address().port;
+  try {
+    const csrf = await ownerSession(port);
+    const response = await request(port, '/api/admin/bookings', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrf, 'Idempotency-Key': 'pending-paid-0001' },
+      body: manualBookingBody({
+        arrival: '2027-11-10',
+        departure: '2027-11-12',
+        email: 'pending-paid@example.se',
+        statusCode: 'PENDING',
+        airbnbOverrideIntent: true,
+        agreedTotal: 14150,
+        priceAdjustmentReason: 'Test',
+        paymentStatus: 'PAID',
+        amountPaid: 14150,
+        latestNote: 'Test'
+      })
+    });
+    assert.equal(response.status, 201);
+    assert.equal(response.json.statusCode, 'PENDING');
+    assert.equal(response.json.total, 14150);
+
+    const detail = await request(port, `/api/admin/bookings/${response.json.reference}`);
+    assert.equal(detail.json.booking.statusCode, 'PENDING');
+    assert.equal(detail.json.booking.paymentStatus, 'PAID');
+    assert.equal(detail.json.booking.amountPaid, 14150);
+    assert.equal(detail.json.booking.balance, 0);
+    assert.equal(detail.json.booking.agreedTotal, 14150);
+    assert.equal(detail.json.booking.airbnbOverride, false);
+
+    const calendar = await request(port, '/api/admin/calendar?from=2027-11');
+    assert.equal(calendar.json.nights.length, 0);
+    const list = await request(port, '/api/admin/bookings?status=PENDING');
+    assert.ok(list.json.bookings.some((booking) => booking.reference === response.json.reference));
+
+    const history = await request(port, `/api/admin/bookings/${response.json.reference}/history`);
+    assert.ok(history.json.history.some((entry) => entry.action === 'MANUAL_CREATED'));
+  } finally {
+    close(server);
+  }
+});
+
+test('ogiltig betalstatus och negativt belopp ger tydlig valideringsfelkod', async () => {
+  const server = await listen(demoServer());
+  const port = server.address().port;
+  try {
+    const csrf = await ownerSession(port);
+    const badStatus = await request(port, '/api/admin/bookings', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrf, 'Idempotency-Key': 'pending-bad-payment-0001' },
+      body: manualBookingBody({
+        statusCode: 'PENDING',
+        paymentStatus: 'NOT_A_STATUS'
+      })
+    });
+    assert.equal(badStatus.status, 400);
+    assert.equal(badStatus.json.code, 'VALIDATION');
+    assert.match(badStatus.json.error, /Kontrollera/);
+    assert.ok(badStatus.json.fields.paymentStatus);
+
+    const badAmount = await request(port, '/api/admin/bookings', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrf, 'Idempotency-Key': 'pending-bad-amount-0001' },
+      body: manualBookingBody({
+        statusCode: 'PENDING',
+        paymentStatus: 'PAID',
+        amountPaid: -1
+      })
+    });
+    assert.equal(badAmount.status, 400);
+    assert.equal(badAmount.json.code, 'VALIDATION');
+    assert.ok(badAmount.json.fields.amountPaid);
   } finally {
     close(server);
   }

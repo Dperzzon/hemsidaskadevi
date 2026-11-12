@@ -53,14 +53,39 @@
       method: options.method || 'POST',
       cache: 'no-store',
       credentials: 'same-origin',
+      // Easy Auth kräver same-origin Referer för skrivande anrop.
+      referrerPolicy: 'same-origin',
       headers,
       body: requestBody
     });
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      const error = new Error(
+        'Servern svarade inte med API-data. Inloggningen kan ha gått ut – ladda om sidan och försök igen.'
+      );
+      error.status = response.status;
+      error.code = 'NON_JSON';
+      throw error;
+    }
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
-      const error = new Error(data.error || 'Åtgärden kunde inte genomföras.');
+      let message = data.error;
+      if (!message) {
+        if (response.status === 401) {
+          message = 'Inloggningen har gått ut. Ladda om sidan och logga in igen.';
+        } else if (response.status === 403) {
+          message = 'Du saknar behörighet, eller så har säkerhetssessionen gått ut. Ladda om sidan och logga in igen.';
+        } else if (response.status >= 500) {
+          message = 'Servern kunde inte slutföra åtgärden. Försök igen om en stund.';
+        } else {
+          message = `Servern svarade ${response.status}.`;
+        }
+      }
+      if (data.referenceId) message += ` Felreferens: ${data.referenceId}.`;
+      const error = new Error(message);
       error.status = response.status;
       error.code = data.code;
+      error.referenceId = data.referenceId;
       error.fields = data.fields;
       error.blockedNights = data.blockedNights;
       error.requiresConfirmation = data.requiresConfirmation;
