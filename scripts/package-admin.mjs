@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 // Bygger ett separat publiceringspaket för adminportalen. Paketet innehåller
@@ -101,10 +102,26 @@ async function main() {
     }
   }
 
+  // Gör paketet självständigt. App Service zip-deploy tar bort befintliga
+  // node_modules, så runtime-beroenden måste ingå i paketet. Endast
+  // produktionsberoenden installeras; inga dev-verktyg eller hemligheter.
+  execFileSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', [
+    'ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'
+  ], {
+    cwd: target,
+    stdio: 'inherit',
+    env: { ...process.env, NODE_ENV: 'production' },
+    shell: process.platform === 'win32'
+  });
+  if (!(await exists('node_modules/node-ical')) || !(await exists('node_modules/temporal-polyfill'))) {
+    throw new Error('Adminpaketet saknar runtime-beroenden');
+  }
+
   await fs.writeFile(path.join(target, 'ADMIN_PACKAGE.txt'), [
     'Skadevi Bokningsportal — separat adminpaket',
     'Startkommando: node server/admin/index.js',
     'Datakälla i produktion: Table Storage via managed identity',
+    'Runtime-beroenden ingår i node_modules (endast production).',
     'Inga hemligheter ingår. Inga publika webbplatsfiler ingår.',
     'Byggt av scripts/package-admin.mjs.'
   ].join('\n'), 'utf8');

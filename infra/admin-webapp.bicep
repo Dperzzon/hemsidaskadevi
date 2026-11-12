@@ -118,6 +118,14 @@ resource adminApp 'Microsoft.Web/sites@2024-11-01' = {
           value: adminTrustEasyAuth
         }
         {
+          name: 'ADMIN_PORT'
+          value: '8080'
+        }
+        {
+          name: 'WEBSITES_PORT'
+          value: '8080'
+        }
+        {
           name: 'ADMIN_WRITES_ENABLED'
           value: enableBookingWrites ? '1' : '0'
         }

@@ -479,12 +479,23 @@ npm run smoke:admin
 Den publika webbplatsen, kalendern och prisberäkningen är oförändrade. Inga
 nya npm-beroenden har lagts till för portalen.
 
-## 16. Förberedd aktivering av manuella bokningar
+## 16. Aktiverade manuella bokningar
 
-Aktiveringsläget är förberett i `infra/admin-webapp.bicep` och
-`infra/admin-webapp-activation.bicepparam`, men **inte deployat**.
-`enableBookingWrites=false` är normalläget och behåller Reader +
-`ADMIN_WRITES_ENABLED=0`.
+Aktiverat 2026-11-12 i produktion:
+
+- adminidentiteten har `Storage Table Data Contributor` på endast `bookingrequests`
+- adminidentiteten har `Key Vault Secrets User` på endast `airbnb-ical-url`
+- den överflödiga Reader-tilldelningen är borttagen
+- `ADMIN_WRITES_ENABLED=1`
+- `ADMIN_MAIL_OUTBOX_ENABLED=0`
+- `ADMIN_REQUIRE_AIRBNB_CHECK=1`
+- `AIRBNB_ICAL_URL` är en Key Vault-referens, inte ett värde i Git
+- appen lyssnar på port `8080` via `ADMIN_PORT` och `WEBSITES_PORT`
+- adminpaketet är självständigt och innehåller endast produktionsberoenden
+
+Aktiveringsmallen `infra/admin-webapp-activation.bicepparam` finns kvar för
+reproducerbarhet. Normalläget i `admin-webapp.bicep` är fortfarande
+`enableBookingWrites=false` som säkert standardvärde.
 
 Vid aktivering (`enableBookingWrites=true`) skapas/ändras exakt:
 
@@ -521,12 +532,13 @@ kalenderlåsning.
 $env:ADMIN_TEST_REPO = 'memory'
 node scripts/integration-admin-booking-test.mjs
 
-# Live mot isolerad testtabell kräver dataplansroll på bookingrequeststest:
-$env:ADMIN_TEST_STORAGE_KEY = '...'   # endast om nyckelåtkomst tillåts
+# Live mot isolerad testtabell med Azure CLI-token och tillfällig
+# Storage Table Data Contributor på bookingrequeststest:
+$env:ADMIN_TEST_STORAGE_TOKEN = az account get-access-token --resource https://storage.azure.com/ --query accessToken -o tsv
 node scripts/integration-admin-booking-test.mjs
 ```
 
-Lagringskontot har `allowSharedKeyAccess=false`. Live-testet kan därför bara
-köras av en identitet med `Storage Table Data Contributor` på
-`bookingrequeststest`, eller efter en tillfällig sådan testtabellstilldelning.
-Ingen sådan tilldelning gjordes i steg 8L.
+Lagringskontot har `allowSharedKeyAccess=false`, så live-testet kräver en
+dataplansroll på `bookingrequeststest`. Testet städar endast de egna raderna
+och vägrar alla andra tabeller/konton. I steg 8M kördes 26/26 kontroller live
+mot `bookingrequeststest`; den tillfälliga rollen togs bort efteråt.
