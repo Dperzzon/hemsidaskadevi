@@ -455,8 +455,10 @@ server/admin/                 admin-server, auth, domän, vyer och demorepositor
 server/admin/booking-service.js manuella bokningar, status, block, audit
 server/admin/repository/table.js Table Storage läs/skriv med managed identity
 server/admin/public/          admin-CSS och browser-JS
-infra/admin-webapp.bicep      förberedd app, managed identity, Reader-roll och deployroll
-infra/admin-webapp.bicepparam parametervärden utan hemligheter
+infra/admin-webapp.bicep      förberedd app, Reader/Contributor och Key Vault-scope
+infra/admin-webapp.bicepparam normalläge utan skrivningar
+infra/admin-webapp-activation.bicepparam förberedd aktivering, deployas inte ännu
+scripts/integration-admin-booking-test.mjs fokuserat skriv-/kalendertest
 scripts/package-admin.mjs      separat publiceringspaket för adminappen
 scripts/smoke-admin-package.mjs minimal paketkontroll
 .github/workflows/deploy-admin.yml manuellt godkänd adminpublicering
@@ -476,3 +478,55 @@ npm run smoke:admin
 
 Den publika webbplatsen, kalendern och prisberäkningen är oförändrade. Inga
 nya npm-beroenden har lagts till för portalen.
+
+## 16. Förberedd aktivering av manuella bokningar
+
+Aktiveringsläget är förberett i `infra/admin-webapp.bicep` och
+`infra/admin-webapp-activation.bicepparam`, men **inte deployat**.
+`enableBookingWrites=false` är normalläget och behåller Reader +
+`ADMIN_WRITES_ENABLED=0`.
+
+Vid aktivering (`enableBookingWrites=true`) skapas/ändras exakt:
+
+| Åtgärd | Resurs/scope | Roll/värde |
+|---|---|---|
+| Skapa | Tabellen `bookingrequests` | `Storage Table Data Contributor` för adminidentiteten `1bb634ef-cc05-4161-a85f-b8caddaee4d8` |
+| Skapa | Secret `kv-skadevi-prod/secrets/airbnb-ical-url` | `Key Vault Secrets User` för samma identitet |
+| Ta bort | Tabellen `bookingrequests` | Reader-tilldelningen `f5171663-e1f3-58d8-afe4-f27997c50345` när Contributor verifierats |
+| Ändra | Adminappens inställningar | `ADMIN_WRITES_ENABLED=1` |
+| Lägg till | Adminappens inställningar | `AIRBNB_ICAL_URL=@Microsoft.KeyVault(SecretUri=https://kv-skadevi-prod.vault.azure.net/secrets/airbnb-ical-url/)` |
+| Oförändrat | Adminappens inställningar | `ADMIN_MAIL_OUTBOX_ENABLED=0`, `ADMIN_REQUIRE_AIRBNB_CHECK=1` |
+
+Roll-ID:n i Skadevis tenant:
+
+- Storage Table Data Contributor: `0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3`
+- Storage Table Data Reader: `76199698-9eea-4c19-bc75-cec21354c6b6`
+- Key Vault Secrets User: `4633458b-17de-408a-b874-0445c86b69e6`
+
+Secretvärdet läses aldrig ut i Git. `AIRBNB_ICAL_URL` är en Key Vault-referens
+utan versionsnummer; endast secretnamnet finns i mallen.
+
+### Airbnb-kontroll
+
+Vid bekräftelse hämtas iCal-adressen färskt vid varje försök (max 5 sekunder).
+Timeout, nätverksfel, ogiltig URL, för stor fil eller tolkningsfel ger `503`
+och bokningen förblir obekräftad. Ett misslyckat uppslag tillåter alltså aldrig
+en dubbelbokning. iCal är fortfarande fördröjd och ersätter inte intern
+kalenderlåsning.
+
+### Fokuserat test
+
+```powershell
+# Tjänstelogik med Table-lika create-only/ETag-regler, utan Azure-åtkomst:
+$env:ADMIN_TEST_REPO = 'memory'
+node scripts/integration-admin-booking-test.mjs
+
+# Live mot isolerad testtabell kräver dataplansroll på bookingrequeststest:
+$env:ADMIN_TEST_STORAGE_KEY = '...'   # endast om nyckelåtkomst tillåts
+node scripts/integration-admin-booking-test.mjs
+```
+
+Lagringskontot har `allowSharedKeyAccess=false`. Live-testet kan därför bara
+köras av en identitet med `Storage Table Data Contributor` på
+`bookingrequeststest`, eller efter en tillfällig sådan testtabellstilldelning.
+Ingen sådan tilldelning gjordes i steg 8L.

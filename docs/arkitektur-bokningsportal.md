@@ -675,7 +675,7 @@ block. Förfrågningar ingår aldrig i den unionen.
 2. Kontrollera roll Owner och att inga nätter redan finns i calendar.
 3. Hämta Airbnb iCal färskt (cache max 5 min); om okänd -> stoppa och visa fel.
 4. Kontrollera att ingen natt är blockerad av Airbnb eller intern kalender.
-5. Skapa en batch med en rad per natt (max 93) med If-None-Match: *.
+5. Skapa en rad per natt (max 93) med create-only Insert Entity; duplicate ger 409.
 6. Om batch misslyckas: returnera 409 med vilka nätter som krockar; inget skrivs.
 7. Uppdatera bokningen till CONFIRMED med If-Match.
 8. Skriv historik (actor, från/till, tid, orsak).
@@ -1145,7 +1145,7 @@ Ingen av dessa grindar öppnas i detta steg.
 | Dubbelbokning på grund av fördröjd Airbnb iCal | Hög | Hög | Intern batch-låsning, färsk kontroll före bekräftelse, manuell Airbnb-blockering, konfliktlarm |
 | Airbnb-bokning skapas efter intern bekräftelse | Hög | Hög | Tydlig “Blockera i Airbnb”-åtgärd, övervakning och manuell hantering; ingen automatisk avbokning |
 | Förfrågan behandlas som definitiv bokning | Medel | Hög | Inga kalenderrader förrän `CONFIRMED`; preliminär är endast status |
-| Två admins bekräftar samtidigt | Medel | Hög | ETag/`If-Match`, batch med `If-None-Match: *`, 409 och uppdaterad vy |
+| Två admins bekräftar samtidigt | Medel | Hög | ETag/`If-Match`, create-only Insert Entity, 409 och uppdaterad vy |
 | Table Storage-query blir långsam vid volym | Medel | Medel | Bounded scan, tidsfönster, indexfält; utvärdera SQL först vid behov |
 | Auth-bypass eller felaktig Easy Auth-konfiguration | Låg | Hög | Alla routes skyddade, deny-by-default, rollkontroll i API, stagingtester, säkerhetsgranskning |
 | CSRF/XSS i admin | Medel | Hög | CSRF-token + Origin, CSP/nonce, escaping, inga inline-handlers, säkerhetsrecension |

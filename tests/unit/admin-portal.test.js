@@ -444,16 +444,27 @@ test('Table-adaptern gör endast read-only GET med managed identity', async () =
   assert.ok(calls.some((call) => decodeURIComponent(String(call.url)).replaceAll('+', ' ').includes('outbox')));
 });
 
-test('admin-Bicep använder endast läsroll på tabellen och inga hemligheter', () => {
+test('admin-Bicep är staged: Reader som standard, Contributor/KV endast vid aktivering', () => {
   const template = fs.readFileSync(path.join(__dirname, '../../infra/admin-webapp.bicep'), 'utf8');
+  assert.match(template, /param enableBookingWrites bool = false/);
   assert.match(template, /76199698-9eea-4c19-bc75-cec21354c6b6/);
   assert.match(template, /de139f84-1756-47ae-9be6-808fbbe84772/);
-  assert.doesNotMatch(template, /0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3/);
+  assert.match(template, /0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3/);
+  assert.match(template, /4633458b-17de-408a-b874-0445c86b69e6/);
+  assert.match(template, /resource tableReader [^=]+= if \(!enableBookingWrites\)/);
+  assert.match(template, /resource tableContributor [^=]+= if \(enableBookingWrites\)/);
+  assert.match(template, /resource airbnbSecretUser [^=]+= if \(enableBookingWrites\)/);
+  assert.match(template, /scope: bookingTable/);
+  assert.match(template, /scope: airbnbSecret/);
+  assert.doesNotMatch(template, /scope: storageAccount/);
+  assert.doesNotMatch(template, /scope: keyVault\b/);
   assert.doesNotMatch(template, /Microsoft\.Network\/dnsZones/);
   assert.doesNotMatch(template, /re_[A-Za-z0-9]/);
+  assert.doesNotMatch(template, /https?:\/\/[^\s']*airbnb\.com/i);
   assert.match(template, /ADMIN_TRUST_EASY_AUTH/);
   assert.match(template, /ADMIN_WRITES_ENABLED/);
   assert.match(template, /AZURE_STORAGE_ACCOUNT_NAME/);
+  assert.match(template, /@Microsoft\.KeyVault\(SecretUri=\$\{airbnbIcalSecretUri\}\)/);
 });
 
 async function ownerSession(port) {

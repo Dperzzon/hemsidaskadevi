@@ -238,6 +238,9 @@ function createTableAdminRepository(options = {}) {
       }));
     },
     async createCalendarNight(night, data) {
+      // Table Storage POST/Insert Entity är create-only: samma PartitionKey +
+      // RowKey ger 409 EntityAlreadyExists. If-None-Match får inte skickas på
+      // POST och behövs inte för atomisk nattlåsning.
       const result = await request({
         method: 'POST',
         body: {
@@ -250,8 +253,7 @@ function createTableAdminRepository(options = {}) {
           note: data.note ?? '',
           createdBy: data.createdBy ?? '',
           createdAt: data.createdAt ?? new Date().toISOString()
-        },
-        ifNoneMatch: '*'
+        }
       });
       if (result.status === 409 || result.status === 412) throw conflict('Natten är redan blockerad');
       if (result.status !== 201) {

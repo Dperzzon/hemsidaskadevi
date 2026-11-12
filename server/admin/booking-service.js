@@ -6,8 +6,9 @@
 // Principer:
 // - En förfrågan (PENDING) är aldrig en bokning. Endast Owner kan bekräfta.
 // - Bekräftade bokningar och manuella block skapar en kalenderrad per natt.
-// - Kalenderraden skapas med "create only" (If-None-Match: *) så att två
-//   samtidiga bekräftelser aldrig båda kan lyckas för samma natt.
+// - Kalenderraden skapas med Table Storage Insert Entity, som är create-only:
+//   samma natt/RowKey ger 409. Två samtidiga bekräftelser kan därför aldrig
+//   båda lyckas för samma natt.
 // - Alla ändringar kräver ETag/If-Match och skriver en append-only auditpost.
 // - Sparade prisuppgifter räknas aldrig om vid visning. Nya beräkningar sker
 //   bara vid uttrycklig ändring och bevarar originalpriset.
