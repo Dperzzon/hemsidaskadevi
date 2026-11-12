@@ -53,6 +53,7 @@ function historyList(entries = []) {
   if (!entries.length) return '<p class="muted">Ingen historik registrerad ännu.</p>';
   const actionLabels = {
     MANUAL_CREATED: 'Manuell bokning skapad',
+    AIRBNB_OVERRIDE_APPROVED: 'Airbnb-blockering åsidosatt',
     BLOCK_CREATED: 'Datumblockering skapad',
     BLOCK_REMOVED: 'Datumblockering borttagen',
     NOTE_ADDED: 'Anteckning tillagd',

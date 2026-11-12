@@ -72,6 +72,12 @@ function renderNewBooking(options) {
       </section>
 
       <section class="form-section" data-booking-only>
+        <div class="panel-heading"><div><p class="eyebrow">Airbnb</p><h2>Egen blockering i Airbnb</h2></div></div>
+        <label class="check-row"><input type="checkbox" name="airbnbOverrideIntent"> <span>Jag har själv blockerat datumen i Airbnb för denna bokning.</span></label>
+        <p class="price-note">Om Airbnb visar upptagna datum krävs en aktiv bekräftelse och en kort motivering. Endast Airbnb-konflikten kan åsidosättas. Interna kalenderlås och dubbla bekräftelser blockeras alltid. Tekniska fel i Airbnb-kalendern kan aldrig åsidosättas.</p>
+      </section>
+
+      <section class="form-section" data-booking-only>
         <div class="panel-heading"><div><p class="eyebrow">Pris och betalning</p><h2>Avtalat pris</h2></div></div>
         <div class="form-grid">
           <label class="field"><span>Avtalat totalpris (kr, valfritt)</span><input type="number" name="agreedTotal" min="0" step="1" placeholder="Lämna tomt för ordinarie pris"></label>

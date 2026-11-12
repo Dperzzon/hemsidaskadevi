@@ -60,7 +60,11 @@
     if (!response.ok) {
       const error = new Error(data.error || 'Åtgärden kunde inte genomföras.');
       error.status = response.status;
+      error.code = data.code;
       error.fields = data.fields;
+      error.blockedNights = data.blockedNights;
+      error.requiresConfirmation = data.requiresConfirmation;
+      error.requiresOverrideOption = data.requiresOverrideOption;
       throw error;
     }
     return data;
@@ -73,6 +77,13 @@
     });
   }
 
+  function errorText(error) {
+    const fieldMessages = error.fields && typeof error.fields === 'object'
+      ? Object.values(error.fields).filter(Boolean)
+      : [];
+    return [error.message, ...fieldMessages].filter(Boolean).join(' ');
+  }
+
   function showFormError(form, message) {
     const target = form.querySelector('[data-form-error]');
     if (target) {
@@ -82,6 +93,11 @@
     } else {
       showToast(message);
     }
+  }
+
+  function blockedNightsText(error) {
+    const nights = Array.isArray(error.blockedNights) ? error.blockedNights : [];
+    return nights.length ? ` Upptagna nätter: ${nights.join(', ')}.` : '';
   }
 
   document.querySelectorAll('[data-prepared-action]').forEach((button) => {
@@ -112,17 +128,53 @@
         return;
       }
       button.disabled = true;
-      try {
-        await api(`/api/admin/bookings/${encodeURIComponent(button.dataset.reference)}/status`, {
+      const submit = (extra = {}) => api(
+        `/api/admin/bookings/${encodeURIComponent(button.dataset.reference)}/status`,
+        {
           body: {
             action,
             reason,
-            expectedEtag: button.dataset.etag || undefined
+            expectedEtag: button.dataset.etag || undefined,
+            ...extra
           }
-        });
+        }
+      );
+      try {
+        try {
+          await submit();
+        } catch (error) {
+          if (action !== 'confirm' || error.code !== 'AIRBNB_CONFLICT') throw error;
+          if (!error.requiresConfirmation) {
+            showToast(`${error.message}${blockedNightsText(error)}`);
+            button.disabled = false;
+            return;
+          }
+          const approved = window.confirm(
+            `Airbnb visar upptagna datum.${blockedNightsText(error)}\n\n` +
+            'Bekräfta att du själv blockerat datumen i Airbnb och vill åsidosätta endast Airbnb-konflikten. ' +
+            'Interna kalenderlås påverkas inte.'
+          );
+          if (!approved) {
+            showToast('Bokningen bekräftades inte.');
+            button.disabled = false;
+            return;
+          }
+          const overrideReason = window.prompt('Kort motivering till Airbnb-åsidosättningen:');
+          if (!overrideReason || !overrideReason.trim()) {
+            showToast('En motivering krävs för att åsidosätta Airbnb.');
+            button.disabled = false;
+            return;
+          }
+          await submit({
+            airbnbOverrideIntent: true,
+            airbnbOverride: true,
+            airbnbOverrideConfirmed: true,
+            airbnbOverrideReason: overrideReason.trim()
+          });
+        }
         window.location.reload();
       } catch (error) {
-        showToast(error.message);
+        showToast(errorText(error));
         button.disabled = false;
       }
     });
@@ -157,6 +209,8 @@
 
   document.querySelectorAll('form[data-admin-form]').forEach((form) => {
     const type = form.dataset.adminForm;
+    let manualIdempotencyKey = '';
+    let blockIdempotencyKey = '';
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
       setBusy(form, true);
@@ -204,8 +258,9 @@
           return;
         }
         if (type === 'block') {
+          if (!blockIdempotencyKey) blockIdempotencyKey = crypto.randomUUID();
           await api('/api/admin/calendar/blocks', {
-            headers: { 'Idempotency-Key': crypto.randomUUID() },
+            headers: { 'Idempotency-Key': blockIdempotencyKey },
             body: {
               arrival: formValue(form, 'arrival'),
               departure: formValue(form, 'departure'),
@@ -219,8 +274,9 @@
           const modeElement = form.querySelector('input[name="mode"]:checked');
           const mode = modeElement ? modeElement.value : 'booking';
           if (mode === 'block') {
+            if (!blockIdempotencyKey) blockIdempotencyKey = crypto.randomUUID();
             await api('/api/admin/calendar/blocks', {
-              headers: { 'Idempotency-Key': crypto.randomUUID() },
+              headers: { 'Idempotency-Key': blockIdempotencyKey },
               body: {
                 arrival: formValue(form, 'arrival'),
                 departure: formValue(form, 'departure'),
@@ -230,39 +286,74 @@
             window.location.href = '/admin/calendar';
             return;
           }
-          const data = await api('/api/admin/bookings', {
-            headers: { 'Idempotency-Key': crypto.randomUUID() },
-            body: {
-              mode: 'booking',
-              firstName: formValue(form, 'firstName'),
-              lastName: formValue(form, 'lastName'),
-              email: formValue(form, 'email'),
-              phone: formValue(form, 'phone'),
-              company: formValue(form, 'company'),
-              arrival: formValue(form, 'arrival'),
-              departure: formValue(form, 'departure'),
-              guests: Number(formValue(form, 'guests') || 0),
-              bookingSource: formValue(form, 'bookingSource'),
-              statusCode: formValue(form, 'statusCode'),
-              addons: {
-                slutstad: checked(form, 'slutstad'),
-                lakan: checked(form, 'lakan'),
-                linenCount: Number(formValue(form, 'linenCount') || 0),
-                ved: checked(form, 'ved'),
-                tidigIncheckning: checked(form, 'tidigIncheckning'),
-                senUtcheckning: checked(form, 'senUtcheckning')
-              },
-              agreedTotal: formValue(form, 'agreedTotal') === '' ? null : Number(formValue(form, 'agreedTotal')),
-              priceAdjustmentReason: formValue(form, 'priceAdjustmentReason'),
-              paymentStatus: formValue(form, 'paymentStatus'),
-              amountPaid: Number(formValue(form, 'amountPaid') || 0),
-              latestNote: formValue(form, 'latestNote')
-            }
+
+          // Behåll samma nyckel genom Airbnb-override och omförsök. Servern
+          // återanvänder då en redan sparad bokning i stället för att skapa
+          // en dubblett om ett tidigare svar var osäkert.
+          if (!manualIdempotencyKey) manualIdempotencyKey = crypto.randomUUID();
+          const payload = {
+            mode: 'booking',
+            firstName: formValue(form, 'firstName'),
+            lastName: formValue(form, 'lastName'),
+            email: formValue(form, 'email'),
+            phone: formValue(form, 'phone'),
+            company: formValue(form, 'company'),
+            arrival: formValue(form, 'arrival'),
+            departure: formValue(form, 'departure'),
+            guests: Number(formValue(form, 'guests') || 0),
+            bookingSource: formValue(form, 'bookingSource'),
+            statusCode: formValue(form, 'statusCode'),
+            airbnbOverrideIntent: checked(form, 'airbnbOverrideIntent'),
+            addons: {
+              slutstad: checked(form, 'slutstad'),
+              lakan: checked(form, 'lakan'),
+              linenCount: Number(formValue(form, 'linenCount') || 0),
+              ved: checked(form, 'ved'),
+              tidigIncheckning: checked(form, 'tidigIncheckning'),
+              senUtcheckning: checked(form, 'senUtcheckning')
+            },
+            agreedTotal: formValue(form, 'agreedTotal') === '' ? null : Number(formValue(form, 'agreedTotal')),
+            priceAdjustmentReason: formValue(form, 'priceAdjustmentReason'),
+            paymentStatus: formValue(form, 'paymentStatus'),
+            amountPaid: Number(formValue(form, 'amountPaid') || 0),
+            latestNote: formValue(form, 'latestNote')
+          };
+          const post = (extra = {}) => api('/api/admin/bookings', {
+            headers: { 'Idempotency-Key': manualIdempotencyKey },
+            body: { ...payload, ...extra }
           });
+
+          let data;
+          try {
+            data = await post();
+          } catch (error) {
+            if (error.code !== 'AIRBNB_CONFLICT' || !error.requiresConfirmation) throw error;
+            const approved = window.confirm(
+              `Varning: Airbnb visar upptagna datum.${blockedNightsText(error)}\n\n` +
+              'Bekräfta att du själv har blockerat datumen i Airbnb för denna bokning. ' +
+              'Endast Airbnb-konflikten åsidosätts. Interna kalenderlås och andra bokningar påverkas inte.'
+            );
+            if (!approved) {
+              showFormError(form, 'Bokningen skapades inte. Datumen är fortsatt blockerade i Airbnb.');
+              setBusy(form, false);
+              return;
+            }
+            const overrideReason = window.prompt('Kort motivering till varför Airbnb-blockeringen åsidosätts:');
+            if (!overrideReason || !overrideReason.trim()) {
+              showFormError(form, 'En motivering krävs för att åsidosätta Airbnb-blockeringen.');
+              setBusy(form, false);
+              return;
+            }
+            data = await post({
+              airbnbOverride: true,
+              airbnbOverrideConfirmed: true,
+              airbnbOverrideReason: overrideReason.trim()
+            });
+          }
           window.location.href = `/admin/bookings/${encodeURIComponent(data.reference)}`;
         }
       } catch (error) {
-        showFormError(form, error.message);
+        showFormError(form, errorText(error));
         setBusy(form, false);
       }
     });

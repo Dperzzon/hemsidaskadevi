@@ -2,10 +2,11 @@
 
 Portalen är en separat administrationsapp. Den ändrar inte den publika
 webbplatsens beteende, Azure-resurserna, DNS eller `BOOKING_REQUESTS_ENABLED`.
-I denna version är bokningshanteringen fullt utbyggd lokalt och i demoläge:
-manuella bokningar, statusövergångar, datumblockering, betalstatus,
-anteckningar, auditlogg och intern kalender. Mot Azure Table Storage är
-skrivningarna fortfarande avstängda tills RBAC och granskning är klara.
+Bokningshanteringen är aktiv i produktion: manuella bokningar,
+statusövergångar, datumblockering, betalstatus, anteckningar, auditlogg och
+intern kalender. Skrivningar mot Azure Table Storage använder managed identity
+med Contributor endast på tabellen `bookingrequests`. Mejl är fortfarande
+avstängt.
 
 ## 1. Starta demon
 
@@ -524,6 +525,26 @@ Timeout, nätverksfel, ogiltig URL, för stor fil eller tolkningsfel ger `503`
 och bokningen förblir obekräftad. Ett misslyckat uppslag tillåter alltså aldrig
 en dubbelbokning. iCal är fortfarande fördröjd och ersätter inte intern
 kalenderlåsning.
+
+### Egen Airbnb-blockering
+
+Om Owner själv har blockerat datumen i Airbnb kan detta anges i formuläret
+Ny bokning. Portalen gör då fortfarande en färsk Airbnb-kontroll. Visar Airbnb
+upptagna datum krävs:
+
+1. en tydlig varning med de upptagna nätterna,
+2. aktiv bekräftelse från Owner,
+3. en kort motivering.
+
+Först då sparas bokningen med `airbnbOverride`, motivering, godkännare,
+tidpunkt och de blockerade nätterna. En separat auditpost
+`AIRBNB_OVERRIDE_APPROVED` skrivs. Åsidosättningen gäller endast Airbnb;
+interna kalenderlås och andra bekräftade bokningar blockeras alltid. Ett
+tekniskt fel i Airbnb-kalendern ger `503` och kan aldrig åsidosättas.
+
+Samma `Idempotency-Key` återanvänds vid override och omförsök. Om bokningen
+redan sparades av ett tidigare försök återanvänds den i stället för att en
+dubblett skapas.
 
 ### Fokuserat test
 

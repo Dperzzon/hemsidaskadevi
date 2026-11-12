@@ -449,6 +449,39 @@ async function main() {
       'bekräftelse lyckades när Airbnb-kontrollen svarade utan blockering');
     assert((await repo.listCalendar(d5, addDays(d5, 2))).length === 2,
       'bekräftelsen skapade nattlås efter godkänd Airbnb-kontroll');
+
+    console.log('6. Manuell Airbnb-blockering kan åsidosättas med motivering och audit');
+    const d6 = addDays(d5, 10);
+    const overridePending = await createManualBooking(repo, owner,
+      bookingBody(d6, addDays(d6, 2), { statusCode: 'PENDING' }),
+      { ...options, idempotencyKey: `${options.idempotencyKey}-override` }
+    );
+    const overrideRef = overridePending.jsonBody.reference;
+    createdReferences.add(overrideRef);
+    const overrideBlocked = await changeStatus(repo, owner, overrideRef, 'confirm', {
+      airbnbOverrideIntent: true,
+      airbnbOverride: true,
+      airbnbOverrideConfirmed: true,
+      airbnbOverrideReason: 'Egen Airbnb-blockering för denna bokning'
+    }, {
+      ...options,
+      requireAirbnbCheck: true,
+      availabilityHandler: async () => ({ status: 200, jsonBody: { blocked: [d6, addDays(d6, 1)] } })
+    });
+    assert(overrideBlocked.status === 200 && overrideBlocked.jsonBody.statusCode === 'CONFIRMED',
+      'bekräftelse med Airbnb-override lyckades');
+    const overrideRaw = await repo.getRawBooking(overrideRef);
+    assert(overrideRaw.record.airbnbOverride === true, 'override-flaggan sparades');
+    assert(overrideRaw.record.airbnbOverrideReason === 'Egen Airbnb-blockering för denna bokning',
+      'motiveringen sparades');
+    assert(Array.isArray(overrideRaw.record.airbnbBlockedNights) &&
+      overrideRaw.record.airbnbBlockedNights.length === 2, 'de blockerade nätterna sparades');
+    assert(overrideRaw.record.airbnbOverrideApprovedBy.length > 0, 'godkännaren sparades');
+    assert((await repo.listCalendar(d6, addDays(d6, 2))).length === 2,
+      'interna nattlås skapades trots Airbnb-override');
+    const overrideHistory = await repo.listHistory(overrideRef);
+    assert(overrideHistory.some((entry) => entry.action === 'AIRBNB_OVERRIDE_APPROVED'),
+      'Airbnb-override loggades i auditloggen');
   } finally {
     console.log('5. Städar endast testets egna rader');
     for (const reference of createdReferences) await cleanup(reference);

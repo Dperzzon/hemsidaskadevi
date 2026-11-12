@@ -333,6 +333,11 @@ function normalizeBooking(record = {}, options = {}) {
     balance: numberOr(record.balance, numberOr(record.total) - numberOr(record.amountPaid)),
     latestNote: String(record.latestNote ?? ''),
     airbnbBlockedAt: record.airbnbBlockedAt ?? '',
+    airbnbOverride: record.airbnbOverride === true,
+    airbnbOverrideReason: String(record.airbnbOverrideReason ?? ''),
+    airbnbOverrideApprovedBy: String(record.airbnbOverrideApprovedBy ?? ''),
+    airbnbOverrideApprovedAt: String(record.airbnbOverrideApprovedAt ?? ''),
+    airbnbBlockedNights: Array.isArray(record.airbnbBlockedNights) ? record.airbnbBlockedNights : [],
     overlaps: Array.isArray(record.overlaps) ? record.overlaps : [],
     actionFlags: record.actionFlags && typeof record.actionFlags === 'object' ? record.actionFlags : {},
     isDemo: record.isDemo === true || String(record.reference ?? '').startsWith('DEMO-')

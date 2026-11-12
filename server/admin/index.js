@@ -75,6 +75,10 @@ function securityHeaders(req, options = {}) {
 }
 
 function sendJson(req, res, status, body, extraHeaders = {}) {
+  if (status >= 400 && String(req.url ?? '').startsWith('/api/admin/')) {
+    const pathOnly = String(req.url).split('?')[0];
+    console.warn(`[admin-api] ${req.method} ${pathOnly} -> ${status} ${body?.code ?? ''}`.trim());
+  }
   const headers = {
     ...securityHeaders(req),
     'Content-Type': 'application/json; charset=utf-8',
@@ -658,7 +662,10 @@ let calendarParserReady = false;
       }
       console.error(`Adminfel på ${pageTitleFor(url.pathname)}: ${error.message}`);
       if (isApi) {
-        sendJson(req, res, 503, { error: 'Bokningsdata är tillfälligt otillgänglig.' });
+        sendJson(req, res, 503, {
+          error: 'Bokningsdata är tillfälligt otillgänglig. Försök igen om en stund.',
+          code: 'STORAGE'
+        });
       } else {
         sendHtml(req, res, 503, renderErrorPage({
           status: 503,

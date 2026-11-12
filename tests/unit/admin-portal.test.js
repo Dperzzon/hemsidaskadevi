@@ -82,7 +82,11 @@ function demoServer(options = {}) {
     auth,
     repository,
     demo: options.demo ?? true,
-    now: options.now
+    now: options.now,
+    writesEnabled: options.writesEnabled,
+    requireAirbnbCheck: options.requireAirbnbCheck,
+    availabilityHandler: options.availabilityHandler,
+    outboxEnabled: options.outboxEnabled
   });
 }
 
@@ -529,6 +533,137 @@ test('Owner kan skapa manuell bokning som låser kalendern och auditloggas', asy
     });
     assert.equal(duplicate.status, 200);
     assert.equal(duplicate.json.duplicate, true);
+  } finally {
+    close(server);
+  }
+});
+
+test('Airbnb-override kräver aktiv bekräftelse och motivering men kringgår aldrig interna lås', async () => {
+  let blockedNights = ['2027-08-10', '2027-08-11'];
+  const server = await listen(demoServer({
+    requireAirbnbCheck: true,
+    availabilityHandler: async () => ({ status: 200, jsonBody: { blocked: blockedNights } })
+  }));
+  const port = server.address().port;
+  const body = manualBookingBody({
+    arrival: '2027-08-10',
+    departure: '2027-08-12',
+    email: 'airbnb-override@example.se'
+  });
+  try {
+    const csrf = await ownerSession(port);
+    const key = 'airbnb-override-0001';
+    const headers = { 'X-CSRF-Token': csrf, 'Idempotency-Key': key };
+
+    const notMarked = await request(port, '/api/admin/bookings', {
+      method: 'POST', headers, body
+    });
+    assert.equal(notMarked.status, 409);
+    assert.equal(notMarked.json.code, 'AIRBNB_CONFLICT');
+    assert.equal(notMarked.json.requiresOverrideOption, true);
+    assert.match(notMarked.json.error, /Airbnb/);
+
+    const noConfirmation = await request(port, '/api/admin/bookings', {
+      method: 'POST', headers, body: { ...body, airbnbOverrideIntent: true }
+    });
+    assert.equal(noConfirmation.status, 409);
+    assert.equal(noConfirmation.json.code, 'AIRBNB_CONFLICT');
+    assert.equal(noConfirmation.json.requiresConfirmation, true);
+    assert.deepEqual(noConfirmation.json.blockedNights, blockedNights);
+
+    const approved = await request(port, '/api/admin/bookings', {
+      method: 'POST',
+      headers,
+      body: {
+        ...body,
+        airbnbOverrideIntent: true,
+        airbnbOverride: true,
+        airbnbOverrideConfirmed: true,
+        airbnbOverrideReason: 'Egen blockering i Airbnb för denna gäst'
+      }
+    });
+    assert.equal(approved.status, 201);
+    const reference = approved.json.reference;
+
+    const detail = await request(port, `/api/admin/bookings/${reference}`);
+    assert.equal(detail.json.booking.airbnbOverride, true);
+    assert.equal(detail.json.booking.airbnbOverrideReason, 'Egen blockering i Airbnb för denna gäst');
+    assert.ok(detail.json.booking.airbnbOverrideApprovedBy);
+    assert.deepEqual(detail.json.booking.airbnbBlockedNights, blockedNights);
+
+    const calendar = await request(port, '/api/admin/calendar?from=2027-08');
+    assert.equal(calendar.json.nights.filter((row) => row.reference === reference).length, 2);
+
+    const history = await request(port, `/api/admin/bookings/${reference}/history`);
+    const overrideEntry = history.json.history.find((entry) => entry.action === 'AIRBNB_OVERRIDE_APPROVED');
+    assert.ok(overrideEntry);
+    assert.equal(overrideEntry.reason, 'Egen blockering i Airbnb för denna gäst');
+    assert.equal(overrideEntry.actorName, detail.json.booking.airbnbOverrideApprovedBy);
+
+    const retry = await request(port, '/api/admin/bookings', {
+      method: 'POST',
+      headers,
+      body: {
+        ...body,
+        airbnbOverrideIntent: true,
+        airbnbOverride: true,
+        airbnbOverrideConfirmed: true,
+        airbnbOverrideReason: 'Egen blockering i Airbnb för denna gäst'
+      }
+    });
+    assert.equal(retry.status, 200);
+    assert.equal(retry.json.duplicate, true);
+    assert.equal(retry.json.reference, reference);
+    const afterRetry = await request(port, '/api/admin/calendar?from=2027-08');
+    assert.equal(afterRetry.json.nights.filter((row) => row.reference === reference).length, 2);
+
+    blockedNights = [];
+    const existing = await request(port, '/api/admin/bookings', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrf, 'Idempotency-Key': 'airbnb-internal-0001' },
+      body: manualBookingBody({
+        arrival: '2027-08-10',
+        departure: '2027-08-12',
+        email: 'internal@example.se',
+        airbnbOverrideIntent: true,
+        airbnbOverride: true,
+        airbnbOverrideConfirmed: true,
+        airbnbOverrideReason: 'Försök kringgå internt lås'
+      })
+    });
+    assert.equal(existing.status, 409);
+    assert.equal(existing.json.code, 'INTERNAL_CALENDAR_CONFLICT');
+  } finally {
+    close(server);
+  }
+});
+
+test('Airbnb-tekniskt fel kan aldrig åsidosättas', async () => {
+  const server = await listen(demoServer({
+    requireAirbnbCheck: true,
+    availabilityHandler: async () => { throw new Error('timeout'); }
+  }));
+  const port = server.address().port;
+  try {
+    const csrf = await ownerSession(port);
+    const response = await request(port, '/api/admin/bookings', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrf, 'Idempotency-Key': 'airbnb-timeout-0001' },
+      body: manualBookingBody({
+        arrival: '2027-09-10',
+        departure: '2027-09-12',
+        email: 'timeout@example.se',
+        airbnbOverrideIntent: true,
+        airbnbOverride: true,
+        airbnbOverrideConfirmed: true,
+        airbnbOverrideReason: 'Ska inte få åsidosätta tekniskt fel'
+      })
+    });
+    assert.equal(response.status, 503);
+    assert.equal(response.json.code, 'AIRBNB_UNAVAILABLE');
+    assert.match(response.json.error, /kunde inte hämtas eller tolkas/);
+    const calendar = await request(port, '/api/admin/calendar?from=2027-09');
+    assert.equal(calendar.json.nights.length, 0);
   } finally {
     close(server);
   }

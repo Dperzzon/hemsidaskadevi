@@ -135,6 +135,11 @@ function renderBookingDetail(options) {
     </div>
 
     ${booking.actionReasons.length ? `<div class="attention-banner"><strong>Kräver åtgärd</strong>${actionChips(booking)}</div>` : ''}
+    ${booking.airbnbOverride ? `<div class="notice-banner">
+      <strong>Airbnb-blockering åsidosatt.</strong> ${escapeHtml(booking.airbnbOverrideReason || 'Motivering saknas')} ·
+      Godkänd av ${escapeHtml(booking.airbnbOverrideApprovedBy || 'okänd')} ${formatDateTime(booking.airbnbOverrideApprovedAt)}.
+      ${booking.airbnbBlockedNights.length ? `Upptagna nätter: ${escapeHtml(booking.airbnbBlockedNights.join(', '))}.` : ''}
+    </div>` : ''}
 
     <div class="detail-layout">
       <div class="detail-main">

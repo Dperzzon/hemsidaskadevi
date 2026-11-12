@@ -167,14 +167,29 @@ function validateManualBooking(body, now = new Date()) {
     }
   }
 
-  if (Object.keys(errors).length) return { errors };
+  if (Object.keys(errors).length) {
+    return {
+      errors,
+      code: 'VALIDATION',
+      message: 'Kontrollera uppgifterna i formuläret.'
+    };
+  }
 
   const addons = mode === 'booking'
     ? validAddons(body.addons, guests)
     : validAddons({}, 0);
-  const pricing = mode === 'booking'
-    ? quote({ arrival: dates.arrival, departure: dates.departure, guests, addons })
-    : null;
+  let pricing = null;
+  if (mode === 'booking') {
+    try {
+      pricing = quote({ arrival: dates.arrival, departure: dates.departure, guests, addons });
+    } catch {
+      return {
+        errors: { pricing: 'Prisberäkningen kunde inte genomföras.' },
+        code: 'PRICE',
+        message: 'Priset kunde inte beräknas. Kontrollera datum, gäster och tillval.'
+      };
+    }
+  }
   const total = mode === 'block' ? 0 : (agreedTotal ?? pricing.total);
 
   return {
@@ -264,29 +279,71 @@ async function airbnbConflicts(record, options, context) {
   };
 }
 
-async function assertConfirmable(repo, record, options, context, now) {
+function overrideRequest(body = {}) {
+  return {
+    intent: body.airbnbOverrideIntent === true,
+    allowed: body.airbnbOverride === true,
+    confirmed: body.airbnbOverrideConfirmed === true,
+    reason: cleanString(body.airbnbOverrideReason, 500)
+  };
+}
+
+async function assertConfirmable(repo, record, options, context, now, body = {}) {
+  const override = overrideRequest(body);
   const calendar = await calendarConflicts(repo, record);
   if (calendar.length) {
-    return error(409, 'Datumen är redan blockerade i den interna kalendern.', {
-      conflicts: calendar.map((row) => row.night ?? row.RowKey)
-    });
+    // Airbnb-override får aldrig kringgå interna kalenderlås.
+    return {
+      error: error(409, 'Datumen är redan blockerade i den interna kalendern.', {
+        code: 'INTERNAL_CALENDAR_CONFLICT',
+        conflicts: calendar.map((row) => row.night ?? row.RowKey)
+      })
+    };
   }
   const internal = await internalConflicts(repo, record, now, record.reference);
   if (internal.length) {
-    return error(409, 'Datumen överlappar en annan bekräftad bokning eller blockering.', {
-      conflicts: internal.map((booking) => booking.reference)
-    });
+    return {
+      error: error(409, 'Datumen överlappar en annan bekräftad bokning eller blockering.', {
+        code: 'INTERNAL_BOOKING_CONFLICT',
+        conflicts: internal.map((booking) => booking.reference)
+      })
+    };
   }
   const airbnb = await airbnbConflicts(record, options, context);
   if (airbnb.unavailable) {
-    return error(503, 'Airbnb-kalendern kunde inte kontrolleras. Bokningen har inte bekräftats.');
+    // Ett tekniskt fel är aldrig samma sak som en hämtad Airbnb-blockering.
+    return {
+      error: error(503, 'Airbnb-kalendern kunde inte hämtas eller tolkas. Bokningen har inte bekräftats och kan inte åsidosättas.', {
+        code: 'AIRBNB_UNAVAILABLE'
+      })
+    };
   }
   if (airbnb.blocked.length) {
-    return error(409, 'Några nätter är redan bokade i Airbnb-kalendern. Bokningen har inte bekräftats.', {
+    if (!override.intent) {
+      return {
+        error: error(409, 'Några nätter är redan blockerade i Airbnb-kalendern. Markera att du själv blockerat datumen om det är din egen blockering.', {
+          code: 'AIRBNB_CONFLICT',
+          blockedNights: airbnb.blocked,
+          requiresOverrideOption: true
+        })
+      };
+    }
+    if (!override.allowed || !override.confirmed || !override.reason) {
+      return {
+        error: error(409, 'Airbnb visar upptagna datum. Bekräfta åsidosättningen aktivt och ange en kort motivering.', {
+          code: 'AIRBNB_CONFLICT',
+          blockedNights: airbnb.blocked,
+          requiresConfirmation: true
+        })
+      };
+    }
+    return {
+      error: null,
+      overrideApplied: true,
       blockedNights: airbnb.blocked
-    });
+    };
   }
-  return null;
+  return { error: null, overrideApplied: false, blockedNights: [] };
 }
 
 async function lockCalendar(repo, record, principal, now) {
@@ -310,7 +367,8 @@ async function lockCalendar(repo, record, principal, now) {
         await repo.deleteCalendarNight(inserted, record.reference).catch(() => {});
       }
       if (cause?.status === 409) {
-        return error(409, 'Datumen är redan blockerade. Ingen delvis blockering sparades.', {
+        return error(409, 'Datumen är redan blockerade i den interna kalendern. Ingen delvis blockering sparades.', {
+          code: 'INTERNAL_CALENDAR_CONFLICT',
           conflicts: [night]
         });
       }
@@ -354,8 +412,14 @@ async function audit(repo, principal, action, record, details = {}) {
 }
 
 function normalizeRepoError(cause) {
-  if (cause?.status === 409) return error(409, 'Bokningen har ändrats av någon annan. Uppdatera sidan och försök igen.');
-  if (cause?.status === 404) return error(404, 'Bokningen hittades inte.');
+  if (cause?.status === 409) {
+    return error(409, 'Bokningen har ändrats av någon annan. Uppdatera sidan och försök igen.', {
+      code: 'STALE'
+    });
+  }
+  if (cause?.status === 404) {
+    return error(404, 'Bokningen hittades inte.', { code: 'NOT_FOUND' });
+  }
   return null;
 }
 
@@ -363,13 +427,27 @@ async function createManualBooking(repo, principal, body, options = {}, context 
   const now = options.now ?? new Date();
   const validated = validateManualBooking(body, now);
   if (validated.errors) {
-    return error(400, 'Kontrollera uppgifterna i formuläret.', { fields: validated.errors });
+    return error(400, validated.message ?? 'Kontrollera uppgifterna i formuläret.', {
+      code: validated.code ?? 'VALIDATION',
+      fields: validated.errors
+    });
   }
   const idempotencyKey = makeIdempotencyKey(options.idempotencyKey);
   const rowKey = `${validated.mode === 'block' ? 'block' : 'manual'}-${idempotencyKey}`;
+  // Samma Idempotency-Key används vid Airbnb-override och vid omförsök efter
+  // ett osäkert svar. Det förhindrar dubbletter och återanvänder en eventuell
+  // redan sparad bokning i stället för att skapa en ny.
   const existing = await repo.findByIdempotencyKey(rowKey).catch(() => null);
   if (existing) {
-    return { status: 200, jsonBody: { reference: existing.reference, duplicate: true } };
+    return {
+      status: 200,
+      jsonBody: {
+        reference: existing.reference,
+        statusCode: existing.statusCode,
+        duplicate: true,
+        message: 'Bokningen fanns redan och återanvändes. Ingen dubblett skapades.'
+      }
+    };
   }
 
   let reference = makeReference(validated.referencePrefix, now);
@@ -394,25 +472,45 @@ async function createManualBooking(repo, principal, body, options = {}, context 
     declinedAt: '',
     cancelledAt: '',
     airbnbBlockedAt: '',
+    airbnbOverride: false,
+    airbnbOverrideReason: '',
+    airbnbOverrideApprovedBy: '',
+    airbnbOverrideApprovedAt: '',
+    airbnbBlockedNights: [],
     overlaps: []
   };
 
   let locked = null;
+  let overrideAudit = null;
   if (record.statusCode === 'CONFIRMED' || record.statusCode === 'BLOCKED') {
-    const conflict = record.statusCode === 'CONFIRMED'
-      ? await assertConfirmable(repo, record, options, context, now)
-      : null;
-    if (conflict) return conflict;
+    if (record.statusCode === 'CONFIRMED') {
+      const confirmable = await assertConfirmable(repo, record, options, context, now, body);
+      if (confirmable.error) return confirmable.error;
+      if (confirmable.overrideApplied) {
+        const actor = actorOf(principal);
+        record.airbnbOverride = true;
+        record.airbnbOverrideReason = cleanString(body.airbnbOverrideReason, 500);
+        record.airbnbOverrideApprovedBy = actor.name;
+        record.airbnbOverrideApprovedAt = now.toISOString();
+        record.airbnbBlockedNights = confirmable.blockedNights;
+        overrideAudit = {
+          reason: record.airbnbOverrideReason,
+          blockedNights: confirmable.blockedNights
+        };
+      }
+    }
     if (record.statusCode === 'BLOCKED') {
       const calendar = await calendarConflicts(repo, record);
       if (calendar.length) {
-        return error(409, 'Datumen är redan blockerade.', {
+        return error(409, 'Datumen är redan blockerade i den interna kalendern.', {
+          code: 'INTERNAL_CALENDAR_CONFLICT',
           conflicts: calendar.map((row) => row.night ?? row.RowKey)
         });
       }
       const internal = await internalConflicts(repo, record, now, record.reference);
       if (internal.length) {
         return error(409, 'Datumen överlappar en intern bokning.', {
+          code: 'INTERNAL_BOOKING_CONFLICT',
           conflicts: internal.map((booking) => booking.reference)
         });
       }
@@ -430,8 +528,17 @@ async function createManualBooking(repo, principal, body, options = {}, context 
     await audit(repo, principal, validated.mode === 'block' ? 'BLOCK_CREATED' : 'MANUAL_CREATED', record, {
       toStatus: record.statusCode,
       reason: record.latestNote,
+      changes: overrideAudit ? { airbnbOverride: overrideAudit } : {},
       context
     });
+    if (overrideAudit) {
+      await audit(repo, principal, 'AIRBNB_OVERRIDE_APPROVED', record, {
+        toStatus: record.statusCode,
+        reason: overrideAudit.reason,
+        changes: { blockedNights: overrideAudit.blockedNights },
+        context
+      });
+    }
     if (validated.mode === 'booking' && body.sendGuestEmail === true) {
       await queueGuestConfirmation(repo, record, options, context);
     }
@@ -472,6 +579,7 @@ async function changeStatus(repo, principal, reference, action, body = {}, optio
   let nextStatus = fromStatus;
   let auditAction = action;
   let lockedNights = null;
+  let overrideAudit = null;
 
   if (action === 'approve' || action === 'preliminary') {
     if (fromStatus !== 'PENDING') return error(422, 'Endast en väntande förfrågan kan godkännas som preliminär.');
@@ -482,8 +590,20 @@ async function changeStatus(repo, principal, reference, action, body = {}, optio
     nextStatus = 'DECLINED';
   } else if (action === 'confirm') {
     if (!['PENDING', 'PRELIMINARY'].includes(fromStatus)) return error(422, 'Endast väntande eller preliminär bokning kan bekräftas.');
-    const conflict = await assertConfirmable(repo, record, options, context, now);
-    if (conflict) return conflict;
+    const confirmable = await assertConfirmable(repo, record, options, context, now, body);
+    if (confirmable.error) return confirmable.error;
+    if (confirmable.overrideApplied) {
+      const actor = actorOf(principal);
+      record.airbnbOverride = true;
+      record.airbnbOverrideReason = cleanString(body.airbnbOverrideReason, 500);
+      record.airbnbOverrideApprovedBy = actor.name;
+      record.airbnbOverrideApprovedAt = now.toISOString();
+      record.airbnbBlockedNights = confirmable.blockedNights;
+      overrideAudit = {
+        reason: record.airbnbOverrideReason,
+        blockedNights: confirmable.blockedNights
+      };
+    }
     lockedNights = await lockCalendar(repo, record, principal, now);
     if (lockedNights?.status) return lockedNights;
     nextStatus = 'CONFIRMED';
@@ -512,8 +632,18 @@ async function changeStatus(repo, principal, reference, action, body = {}, optio
       fromStatus,
       toStatus: nextStatus,
       reason,
+      changes: overrideAudit ? { airbnbOverride: overrideAudit } : {},
       context
     });
+    if (overrideAudit) {
+      await audit(repo, principal, 'AIRBNB_OVERRIDE_APPROVED', record, {
+        fromStatus,
+        toStatus: nextStatus,
+        reason: overrideAudit.reason,
+        changes: { blockedNights: overrideAudit.blockedNights },
+        context
+      });
+    }
     if (nextStatus === 'CONFIRMED' && body.sendGuestEmail === true) {
       await queueGuestConfirmation(repo, record, options, context);
     }
