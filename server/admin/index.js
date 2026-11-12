@@ -474,7 +474,20 @@ function createAdminRequestListener(options = {}) {
     }
 
     if (url.pathname === '/healthz' && (req.method === 'GET' || req.method === 'HEAD')) {
-      sendJson(req, res, 200, { status: 'ok' });
+let calendarParserReady = false;
+      try {
+        require.resolve('node-ical');
+        calendarParserReady = true;
+      } catch {
+        calendarParserReady = false;
+      }
+      const airbnbConfigured = typeof process.env.AIRBNB_ICAL_URL === 'string' &&
+        process.env.AIRBNB_ICAL_URL.startsWith('http');
+      sendJson(req, res, 200, {
+        status: 'ok',
+        airbnbConfigured,
+        calendarParserReady
+      });
       return;
     }
 

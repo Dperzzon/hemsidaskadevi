@@ -251,6 +251,8 @@ test('demoläget serverar dashboard, lista och detalj utan Azure', async () => {
     const health = await request(port, '/healthz');
     assert.equal(health.status, 200);
     assert.equal(health.json.status, 'ok');
+    assert.equal(typeof health.json.airbnbConfigured, 'boolean');
+    assert.equal(typeof health.json.calendarParserReady, 'boolean');
 
     const dashboard = await request(port, '/admin');
     assert.equal(dashboard.status, 200);
