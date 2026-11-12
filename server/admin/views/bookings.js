@@ -21,7 +21,7 @@ function option(value, label, selected) {
 }
 
 function renderBookings(options) {
-  const { bookings, filters, principal, demo, csrfToken, totalCount } = options;
+  const { bookings, filters, principal, demo, csrfToken, writesEnabled, totalCount } = options;
   const statusOptions = [
     option('ALL', 'Alla statusar', filters.status || 'ALL'),
     ...Object.values(STATUS_META).map((meta) => option(meta.code, meta.label, filters.status))
@@ -57,7 +57,10 @@ function renderBookings(options) {
     : emptyState('Inga bokningar matchar', 'Prova att rensa filtren eller söka på ett annat namn, datum eller referens.');
 
   const content = `
-    ${pageHeader('Bokningar', `${totalCount} bokningar och förfrågningar i portalen`)}
+    ${pageHeader('Bokningar', `${totalCount} bokningar och förfrågningar i portalen`,
+      principal.roles?.includes('Owner')
+        ? '<a class="btn btn-primary" href="/admin/bookings/new">+ Ny bokning</a>'
+        : '')}
     <section class="panel filter-panel">
       <form class="filter-form" method="get" action="/admin/bookings" role="search">
         <label class="field field-search">
@@ -97,7 +100,7 @@ function renderBookings(options) {
     </div>
     ${rows}
   `;
-  return layout({ title: 'Bokningar', active: '/admin/bookings', principal, demo, csrfToken, content });
+  return layout({ title: 'Bokningar', active: '/admin/bookings', principal, demo, csrfToken, writesEnabled, content });
 }
 
 module.exports = { renderBookings };

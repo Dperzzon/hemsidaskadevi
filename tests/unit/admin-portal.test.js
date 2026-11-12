@@ -241,7 +241,7 @@ test('detaljvyn visar samtliga tillval och prissnapshot', () => {
   assert.match(html, /resend-1/);
   assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
   assert.doesNotMatch(html, /<script>alert\(1\)<\/script>/);
-  assert.match(html, /data-prepared-action="approve"/);
+  assert.match(html, /data-booking-action="confirm"/);
 });
 
 test('demoläget serverar dashboard, lista och detalj utan Azure', async () => {
@@ -269,7 +269,7 @@ test('demoläget serverar dashboard, lista och detalj utan Azure', async () => {
     assert.match(detail.body, /Slutstädning/);
     assert.match(detail.body, /Sparat prissnapshot/);
     assert.match(detail.body, /Mejlstatus/);
-    assert.match(detail.body, /data-prepared-action="confirm"/);
+    assert.match(detail.body, /data-booking-action="cancel"/);
   } finally {
     close(server);
   }
@@ -300,25 +300,26 @@ test('admin-API kräver auth och skyddas med CSRF', async () => {
     const session = await request(port, '/api/admin/session');
     assert.equal(session.status, 200);
     assert.equal(session.json.demo, true);
-    assert.equal(session.json.writesEnabled, false);
+    assert.equal(session.json.writesEnabled, true);
+    assert.equal(session.json.readOnly, false);
     assert.equal(session.json.user.roles[0], 'Owner');
 
     const list = await request(port, '/api/admin/bookings?status=PENDING');
     assert.equal(list.status, 200);
     assert.equal(list.json.count, 2);
 
-    const withoutCsrf = await request(port, '/api/admin/bookings/DEMO-2026-D4/status', {
-      method: 'POST', body: { action: 'confirm' }
+    const withoutCsrf = await request(port, '/api/admin/bookings/DEMO-2026-A1/status', {
+      method: 'POST', body: { action: 'approve' }
     });
     assert.equal(withoutCsrf.status, 403);
 
-    const withCsrf = await request(port, '/api/admin/bookings/DEMO-2026-D4/status', {
+    const withCsrf = await request(port, '/api/admin/bookings/DEMO-2026-A1/status', {
       method: 'POST',
       headers: { 'X-CSRF-Token': session.json.csrfToken },
-      body: { action: 'confirm' }
+      body: { action: 'approve' }
     });
-    assert.equal(withCsrf.status, 503);
-    assert.match(withCsrf.json.error, /Ingen bokning har ändrats/);
+    assert.equal(withCsrf.status, 200);
+    assert.equal(withCsrf.json.statusCode, 'PRELIMINARY');
   } finally {
     close(server);
   }
@@ -451,5 +452,308 @@ test('admin-Bicep använder endast läsroll på tabellen och inga hemligheter', 
   assert.doesNotMatch(template, /Microsoft\.Network\/dnsZones/);
   assert.doesNotMatch(template, /re_[A-Za-z0-9]/);
   assert.match(template, /ADMIN_TRUST_EASY_AUTH/);
+  assert.match(template, /ADMIN_WRITES_ENABLED/);
   assert.match(template, /AZURE_STORAGE_ACCOUNT_NAME/);
+});
+
+async function ownerSession(port) {
+  const session = await request(port, '/api/admin/session');
+  return session.json.csrfToken;
+}
+
+function manualBookingBody(overrides = {}) {
+  return {
+    mode: 'booking',
+    firstName: 'Manuel',
+    lastName: 'Bokning',
+    email: 'manuel@example.se',
+    phone: '+46 70 123 45 67',
+    arrival: '2027-02-10',
+    departure: '2027-02-13',
+    guests: 4,
+    bookingSource: 'PHONE',
+    statusCode: 'CONFIRMED',
+    addons: { slutstad: true, lakan: true, linenCount: 4, ved: false, tidigIncheckning: false, senUtcheckning: false },
+    paymentStatus: 'DEPOSIT_PAID',
+    amountPaid: 5000,
+    latestNote: 'Bokad via telefon.',
+    ...overrides
+  };
+}
+
+test('Owner kan skapa manuell bokning som låser kalendern och auditloggas', async () => {
+  const server = await listen(demoServer());
+  const port = server.address().port;
+  try {
+    const csrf = await ownerSession(port);
+    const created = await request(port, '/api/admin/bookings', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrf, 'Idempotency-Key': 'manual-test-0001' },
+      body: manualBookingBody()
+    });
+    assert.equal(created.status, 201);
+    assert.equal(created.json.statusCode, 'CONFIRMED');
+    assert.ok(created.json.total > 0);
+
+    const calendar = await request(port, '/api/admin/calendar?from=2027-02');
+    assert.equal(calendar.status, 200);
+    const nights = calendar.json.nights.filter((row) => row.reference === created.json.reference);
+    assert.equal(nights.length, 3);
+    assert.equal(nights[0].type, 'BOOKING');
+
+    const history = await request(port, `/api/admin/bookings/${created.json.reference}/history`);
+    assert.equal(history.status, 200);
+    assert.ok(history.json.history.some((entry) => entry.action === 'MANUAL_CREATED'));
+
+    const detail = await request(port, `/admin/bookings/${created.json.reference}`);
+    assert.match(detail.body, /Auditlogg/);
+    assert.match(detail.body, /Manuell bokning skapad/);
+
+    const duplicate = await request(port, '/api/admin/bookings', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrf, 'Idempotency-Key': 'manual-test-0001' },
+      body: manualBookingBody()
+    });
+    assert.equal(duplicate.status, 200);
+    assert.equal(duplicate.json.duplicate, true);
+  } finally {
+    close(server);
+  }
+});
+
+test('samtidiga bekräftelser kan aldrig dubbelboka samma nätter', async () => {
+  const server = await listen(demoServer());
+  const port = server.address().port;
+  try {
+    const csrf = await ownerSession(port);
+    const body = () => manualBookingBody({
+      arrival: '2027-03-10',
+      departure: '2027-03-12',
+      email: `same-${Math.random()}@example.se`
+    });
+    const [first, second] = await Promise.all([
+      request(port, '/api/admin/bookings', {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrf, 'Idempotency-Key': `concurrent-a-${Date.now()}` },
+        body: body()
+      }),
+      request(port, '/api/admin/bookings', {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrf, 'Idempotency-Key': `concurrent-b-${Date.now()}` },
+        body: body()
+      })
+    ]);
+    assert.deepEqual([first.status, second.status].sort(), [201, 409]);
+
+    const calendar = await request(port, '/api/admin/calendar?from=2027-03');
+    const rows = calendar.json.nights.filter((row) => row.night >= '2027-03-10' && row.night < '2027-03-12');
+    assert.equal(rows.length, 2, 'endast en bokning får äga nätterna');
+  } finally {
+    close(server);
+  }
+});
+
+test('rollback vid krock tar bara bort egna nätter och aldrig en annan boknings lås', async () => {
+  const server = await listen(demoServer());
+  const port = server.address().port;
+  try {
+    const csrf = await ownerSession(port);
+    const block = await request(port, '/api/admin/calendar/blocks', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrf, 'Idempotency-Key': 'rollback-foreign-0001' },
+      body: { arrival: '2027-07-12', departure: '2027-07-13', latestNote: 'Befintligt lås' }
+    });
+    assert.equal(block.status, 201);
+
+    const attempt = await request(port, '/api/admin/bookings', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrf, 'Idempotency-Key': 'rollback-attempt-0001' },
+      body: manualBookingBody({
+        arrival: '2027-07-10',
+        departure: '2027-07-13',
+        email: 'rollback@example.se'
+      })
+    });
+    assert.equal(attempt.status, 409);
+
+    const calendar = await request(port, '/api/admin/calendar?from=2027-07');
+    const period = calendar.json.nights.filter((row) =>
+      row.night >= '2027-07-10' && row.night < '2027-07-13'
+    );
+    assert.deepEqual(period.map((row) => row.night), ['2027-07-12']);
+    assert.equal(period[0].reference, block.json.reference);
+    assert.equal(period[0].type, 'MANUAL');
+    assert.equal(
+      calendar.json.nights.filter((row) => row.night === '2027-07-10' || row.night === '2027-07-11').length,
+      0,
+      'försökets egna nätter ska ha rullats tillbaka'
+    );
+  } finally {
+    close(server);
+  }
+});
+
+test('datumblockering kan skapas och tas bort utan gästuppgifter', async () => {
+  const server = await listen(demoServer());
+  const port = server.address().port;
+  try {
+    const csrf = await ownerSession(port);
+    const block = await request(port, '/api/admin/calendar/blocks', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrf, 'Idempotency-Key': 'block-test-0001' },
+      body: { arrival: '2027-04-01', departure: '2027-04-04', latestNote: 'Eget underhåll' }
+    });
+    assert.equal(block.status, 201);
+    assert.match(block.json.reference, /^BLOCK-/);
+
+    const calendar = await request(port, '/api/admin/calendar?from=2027-04');
+    const rows = calendar.json.nights.filter((row) => row.reference === block.json.reference);
+    assert.equal(rows.length, 3);
+    assert.equal(rows[0].type, 'MANUAL');
+
+    const removed = await request(port, `/api/admin/calendar/blocks/${block.json.reference}`, {
+      method: 'DELETE',
+      headers: { 'X-CSRF-Token': csrf }
+    });
+    assert.equal(removed.status, 200);
+    assert.equal(removed.json.removed, true);
+
+    const after = await request(port, '/api/admin/calendar?from=2027-04');
+    assert.equal(after.json.nights.filter((row) => row.reference === block.json.reference).length, 0);
+  } finally {
+    close(server);
+  }
+});
+
+test('Owner kan lägga anteckning, ändra betalning och tillval med ETag', async () => {
+  const server = await listen(demoServer());
+  const port = server.address().port;
+  try {
+    const csrf = await ownerSession(port);
+    const booking = await request(port, '/api/admin/bookings/DEMO-2026-C3');
+    const etag = booking.json.booking.etag;
+
+    const note = await request(port, '/api/admin/bookings/DEMO-2026-C3/notes', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrf },
+      body: { note: 'Gästen ringde.', expectedEtag: etag }
+    });
+    assert.equal(note.status, 200);
+
+    const payment = await request(port, '/api/admin/bookings/DEMO-2026-C3/payment', {
+      method: 'PATCH',
+      headers: { 'X-CSRF-Token': csrf },
+      body: { paymentStatus: 'PAID', amountPaid: 0, expectedEtag: note.json.etag }
+    });
+    assert.equal(payment.status, 200);
+    assert.equal(payment.json.paymentStatus, 'PAID');
+
+    const addons = await request(port, '/api/admin/bookings/DEMO-2026-C3/addons', {
+      method: 'PATCH',
+      headers: { 'X-CSRF-Token': csrf },
+      body: {
+        addons: { slutstad: true, lakan: false, linenCount: 0, ved: true, tidigIncheckning: false, senUtcheckning: false },
+        reason: 'Gästen lade till städning och ved.',
+        expectedEtag: payment.json.etag
+      }
+    });
+    assert.equal(addons.status, 200);
+    assert.ok(addons.json.totalAddons > 0);
+
+    const stale = await request(port, '/api/admin/bookings/DEMO-2026-C3/notes', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrf },
+      body: { note: 'Gammal flik.', expectedEtag: etag }
+    });
+    assert.equal(stale.status, 409);
+  } finally {
+    close(server);
+  }
+});
+
+test('avtalat pris kräver ändringsorsak och bevarar beräknat pris', async () => {
+  const server = await listen(demoServer());
+  const port = server.address().port;
+  try {
+    const csrf = await ownerSession(port);
+    const withoutReason = await request(port, '/api/admin/bookings', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrf, 'Idempotency-Key': 'agreed-missing-0001' },
+      body: manualBookingBody({ arrival: '2027-05-10', departure: '2027-05-12', agreedTotal: 9999 })
+    });
+    assert.equal(withoutReason.status, 400);
+    assert.ok(withoutReason.json.fields.priceAdjustmentReason);
+
+    const created = await request(port, '/api/admin/bookings', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrf, 'Idempotency-Key': 'agreed-ok-0001' },
+      body: manualBookingBody({
+        arrival: '2027-05-10',
+        departure: '2027-05-12',
+        agreedTotal: 9999,
+        priceAdjustmentReason: 'Avtal med återkommande gäst'
+      })
+    });
+    assert.equal(created.status, 201);
+    const detail = await request(port, `/api/admin/bookings/${created.json.reference}`).then((r) => r.json);
+    assert.equal(detail.booking.total, 9999);
+    assert.ok(detail.booking.calculatedTotal > 0);
+    assert.equal(detail.booking.priceAdjustmentReason, 'Avtal med återkommande gäst');
+  } finally {
+    close(server);
+  }
+});
+
+test('Staff och skrivningar utan aktiverat stöd nekas server-side', async () => {
+  const staffAuth = createAuth({ trustEasyAuth: true });
+  const server = await listen(createAdminRequestListener({
+    auth: staffAuth,
+    repository: createDemoRepository({ now: new Date() }),
+    demo: false,
+    writesEnabled: true
+  }));
+  const port = server.address().port;
+  const header = principalHeader('Staff', 'Test Staff');
+  try {
+    const session = await request(port, '/api/admin/session', {
+      headers: { 'x-ms-client-principal': header }
+    });
+    const denied = await request(port, '/api/admin/bookings', {
+      method: 'POST',
+      headers: {
+        'x-ms-client-principal': header,
+        'X-CSRF-Token': session.json.csrfToken,
+        'Idempotency-Key': 'staff-test-0001'
+      },
+      body: manualBookingBody()
+    });
+    assert.equal(denied.status, 403);
+    assert.match(denied.json.error, /ägarbehörighet/);
+  } finally {
+    close(server);
+  }
+
+  const disabled = await listen(createAdminRequestListener({
+    auth: createAuth({ demo: true }),
+    repository: createDemoRepository({ now: new Date() }),
+    demo: true,
+    writesEnabled: false
+  }));
+  const disabledPort = disabled.address().port;
+  try {
+    const session = await request(disabledPort, '/api/admin/session');
+    const blocked = await request(disabledPort, '/api/admin/bookings', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': session.json.csrfToken, 'Idempotency-Key': 'disabled-test-0001' },
+      body: manualBookingBody()
+    });
+    assert.equal(blocked.status, 503);
+    assert.match(blocked.json.error, /inte aktiverade/);
+
+    const page = await request(disabledPort, '/admin');
+    assert.match(page.body, /Skrivfunktioner är inte aktiverade/);
+    assert.match(page.body, /Skriv-API:erna svarar 503/);
+  } finally {
+    close(disabled);
+  }
 });

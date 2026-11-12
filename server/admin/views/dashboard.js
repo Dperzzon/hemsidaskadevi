@@ -9,7 +9,7 @@ const {
 const {
   statusBadge,
   actionChips,
-  preparedButton,
+  actionButton,
   metricCard,
   pageHeader,
   bookingLink,
@@ -56,14 +56,14 @@ function requestCard(booking) {
     `<div><span>Totalt</span><strong>${escapeHtml(formatMoney(booking.total))}</strong></div>` +
     `</div>` +
     `<div class="request-actions">` +
-    preparedButton('Godkänn', 'approve', 'primary', 'Förberedd – statusändringar är avstängda') +
-    preparedButton('Neka', 'decline', 'ghost', 'Förberedd – statusändringar är avstängda') +
+    actionButton('Godkänn', 'approve', booking, 'primary') +
+    actionButton('Neka', 'decline', booking, 'ghost', { prompt: 'Orsak till nekande', requiresReason: true }) +
     `<a class="btn btn-secondary" href="/admin/bookings/${encodeURIComponent(booking.reference)}">Öppna</a>` +
     `</div></article>`;
 }
 
 function renderDashboard(options) {
-  const { data, principal, demo, csrfToken, now = new Date() } = options;
+  const { data, principal, demo, csrfToken, writesEnabled, now = new Date() } = options;
   const actions = data.actions.length
     ? `<div class="action-list">${data.actions.map((booking) => `
       <article class="action-row">
@@ -98,7 +98,9 @@ function renderDashboard(options) {
 
   const content = `
     ${pageHeader('Översikt', longDate(now),
-      `<a class="btn btn-secondary" href="/admin/bookings">Visa alla bokningar</a>`)}
+      `<div class="button-row">${principal.roles?.includes('Owner')
+        ? '<a class="btn btn-primary" href="/admin/bookings/new">+ Ny bokning</a>'
+        : ''}<a class="btn btn-secondary" href="/admin/bookings">Visa alla bokningar</a></div>`)}
     <section class="metric-grid" aria-label="Nyckeltal">
       ${metricCard('Nya förfrågningar', String(data.newRequestCount), 'Väntar på beslut', 'pending')}
       ${metricCard('Kommande bokningar', String(data.upcomingCount), `${data.upcomingGuests} gäster`, 'confirmed')}
@@ -130,7 +132,7 @@ function renderDashboard(options) {
       ${upcoming}
     </section>
   `;
-  return layout({ title: 'Översikt', active: '/admin', principal, demo, csrfToken, content });
+  return layout({ title: 'Översikt', active: '/admin', principal, demo, csrfToken, writesEnabled, content });
 }
 
 module.exports = { renderDashboard };

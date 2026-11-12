@@ -10,12 +10,20 @@ function navItem(href, label, active) {
 
 function layout(options) {
   const {
-    title, active, principal, demo, csrfToken, content, bodyClass = ''
+    title, active, principal, demo, csrfToken, content, bodyClass = '',
+    writesEnabled = true
   } = options;
   const demoBanner = demo
     ? `<div class="demo-banner" role="status">` +
       `<strong>Demoläge.</strong> Alla bokningar är syntetiska (DEMO-). ` +
       `Inga riktiga bokningar visas eller ändras, och inga statusändringar är aktiva.` +
+      `</div>`
+    : '';
+  const readonlyBanner = !writesEnabled
+    ? `<div class="readonly-banner" role="status">` +
+      `<strong>Skrivfunktioner är inte aktiverade.</strong> ` +
+      `Portalens vyer och formulär kan granskas, men inga bokningar, blockeringar, ` +
+      `anteckningar eller betalningar kan sparas. Skriv-API:erna svarar 503.` +
       `</div>`
     : '';
   return `<!doctype html>
@@ -34,6 +42,7 @@ function layout(options) {
 <body class="${escapeHtml(bodyClass)}" data-csrf="${escapeHtml(csrfToken)}" data-demo="${demo ? 'true' : 'false'}" data-roles="${escapeHtml(principal.roles.join(','))}">
   <a class="skip-link" href="#main">Hoppa till innehåll</a>
   ${demoBanner}
+  ${readonlyBanner}
   <div class="app-shell">
     <aside class="sidebar" id="sidebar" aria-label="Huvudmeny">
       <a class="brand" href="/admin" aria-label="Skadevi Bokningsportal – översikt">
@@ -43,10 +52,12 @@ function layout(options) {
       <nav class="main-nav" aria-label="Portal">
         ${navItem('/admin', 'Översikt', active)}
         ${navItem('/admin/bookings', 'Bokningar', active)}
+        ${navItem('/admin/bookings/new', 'Ny bokning', active)}
+        ${navItem('/admin/calendar', 'Kalender', active)}
       </nav>
       <div class="sidebar-note">
-        <span class="sidebar-note-title">Första versionen</span>
-        <p>Läsbar portal. Statusändringar, betalningar och kalender aktiveras i nästa etapp.</p>
+        <span class="sidebar-note-title">Bokningsportal</span>
+        <p>Bekräftade bokningar och manuella block låser datum i den interna kalendern. Airbnb iCal är fördröjd och uppdateras inte i realtid.</p>
       </div>
     </aside>
     <div class="workspace">

@@ -286,6 +286,7 @@ function buildNotifications(record) {
   const guestIntro = 'Tack för din bokningsförfrågan! Vi har tagit emot dina önskemål och återkommer med besked om tillgänglighet och bokning.';
   return {
     host: {
+      mailType: 'HOST_NEW_REQUEST',
       to: MAIL.hostRecipient,
       replyTo: MAIL.replyTo,
       subject: `Ny bokningsförfrågan ${record.reference} — Inväntar godkännande`,
@@ -293,6 +294,7 @@ function buildNotifications(record) {
       html: `<h2>Ny bokningsförfrågan ${escapeHtml(record.reference)}</h2><p><strong>${disclaimer}</strong></p><ul>${htmlRows}</ul>`
     },
     guest: {
+      mailType: 'GUEST_REQUEST_ACK',
       to: record.email,
       replyTo: MAIL.replyTo,
       subject: `Vi har tagit emot din bokningsförfrågan (${record.reference})`,
@@ -308,6 +310,8 @@ async function saveOutbox(store, record, context) {
       await store.save({
         partition: 'outbox',
         idempotencyKey: `outbox-${record.idempotencyKey}-${key}`,
+        reference: record.reference,
+        mailType: notification.mailType,
         status: 'Utkorg',
         mailTo: notification.to,
         mailReplyTo: notification.replyTo ?? '',
@@ -447,9 +451,17 @@ async function handleBookingRequest(request, context, options = {}) {
     ...validated.record,
     idempotencyKey,
     reference,
+    statusCode: 'PENDING',
     status: 'Inväntar godkännande',
+    bookingSource: 'WEB',
+    version: 1,
+    paymentStatus: 'UNPAID',
+    amountPaid: 0,
+    balance: validated.record.total,
+    latestNote: '',
     overlaps,
-    createdAt: now.toISOString()
+    createdAt: now.toISOString(),
+    updatedAt: now.toISOString()
   };
   try {
     const saved = await store.save(record, { warn });

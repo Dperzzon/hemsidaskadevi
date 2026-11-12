@@ -166,6 +166,21 @@ test('giltig förfrågan sparas med status Inväntar godkännande och unik refer
   assert.equal([...stored.values()].filter((item) => item.status === 'Utkorg').length, 2);
 });
 
+test('webbokning sparas med källa Website, status PENDING och mejltyper i utkorgen', async () => {
+  const { options, stored, context } = setup();
+  const result = await handleBookingRequest(request(), context, options);
+  assert.equal(result.status, 201);
+  const record = [...stored.values()].find((item) => item.status === 'Inväntar godkännande');
+  assert.equal(record.statusCode, 'PENDING');
+  assert.equal(record.bookingSource, 'WEB');
+  assert.equal(record.paymentStatus, 'UNPAID');
+  assert.equal(record.balance, record.total);
+  assert.equal(record.version, 1);
+  const outbox = [...stored.values()].filter((item) => item.partition === 'outbox');
+  assert.deepEqual(outbox.map((item) => item.mailType).sort(), ['GUEST_REQUEST_ACK', 'HOST_NEW_REQUEST']);
+  assert.ok(outbox.every((item) => item.reference === record.reference));
+});
+
 test('dubbel inskick med samma idempotensnyckel ger samma referens', async () => {
   const { options, stored, context } = setup();
   const first = await handleBookingRequest(request(), context, options);

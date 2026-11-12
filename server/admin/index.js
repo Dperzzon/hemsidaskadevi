@@ -20,7 +20,18 @@ const {
 const { renderDashboard } = require('./views/dashboard');
 const { renderBookings } = require('./views/bookings');
 const { renderBookingDetail } = require('./views/booking-detail');
+const { renderNewBooking } = require('./views/booking-new');
+const { renderCalendar } = require('./views/calendar');
 const { renderErrorPage } = require('./views/error');
+const {
+  createManualBooking,
+  changeStatus,
+  addNote,
+  updatePayment,
+  updateAddons,
+  removeBlock,
+  calendarRange
+} = require('./booking-service');
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
@@ -172,13 +183,75 @@ function parseFilters(searchParams) {
 function pageTitleFor(pathname) {
   if (pathname === '/admin') return 'Översikt';
   if (pathname === '/admin/bookings') return 'Bokningar';
+  if (pathname === '/admin/bookings/new') return 'Ny bokning';
+  if (pathname === '/admin/calendar') return 'Kalender';
   if (pathname.startsWith('/admin/bookings/')) return 'Bokningsdetaljer';
   return 'Bokningsportal';
+}
+
+function parseCalendarRange(searchParams, now = new Date()) {
+  const today = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Stockholm', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(now);
+  const requested = String(searchParams.get('from') ?? '');
+  const from = /^\d{4}-\d{2}$/.test(requested)
+    ? `${requested}-01`
+    : (DATE_PATTERN.test(requested) ? requested : `${today.slice(0, 7)}-01`);
+  const monthStart = `${from.slice(0, 7)}-01`;
+  const next = new Date(`${monthStart}T00:00:00Z`);
+  next.setUTCMonth(next.getUTCMonth() + 1);
+  return { from: monthStart, to: next.toISOString().slice(0, 10) };
+}
+
+function serviceOptions(context) {
+  return {
+    now: context.now,
+    expectedEtag: context.expectedEtag,
+    idempotencyKey: context.idempotencyKey,
+    availabilityHandler: context.availabilityHandler,
+    requireAirbnbCheck: context.requireAirbnbCheck,
+    availability: context.availability,
+    outboxEnabled: context.outboxEnabled
+  };
+}
+
+async function readBodyOrError(req, res, optional = false) {
+  const contentType = String(req.headers['content-type'] ?? '');
+  const contentLength = String(req.headers['content-length'] ?? '');
+  if (optional && (!contentType || contentLength === '0')) {
+    return { body: {} };
+  }
+  try {
+    return { body: await readJsonBody(req) };
+  } catch {
+    if (optional) return { body: {} };
+    sendJson(req, res, 400, { error: 'Förfrågan kunde inte tolkas.' });
+    return null;
+  }
+}
+
+function guardWrite(req, res, context) {
+  const { auth, principal } = context;
+  if (!context.writesEnabled) {
+    sendJson(req, res, 503, {
+      error: 'Skrivfunktioner är inte aktiverade i denna miljö. Ingen bokning har ändrats.'
+    });
+    return false;
+  }
+  if (!auth.verifyCsrf(req, principal)) {
+    sendJson(req, res, 403, { error: 'Ogiltig CSRF-token.' });
+    return false;
+  }
+  auth.requireRole(principal, 'Owner');
+  return true;
 }
 
 async function handleApi(req, res, url, context) {
   const { auth, principal, repository, now } = context;
   const pathname = url.pathname;
+  if (typeof req.headers['if-match'] === 'string') {
+    context.expectedEtag = req.headers['if-match'];
+  }
 
   if (pathname === '/api/admin/session' && req.method === 'GET') {
     sendJson(req, res, 200, {
@@ -193,8 +266,8 @@ async function handleApi(req, res, url, context) {
       authMode: auth.demo ? 'demo' : 'easyauth',
       easyAuthTrusted: auth.trustEasyAuth,
       dataSource: repository.type,
-      readOnly: true,
-      writesEnabled: false
+      readOnly: !context.writesEnabled,
+      writesEnabled: context.writesEnabled
     });
     return;
   }
@@ -212,6 +285,58 @@ async function handleApi(req, res, url, context) {
     return;
   }
 
+  if (pathname === '/api/admin/bookings' && req.method === 'POST') {
+    if (!guardWrite(req, res, context)) return;
+    const parsed = await readBodyOrError(req, res);
+    if (!parsed) return;
+    const result = await createManualBooking(repository, principal, parsed.body, {
+      ...serviceOptions(context),
+      idempotencyKey: req.headers['idempotency-key']
+    }, { warn: context.warn });
+    sendJson(req, res, result.status, result.jsonBody);
+    return;
+  }
+
+  if (pathname === '/api/admin/calendar' && req.method === 'GET') {
+    const range = parseCalendarRange(url.searchParams, now);
+    const data = await calendarRange(repository, range.from, range.to, now);
+    sendJson(req, res, 200, { ...range, ...data });
+    return;
+  }
+
+  if (pathname === '/api/admin/calendar/blocks' && req.method === 'POST') {
+    if (!guardWrite(req, res, context)) return;
+    const parsed = await readBodyOrError(req, res);
+    if (!parsed) return;
+    const result = await createManualBooking(repository, principal, {
+      ...parsed.body,
+      mode: 'block',
+      statusCode: 'BLOCKED'
+    }, {
+      ...serviceOptions(context),
+      idempotencyKey: req.headers['idempotency-key']
+    }, { warn: context.warn });
+    sendJson(req, res, result.status, result.jsonBody);
+    return;
+  }
+
+  const unblockMatch = /^\/api\/admin\/calendar\/blocks\/([^/]+)$/.exec(pathname);
+  if (unblockMatch && req.method === 'DELETE') {
+    if (!guardWrite(req, res, context)) return;
+    const parsed = await readBodyOrError(req, res, true);
+    if (!parsed) return;
+    const result = await removeBlock(
+      repository,
+      principal,
+      decodeURIComponent(unblockMatch[1]),
+      parsed.body,
+      serviceOptions(context),
+      { warn: context.warn }
+    );
+    sendJson(req, res, result.status, result.jsonBody);
+    return;
+  }
+
   const detailMatch = /^\/api\/admin\/bookings\/([^/]+)$/.exec(pathname);
   if (detailMatch && req.method === 'GET') {
     const reference = decodeURIComponent(detailMatch[1]);
@@ -224,35 +349,86 @@ async function handleApi(req, res, url, context) {
     return;
   }
 
+  const historyMatch = /^\/api\/admin\/bookings\/([^/]+)\/history$/.exec(pathname);
+  if (historyMatch && req.method === 'GET') {
+    const reference = decodeURIComponent(historyMatch[1]);
+    const history = await repository.listHistory(reference);
+    sendJson(req, res, 200, { history });
+    return;
+  }
+
   const statusMatch = /^\/api\/admin\/bookings\/([^/]+)\/status$/.exec(pathname);
   if (statusMatch && req.method === 'POST') {
-    if (!auth.verifyCsrf(req, principal)) {
-      sendJson(req, res, 403, { error: 'Ogiltig CSRF-token.' });
-      return;
-    }
-    let body;
-    try {
-      body = await readJsonBody(req);
-    } catch {
-      sendJson(req, res, 400, { error: 'Förfrågan kunde inte tolkas.' });
-      return;
-    }
-    const action = String(body.action ?? '');
+    if (!guardWrite(req, res, context)) return;
+    const parsed = await readBodyOrError(req, res);
+    if (!parsed) return;
+    const action = String(parsed.body.action ?? '');
     const allowed = new Set(['approve', 'decline', 'preliminary', 'confirm', 'cancel']);
     if (!allowed.has(action)) {
       sendJson(req, res, 400, { error: 'Okänd statusåtgärd.' });
       return;
     }
-    if (action === 'confirm' || action === 'cancel') {
-      auth.requireRole(principal, 'Owner');
-    }
-    // Första versionen är uttryckligen read-only. API-kontraktet finns på
-    // plats, men ingen skrivning eller mejl sker.
-    sendJson(req, res, 503, {
-      error: 'Statusändringar är avstängda i denna version. Ingen bokning har ändrats.',
+    const result = await changeStatus(
+      repository,
+      principal,
+      decodeURIComponent(statusMatch[1]),
       action,
-      reference: decodeURIComponent(statusMatch[1])
-    });
+      parsed.body,
+      serviceOptions(context),
+      { warn: context.warn }
+    );
+    sendJson(req, res, result.status, result.jsonBody);
+    return;
+  }
+
+  const notesMatch = /^\/api\/admin\/bookings\/([^/]+)\/notes$/.exec(pathname);
+  if (notesMatch && req.method === 'POST') {
+    if (!guardWrite(req, res, context)) return;
+    const parsed = await readBodyOrError(req, res);
+    if (!parsed) return;
+    const result = await addNote(
+      repository,
+      principal,
+      decodeURIComponent(notesMatch[1]),
+      parsed.body,
+      serviceOptions(context),
+      { warn: context.warn }
+    );
+    sendJson(req, res, result.status, result.jsonBody);
+    return;
+  }
+
+  const addonsMatch = /^\/api\/admin\/bookings\/([^/]+)\/addons$/.exec(pathname);
+  if (addonsMatch && req.method === 'PATCH') {
+    if (!guardWrite(req, res, context)) return;
+    const parsed = await readBodyOrError(req, res);
+    if (!parsed) return;
+    const result = await updateAddons(
+      repository,
+      principal,
+      decodeURIComponent(addonsMatch[1]),
+      parsed.body,
+      serviceOptions(context),
+      { warn: context.warn }
+    );
+    sendJson(req, res, result.status, result.jsonBody);
+    return;
+  }
+
+  const paymentMatch = /^\/api\/admin\/bookings\/([^/]+)\/payment$/.exec(pathname);
+  if (paymentMatch && req.method === 'PATCH') {
+    if (!guardWrite(req, res, context)) return;
+    const parsed = await readBodyOrError(req, res);
+    if (!parsed) return;
+    const result = await updatePayment(
+      repository,
+      principal,
+      decodeURIComponent(paymentMatch[1]),
+      parsed.body,
+      serviceOptions(context),
+      { warn: context.warn }
+    );
+    sendJson(req, res, result.status, result.jsonBody);
     return;
   }
 
@@ -277,6 +453,16 @@ function createAdminRequestListener(options = {}) {
   const clock = typeof options.now === 'function'
     ? options.now
     : () => options.now ?? new Date();
+  const writesEnabled = options.writesEnabled ??
+    (repository.type === 'table'
+      ? process.env.ADMIN_WRITES_ENABLED === '1'
+      : true);
+  const requireAirbnbCheck = options.requireAirbnbCheck ??
+    (repository.type === 'table'
+      ? process.env.ADMIN_REQUIRE_AIRBNB_CHECK !== '0'
+      : false);
+  const outboxEnabled = options.outboxEnabled ?? process.env.ADMIN_MAIL_OUTBOX_ENABLED === '1';
+  const warn = options.warn ?? ((message) => console.error(message));
 
   return async function adminRequestListener(req, res) {
     let url;
@@ -335,11 +521,22 @@ function createAdminRequestListener(options = {}) {
 
     try {
       if (isApi) {
-        if (req.method !== 'GET' && req.method !== 'POST') {
-          sendJson(req, res, 405, { error: 'Metod tillåts inte.' }, { Allow: 'GET, POST' });
+        if (!['GET', 'POST', 'PATCH', 'DELETE'].includes(req.method)) {
+          sendJson(req, res, 405, { error: 'Metod tillåts inte.' }, { Allow: 'GET, POST, PATCH, DELETE' });
           return;
         }
-        await handleApi(req, res, url, { auth, principal, repository, now });
+        await handleApi(req, res, url, {
+          auth,
+          principal,
+          repository,
+          now,
+          writesEnabled,
+          requireAirbnbCheck,
+          outboxEnabled,
+          availabilityHandler: options.availabilityHandler,
+          availability: options.availability,
+          warn
+        });
         return;
       }
 
@@ -356,7 +553,7 @@ function createAdminRequestListener(options = {}) {
       if (url.pathname === '/admin' || url.pathname === '/admin/') {
         const data = await repository.dashboard(now);
         sendHtml(req, res, 200, renderDashboard({
-          data, principal, demo, csrfToken, now
+          data, principal, demo, csrfToken, writesEnabled, now
         }));
         return;
       }
@@ -371,7 +568,34 @@ function createAdminRequestListener(options = {}) {
           principal,
           demo,
           csrfToken,
+          writesEnabled,
           totalCount: all.length
+        }));
+        return;
+      }
+
+      if (url.pathname === '/admin/bookings/new' || url.pathname === '/admin/bookings/new/') {
+        if (!principal.roles?.includes('Owner')) {
+          sendHtml(req, res, 403, renderErrorPage({
+            status: 403,
+            message: 'Endast Owner kan skapa manuella bokningar.',
+            principal,
+            demo,
+            csrfToken
+          }));
+          return;
+        }
+        sendHtml(req, res, 200, renderNewBooking({
+          principal, demo, csrfToken, writesEnabled
+        }));
+        return;
+      }
+
+      if (url.pathname === '/admin/calendar' || url.pathname === '/admin/calendar/') {
+        const range = parseCalendarRange(url.searchParams, now);
+        const data = await calendarRange(repository, range.from, range.to, now);
+        sendHtml(req, res, 200, renderCalendar({
+          data, from: range.from, principal, demo, csrfToken, writesEnabled
         }));
         return;
       }
@@ -390,8 +614,9 @@ function createAdminRequestListener(options = {}) {
           }));
           return;
         }
+        const history = await repository.listHistory(reference).catch(() => []);
         sendHtml(req, res, 200, renderBookingDetail({
-          booking, principal, demo, csrfToken
+          booking, principal, demo, csrfToken, writesEnabled, history
         }));
         return;
       }
@@ -465,7 +690,7 @@ function main() {
   }));
   server.listen(port, () => {
     console.log(`Skadevi bokningsportal lyssnar på http://localhost:${port}/admin`);
-    console.log(`Datakälla: ${repository.type} · read-only · skrivningar avstängda`);
+    console.log(`Datakälla: ${repository.type} · skrivningar ${repository.type === 'table' && process.env.ADMIN_WRITES_ENABLED !== '1' ? 'avstängda' : 'aktiva'}`);
     console.log(`Autentisering: ${auth.demo ? 'demo' : `Easy Auth (trusted=${auth.trustEasyAuth})`}`);
     if (demo) console.log('Demoläge: alla bokningar är syntetiska och märkta DEMO-.');
   });

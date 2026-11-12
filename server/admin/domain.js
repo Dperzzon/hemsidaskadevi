@@ -39,6 +39,13 @@ const STATUS_META = {
     shortLabel: 'Avbokad',
     tone: 'cancelled',
     legacy: ['Avbokad', 'Inställd']
+  },
+  BLOCKED: {
+    code: 'BLOCKED',
+    label: 'Blockerad',
+    shortLabel: 'Blockerad',
+    tone: 'blocked',
+    legacy: ['Blockerad', 'Datumblockering']
   }
 };
 
@@ -48,10 +55,12 @@ const SOURCE_LABELS = {
   AIRBNB: 'Airbnb',
   PHONE: 'Telefon',
   EMAIL: 'E-post',
-  OTHER: 'Övrig'
+  DIRECT: 'Direkt',
+  OTHER: 'Annat'
 };
 
 const PAYMENT_LABELS = {
+  UNKNOWN: 'Ej angiven',
   UNPAID: 'Ej betald',
   DEPOSIT_PAID: 'Deposition betald',
   PARTIALLY_PAID: 'Delbetalt',
@@ -97,6 +106,27 @@ function addDays(dateKey, days) {
   const date = new Date(`${dateKey}T00:00:00Z`);
   date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().slice(0, 10);
+}
+
+function validDateKey(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const timestamp = Date.parse(`${value}T00:00:00Z`);
+  return Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === value;
+}
+
+function nightsBetween(arrival, departure) {
+  if (!validDateKey(arrival) || !validDateKey(departure)) return 0;
+  return Math.round((Date.parse(`${departure}T00:00:00Z`) - Date.parse(`${arrival}T00:00:00Z`)) / 86400000);
+}
+
+function nightKeys(arrival, departure) {
+  const nights = [];
+  let date = arrival;
+  while (date < departure) {
+    nights.push(date);
+    date = addDays(date, 1);
+  }
+  return nights;
 }
 
 function toIsoAt(dateKey, hour = 12, minute = 0, timeZone = 'Europe/Stockholm') {
@@ -250,29 +280,41 @@ function normalizeBooking(record = {}, options = {}) {
   const discount = parseJson(record.discount, null);
   const discountAmount = numberOr(record.discountAmount ?? discount?.amount);
   const totalAddons = numberOr(record.totalAddons, addonLines.reduce((sum, line) => sum + line.amount, 0));
+  const bookingSource = String(record.bookingSource ?? 'WEB').toUpperCase();
+  const isBlock = statusCode === 'BLOCKED' || /^BLOCK-/.test(String(record.reference ?? ''));
   const booking = {
     idempotencyKey: record.idempotencyKey ?? record.RowKey ?? '',
+    rowKey: record.rowKey ?? record.RowKey ?? record.idempotencyKey ?? '',
     reference: String(record.reference ?? record.RowKey ?? ''),
+    etag: String(options.etag ?? record.etag ?? ''),
+    version: numberOr(record.version, 1),
     statusCode,
     statusLabel: meta.label,
     statusShortLabel: meta.shortLabel,
     statusTone: meta.tone,
     status: record.status ?? meta.label,
+    isBlock,
+    blockId: String(record.blockId ?? ''),
     arrival: String(record.arrival ?? ''),
     departure: String(record.departure ?? ''),
     nights: numberOr(record.nights),
     guests: numberOr(record.guests),
     firstName: String(record.firstName ?? ''),
     lastName: String(record.lastName ?? ''),
-    guestName: [record.firstName, record.lastName].filter(Boolean).join(' ') || String(record.guestName ?? 'Gäst'),
+    guestName: [record.firstName, record.lastName].filter(Boolean).join(' ') ||
+      (isBlock ? 'Datumblockering' : 'Gäst'),
     email: String(record.email ?? ''),
     phone: String(record.phone ?? ''),
     company: String(record.company ?? ''),
     message: String(record.message ?? ''),
-    bookingSource: String(record.bookingSource ?? 'WEB').toUpperCase(),
-    bookingSourceLabel: SOURCE_LABELS[String(record.bookingSource ?? 'WEB').toUpperCase()] ?? 'Övrig',
+    bookingSource,
+    bookingSourceLabel: SOURCE_LABELS[bookingSource] ?? 'Annat',
     createdAt: String(record.createdAt ?? ''),
     updatedAt: String(record.updatedAt ?? record.createdAt ?? ''),
+    updatedBy: String(record.updatedBy ?? ''),
+    confirmedAt: String(record.confirmedAt ?? ''),
+    declinedAt: String(record.declinedAt ?? ''),
+    cancelledAt: String(record.cancelledAt ?? ''),
     lodgingBase: numberOr(record.lodgingBase),
     discountLabel: String(discount?.label ?? ''),
     discountPercent: numberOr(discount?.percent),
@@ -280,6 +322,9 @@ function normalizeBooking(record = {}, options = {}) {
     lodgingAfterDiscount: numberOr(record.lodgingAfterDiscount, numberOr(record.lodgingBase) - discountAmount),
     totalAddons,
     total: numberOr(record.total),
+    calculatedTotal: numberOr(record.calculatedTotal, numberOr(record.total)),
+    agreedTotal: record.agreedTotal === undefined || record.agreedTotal === null ? null : numberOr(record.agreedTotal),
+    priceAdjustmentReason: String(record.priceAdjustmentReason ?? ''),
     priceVersion: String(record.priceVersion ?? ''),
     addonLines,
     pricing,
@@ -439,6 +484,9 @@ module.exports = {
   PAYMENT_LABELS,
   todayKey,
   addDays,
+  validDateKey,
+  nightsBetween,
+  nightKeys,
   toIsoAt,
   normalizeStatus,
   statusMeta,

@@ -42,8 +42,11 @@ try {
   const checks = [
     ['/admin', 200],
     ['/admin/bookings', 200],
+    ['/admin/bookings/new', 200],
+    ['/admin/calendar', 200],
     ['/api/admin/session', 200],
     ['/api/admin/bookings', 200],
+    ['/api/admin/calendar', 200],
     ['/assets/admin.css', 200],
     ['/assets/admin.js', 200],
     ['/assets/fonts.css', 200],
@@ -63,8 +66,8 @@ try {
   if (html.includes('[object Object]')) fail('gränssnittet innehåller [object Object]');
 
   const session = await fetch(`${base}/api/admin/session`).then((response) => response.json());
-  if (session.demo !== true || session.dataSource !== 'demo' || session.writesEnabled !== false) {
-    fail('sessionens demoläge eller read-only-status är fel');
+  if (session.demo !== true || session.dataSource !== 'demo' || session.writesEnabled !== true) {
+    fail('sessionens demoläge eller skrivstatus är fel');
   }
 
   const list = await fetch(`${base}/api/admin/bookings`).then((response) => response.json());

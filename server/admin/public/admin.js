@@ -1,6 +1,6 @@
-/* Skadevi Bokningsportal — minimal progressiv förbättring.
-   Inga nätverksanrop och inga skrivningar. Förberedda knappar visar bara
-   information tills statusflödet aktiveras i nästa etapp. */
+/* Skadevi Bokningsportal — progressiv förbättring.
+   Alla skrivningar går mot /api/admin/* med CSRF-token och ETag. Inga
+   hemligheter eller bokningsdata lagras i webbläsaren. */
 (() => {
   'use strict';
 
@@ -8,6 +8,8 @@
   const menuButton = document.querySelector('.menu-button');
   const sidebar = document.getElementById('sidebar');
   const toast = document.getElementById('toast');
+  const csrf = body.dataset.csrf || '';
+  const roles = String(body.dataset.roles || '').split(',').filter(Boolean);
   let toastTimer = null;
 
   function setNav(open) {
@@ -34,20 +36,250 @@
     if (toastTimer) clearTimeout(toastTimer);
     toastTimer = setTimeout(() => {
       toast.hidden = true;
-    }, 5200);
+    }, 6200);
   }
 
-  const roles = String(body.dataset.roles || '').split(',').filter(Boolean);
+  async function api(path, options = {}) {
+    const headers = {
+      'X-CSRF-Token': csrf,
+      ...(options.headers || {})
+    };
+    let requestBody;
+    if (options.body !== undefined) {
+      headers['Content-Type'] = 'application/json';
+      requestBody = JSON.stringify(options.body);
+    }
+    const response = await fetch(path, {
+      method: options.method || 'POST',
+      cache: 'no-store',
+      credentials: 'same-origin',
+      headers,
+      body: requestBody
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const error = new Error(data.error || 'Åtgärden kunde inte genomföras.');
+      error.status = response.status;
+      error.fields = data.fields;
+      throw error;
+    }
+    return data;
+  }
+
+  function setBusy(form, busy) {
+    form.querySelectorAll('button, input, select, textarea').forEach((element) => {
+      if (element.dataset.alwaysEnabled === 'true') return;
+      element.disabled = busy;
+    });
+  }
+
+  function showFormError(form, message) {
+    const target = form.querySelector('[data-form-error]');
+    if (target) {
+      target.textContent = message;
+      target.hidden = false;
+      target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    } else {
+      showToast(message);
+    }
+  }
 
   document.querySelectorAll('[data-prepared-action]').forEach((button) => {
     button.addEventListener('click', () => {
+      showToast(`"${button.textContent.trim()}" är inte aktiv i denna version.`);
+    });
+  });
+
+  document.querySelectorAll('[data-booking-action]').forEach((button) => {
+    button.addEventListener('click', async () => {
       const requiredRole = button.dataset.requiresRole;
       if (requiredRole && !roles.includes(requiredRole)) {
         showToast('Åtgärden kräver ägarbehörighet.');
         return;
       }
-      const label = button.textContent.trim();
-      showToast(`"${label}" är förberedd. Inga statusändringar eller mejl skickas i denna version.`);
+      const action = button.dataset.bookingAction;
+      let reason = '';
+      if (button.dataset.prompt) {
+        const answer = window.prompt(button.dataset.prompt);
+        if (answer === null) return;
+        reason = answer.trim();
+        if (button.dataset.requiresReason === 'true' && !reason) {
+          showToast('En orsak krävs.');
+          return;
+        }
+      }
+      if (action === 'confirm' && !window.confirm('Bekräfta bokningen? Datumen låses i den interna kalendern.')) {
+        return;
+      }
+      button.disabled = true;
+      try {
+        await api(`/api/admin/bookings/${encodeURIComponent(button.dataset.reference)}/status`, {
+          body: {
+            action,
+            reason,
+            expectedEtag: button.dataset.etag || undefined
+          }
+        });
+        window.location.reload();
+      } catch (error) {
+        showToast(error.message);
+        button.disabled = false;
+      }
     });
   });
+
+  document.querySelectorAll('[data-block-remove]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      if (!window.confirm('Ta bort blockeringen och frigöra datumen?')) return;
+      button.disabled = true;
+      try {
+        await api(`/api/admin/calendar/blocks/${encodeURIComponent(button.dataset.blockRemove)}`, {
+          method: 'DELETE',
+          headers: button.dataset.etag ? { 'If-Match': button.dataset.etag } : {}
+        });
+        window.location.href = '/admin/calendar';
+      } catch (error) {
+        showToast(error.message);
+        button.disabled = false;
+      }
+    });
+  });
+
+  function formValue(form, name) {
+    const element = form.elements[name];
+    return element ? element.value : '';
+  }
+
+  function checked(form, name) {
+    const element = form.elements[name];
+    return Boolean(element && element.checked);
+  }
+
+  document.querySelectorAll('form[data-admin-form]').forEach((form) => {
+    const type = form.dataset.adminForm;
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      setBusy(form, true);
+      try {
+        if (type === 'note') {
+          await api(`/api/admin/bookings/${encodeURIComponent(form.dataset.reference)}/notes`, {
+            body: {
+              note: formValue(form, 'note'),
+              expectedEtag: form.dataset.etag || undefined
+            }
+          });
+          window.location.reload();
+          return;
+        }
+        if (type === 'payment') {
+          await api(`/api/admin/bookings/${encodeURIComponent(form.dataset.reference)}/payment`, {
+            method: 'PATCH',
+            body: {
+              paymentStatus: formValue(form, 'paymentStatus'),
+              amountPaid: Number(formValue(form, 'amountPaid') || 0),
+              reason: formValue(form, 'reason'),
+              expectedEtag: form.dataset.etag || undefined
+            }
+          });
+          window.location.reload();
+          return;
+        }
+        if (type === 'addons') {
+          await api(`/api/admin/bookings/${encodeURIComponent(form.dataset.reference)}/addons`, {
+            method: 'PATCH',
+            body: {
+              addons: {
+                slutstad: checked(form, 'slutstad'),
+                lakan: checked(form, 'lakan'),
+                linenCount: Number(formValue(form, 'linenCount') || 0),
+                ved: checked(form, 'ved'),
+                tidigIncheckning: checked(form, 'tidigIncheckning'),
+                senUtcheckning: checked(form, 'senUtcheckning')
+              },
+              reason: formValue(form, 'reason'),
+              expectedEtag: form.dataset.etag || undefined
+            }
+          });
+          window.location.reload();
+          return;
+        }
+        if (type === 'block') {
+          await api('/api/admin/calendar/blocks', {
+            headers: { 'Idempotency-Key': crypto.randomUUID() },
+            body: {
+              arrival: formValue(form, 'arrival'),
+              departure: formValue(form, 'departure'),
+              latestNote: formValue(form, 'latestNote')
+            }
+          });
+          window.location.href = '/admin/calendar';
+          return;
+        }
+        if (type === 'manual-booking') {
+          const modeElement = form.querySelector('input[name="mode"]:checked');
+          const mode = modeElement ? modeElement.value : 'booking';
+          if (mode === 'block') {
+            await api('/api/admin/calendar/blocks', {
+              headers: { 'Idempotency-Key': crypto.randomUUID() },
+              body: {
+                arrival: formValue(form, 'arrival'),
+                departure: formValue(form, 'departure'),
+                latestNote: formValue(form, 'latestNote')
+              }
+            });
+            window.location.href = '/admin/calendar';
+            return;
+          }
+          const data = await api('/api/admin/bookings', {
+            headers: { 'Idempotency-Key': crypto.randomUUID() },
+            body: {
+              mode: 'booking',
+              firstName: formValue(form, 'firstName'),
+              lastName: formValue(form, 'lastName'),
+              email: formValue(form, 'email'),
+              phone: formValue(form, 'phone'),
+              company: formValue(form, 'company'),
+              arrival: formValue(form, 'arrival'),
+              departure: formValue(form, 'departure'),
+              guests: Number(formValue(form, 'guests') || 0),
+              bookingSource: formValue(form, 'bookingSource'),
+              statusCode: formValue(form, 'statusCode'),
+              addons: {
+                slutstad: checked(form, 'slutstad'),
+                lakan: checked(form, 'lakan'),
+                linenCount: Number(formValue(form, 'linenCount') || 0),
+                ved: checked(form, 'ved'),
+                tidigIncheckning: checked(form, 'tidigIncheckning'),
+                senUtcheckning: checked(form, 'senUtcheckning')
+              },
+              agreedTotal: formValue(form, 'agreedTotal') === '' ? null : Number(formValue(form, 'agreedTotal')),
+              priceAdjustmentReason: formValue(form, 'priceAdjustmentReason'),
+              paymentStatus: formValue(form, 'paymentStatus'),
+              amountPaid: Number(formValue(form, 'amountPaid') || 0),
+              latestNote: formValue(form, 'latestNote')
+            }
+          });
+          window.location.href = `/admin/bookings/${encodeURIComponent(data.reference)}`;
+        }
+      } catch (error) {
+        showFormError(form, error.message);
+        setBusy(form, false);
+      }
+    });
+  });
+
+  const manualForm = document.querySelector('form[data-admin-form="manual-booking"]');
+  if (manualForm) {
+    const updateMode = () => {
+      const modeElement = manualForm.querySelector('input[name="mode"]:checked');
+      const isBlock = (modeElement ? modeElement.value : 'booking') === 'block';
+      manualForm.querySelectorAll('[data-booking-only]').forEach((element) => {
+        element.hidden = isBlock;
+      });
+    };
+    manualForm.querySelectorAll('input[name="mode"]').forEach((input) => {
+      input.addEventListener('change', updateMode);
+    });
+    updateMode();
+  }
 })();

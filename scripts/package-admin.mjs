@@ -3,7 +3,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // Bygger ett separat publiceringspaket för adminportalen. Paketet innehåller
-// medvetet inte den publika sajten, Resend/Logic App-koden eller hemligheter.
+// medvetet inte den publika sajten, Logic App-koden eller hemligheter.
+// Mejlmallar för bekräftelser får ingå; de skickar inget utanför appen.
 // Användning: node scripts/package-admin.mjs [målkatalog]
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -13,8 +14,10 @@ const allowed = [
   'package.json',
   'package-lock.json',
   'server/admin',
+  'server/calendar',
   'server/booking/store.js',
   'server/booking/pricing.js',
+  'server/booking/mail.js',
   'shared',
   'src/css/fonts.css',
   'public/fonts',
@@ -24,10 +27,14 @@ const allowed = [
 const required = [
   'server/admin/index.js',
   'server/admin/auth.js',
+  'server/admin/booking-service.js',
   'server/admin/public/admin.css',
   'server/admin/public/admin.js',
+  'server/calendar/availability.js',
+  'server/calendar/calendar-worker.js',
   'server/booking/store.js',
   'server/booking/pricing.js',
+  'server/booking/mail.js',
   'shared/pricing-config.json',
   'src/css/fonts.css',
   'public/images/logo.png',
@@ -36,8 +43,8 @@ const required = [
 
 const forbidden = [
   'server/booking/requests.js',
-  'server/booking/mail.js',
   'server/booking/rules.js',
+  'server/booking/house-rules.json',
   'server/index.js',
   'infra',
   '.github',
@@ -110,7 +117,7 @@ async function main() {
   }
   console.log(`Adminpaket klart: ${target}`);
   console.log(`Filer: ${entries.length} · storlek: ${(bytes / 1024 / 1024).toFixed(2)} MB`);
-  console.log('Kontrollerat: server/admin, statiska resurser, pricing/store och inga Resend/publika filer.');
+  console.log('Kontrollerat: server/admin, statiska resurser, pricing/store, mejlmallar och inga publika sidor eller hemligheter.');
 }
 
 main().catch((error) => {

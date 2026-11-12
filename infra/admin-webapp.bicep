@@ -89,6 +89,18 @@ resource adminApp 'Microsoft.Web/sites@2024-11-01' = {
           name: 'ADMIN_TRUST_EASY_AUTH'
           value: adminTrustEasyAuth
         }
+        {
+          name: 'ADMIN_WRITES_ENABLED'
+          value: '0'
+        }
+        {
+          name: 'ADMIN_MAIL_OUTBOX_ENABLED'
+          value: '0'
+        }
+        {
+          name: 'ADMIN_REQUIRE_AIRBNB_CHECK'
+          value: '1'
+        }
       ]
     }
   }

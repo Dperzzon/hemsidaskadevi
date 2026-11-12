@@ -35,6 +35,43 @@ function preparedButton(label, action, variant = 'secondary', note = '', require
     `${escapeHtml(label)}</button>`;
 }
 
+function actionButton(label, action, booking, variant = 'secondary', options = {}) {
+  const attrs = [
+    `type="button"`,
+    `class="btn btn-${escapeHtml(variant)}"`,
+    `data-booking-action="${escapeHtml(action)}"`,
+    `data-reference="${escapeHtml(booking.reference)}"`,
+    `data-etag="${escapeHtml(booking.etag || '')}"`
+  ];
+  if (options.prompt) attrs.push(`data-prompt="${escapeHtml(options.prompt)}"`);
+  if (options.requiresReason) attrs.push('data-requires-reason="true"');
+  if (options.requiresOwner) attrs.push('data-requires-role="Owner"');
+  return `<button ${attrs.join(' ')}>${escapeHtml(label)}</button>`;
+}
+
+function historyList(entries = []) {
+  if (!entries.length) return '<p class="muted">Ingen historik registrerad ännu.</p>';
+  const actionLabels = {
+    MANUAL_CREATED: 'Manuell bokning skapad',
+    BLOCK_CREATED: 'Datumblockering skapad',
+    BLOCK_REMOVED: 'Datumblockering borttagen',
+    NOTE_ADDED: 'Anteckning tillagd',
+    PAYMENT_UPDATED: 'Betalstatus uppdaterad',
+    ADDONS_UPDATED: 'Tillval uppdaterade',
+    approve: 'Godkänd som preliminär',
+    preliminary: 'Godkänd som preliminär',
+    decline: 'Nekad',
+    confirm: 'Bekräftad',
+    cancel: 'Avbokad'
+  };
+  return `<ul class="history-list">${entries.map((entry) => `
+    <li>
+      <div class="history-top"><strong>${escapeHtml(actionLabels[entry.action] ?? entry.action)}</strong>${datetimeCell(entry.at)}</div>
+      <p class="history-meta">${escapeHtml(entry.actorName || 'Okänd')}${entry.fromStatus || entry.toStatus ? ` · ${escapeHtml(entry.fromStatus || '–')} → ${escapeHtml(entry.toStatus || '–')}` : ''}</p>
+      ${entry.reason ? `<p class="history-reason">${escapeHtml(entry.reason)}</p>` : ''}
+    </li>`).join('')}</ul>`;
+}
+
 function metricCard(label, value, detail, tone = '') {
   return `<article class="metric ${tone ? `metric-${escapeHtml(tone)}` : ''}">` +
     `<p class="metric-label">${escapeHtml(label)}</p>` +
@@ -89,6 +126,8 @@ module.exports = {
   deliveryBadge,
   actionChips,
   preparedButton,
+  actionButton,
+  historyList,
   metricCard,
   pageHeader,
   bookingLink,

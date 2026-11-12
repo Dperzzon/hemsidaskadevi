@@ -121,7 +121,7 @@ function tableUrl(accountName, table, target, query) {
 async function tableRequest(options) {
   const {
     accountName, method, table, target = '', query = [],
-    body, fetchImpl = fetch, auth
+    body, fetchImpl = fetch, auth, ifMatch, ifNoneMatch, headers: extraHeaders
   } = options;
   const url = tableUrl(accountName, table, target, query);
   // Kodade frågepar för signaturbygget (matchar exakt URL:n på tråden).
@@ -144,24 +144,34 @@ async function tableRequest(options) {
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json;odata=nometadata';
   }
+  if (ifMatch !== undefined) headers['If-Match'] = ifMatch;
+  if (ifNoneMatch !== undefined) headers['If-None-Match'] = ifNoneMatch;
+  if (extraHeaders) Object.assign(headers, extraHeaders);
   const response = await fetchImpl(url, {
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body)
   });
-  const text = response.headers.get('content-length') === '0' ? '' : await response.text();
+  const contentLength = response.headers?.get?.('content-length');
+  const text = contentLength === '0' ? '' : await response.text();
   let json = null;
   try { json = text ? JSON.parse(text) : null; } catch { json = null; }
-  return { status: response.status, json };
+  return {
+    status: response.status,
+    json,
+    etag: response.headers?.get?.('etag') ?? response.headers?.get?.('ETag') ?? ''
+  };
 }
 
 // OData-egenskaper: alla värden skickas som strängar för enkelhetens skull.
 function toEntity(record, partition) {
   return {
     PartitionKey: partition,
-    RowKey: record.idempotencyKey,
+    RowKey: record.rowKey ?? record.idempotencyKey,
     reference: record.reference,
     status: record.status,
+    statusCode: record.statusCode ?? '',
+    version: String(record.version ?? 1),
     arrival: record.arrival,
     departure: record.departure,
     nights: String(record.nights),
@@ -173,6 +183,7 @@ function toEntity(record, partition) {
     phone: record.phone,
     company: record.company ?? '',
     message: record.message ?? '',
+    bookingSource: record.bookingSource ?? 'WEB',
     addons: JSON.stringify(record.addons),
     totalAddons: String(record.totalAddons),
     discount: record.discount ? JSON.stringify(record.discount) : '',
@@ -180,6 +191,9 @@ function toEntity(record, partition) {
     lodgingBase: String(record.lodgingBase ?? 0),
     lodgingAfterDiscount: String(record.lodgingAfterDiscount ?? 0),
     total: String(record.total ?? 0),
+    calculatedTotal: String(record.calculatedTotal ?? record.total ?? 0),
+    agreedTotal: record.agreedTotal === undefined || record.agreedTotal === null ? '' : String(record.agreedTotal),
+    priceAdjustmentReason: record.priceAdjustmentReason ?? '',
     priceVersion: record.priceVersion ?? '',
     pricing: JSON.stringify({
       nightlyBreakdown: record.nightlyBreakdown ?? [],
@@ -188,8 +202,20 @@ function toEntity(record, partition) {
       discountAmount: record.discountAmount ?? 0,
       addonLines: record.addonLines ?? []
     }),
+    originalPricing: record.originalPricing ? JSON.stringify(record.originalPricing) : '',
     rulesVersion: record.rulesVersion,
     consentContact: String(record.consentContact),
+    paymentStatus: record.paymentStatus ?? (Number(record.total) > 0 ? 'UNPAID' : 'UNKNOWN'),
+    amountPaid: String(record.amountPaid ?? 0),
+    balance: String(record.balance ?? (Number(record.total) - Number(record.amountPaid ?? 0))),
+    latestNote: record.latestNote ?? '',
+    blockId: record.blockId ?? '',
+    airbnbBlockedAt: record.airbnbBlockedAt ?? '',
+    confirmedAt: record.confirmedAt ?? '',
+    declinedAt: record.declinedAt ?? '',
+    cancelledAt: record.cancelledAt ?? '',
+    updatedAt: record.updatedAt ?? '',
+    updatedBy: record.updatedBy ?? '',
     attemptCount: String(record.attemptCount ?? 0),
     attemptedAt: record.attemptedAt ?? '',
     sentAt: record.sentAt ?? '',
@@ -198,10 +224,17 @@ function toEntity(record, partition) {
 }
 
 function fromEntity(entity) {
+  const parse = (value, fallback) => {
+    if (!value) return fallback;
+    try { return JSON.parse(value); } catch { return fallback; }
+  };
   return {
     idempotencyKey: entity.RowKey,
+    rowKey: entity.RowKey,
     reference: entity.reference,
     status: entity.status,
+    statusCode: entity.statusCode || '',
+    version: Number(entity.version ?? 1),
     arrival: entity.arrival,
     departure: entity.departure,
     nights: Number(entity.nights),
@@ -213,16 +246,32 @@ function fromEntity(entity) {
     phone: entity.phone,
     company: entity.company || '',
     message: entity.message || '',
-    addons: JSON.parse(entity.addons),
+    bookingSource: entity.bookingSource || 'WEB',
+    addons: parse(entity.addons, {}),
     totalAddons: Number(entity.totalAddons),
-    discount: entity.discount ? JSON.parse(entity.discount) : null,
+    discount: parse(entity.discount, null),
     lodgingBase: Number(entity.lodgingBase ?? 0),
     lodgingAfterDiscount: Number(entity.lodgingAfterDiscount ?? 0),
     total: Number(entity.total ?? 0),
+    calculatedTotal: Number(entity.calculatedTotal ?? entity.total ?? 0),
+    agreedTotal: entity.agreedTotal === '' || entity.agreedTotal === undefined ? null : Number(entity.agreedTotal),
+    priceAdjustmentReason: entity.priceAdjustmentReason ?? '',
     priceVersion: entity.priceVersion ?? '',
-    pricing: entity.pricing ? JSON.parse(entity.pricing) : null,
+    pricing: parse(entity.pricing, null),
+    originalPricing: parse(entity.originalPricing, null),
     rulesVersion: entity.rulesVersion,
     consentContact: entity.consentContact === 'true',
+    paymentStatus: entity.paymentStatus || (Number(entity.total) > 0 ? 'UNPAID' : 'UNKNOWN'),
+    amountPaid: Number(entity.amountPaid ?? 0),
+    balance: Number(entity.balance ?? (Number(entity.total) - Number(entity.amountPaid ?? 0))),
+    latestNote: entity.latestNote ?? '',
+    blockId: entity.blockId ?? '',
+    airbnbBlockedAt: entity.airbnbBlockedAt ?? '',
+    confirmedAt: entity.confirmedAt ?? '',
+    declinedAt: entity.declinedAt ?? '',
+    cancelledAt: entity.cancelledAt ?? '',
+    updatedAt: entity.updatedAt ?? '',
+    updatedBy: entity.updatedBy ?? '',
     attemptCount: Number(entity.attemptCount ?? 0),
     attemptedAt: entity.attemptedAt ?? '',
     sentAt: entity.sentAt ?? '',
@@ -400,6 +449,8 @@ function toOutboxEntity(record) {
   return {
     PartitionKey: 'outbox',
     RowKey: record.idempotencyKey,
+    reference: record.reference ?? '',
+    mailType: record.mailType ?? '',
     status: record.status ?? 'Utkorg',
     mailTo: record.mailTo,
     mailReplyTo: record.mailReplyTo ?? '',
@@ -417,6 +468,8 @@ function toOutboxEntity(record) {
 function fromOutboxEntity(entity) {
   return {
     idempotencyKey: entity.RowKey,
+    reference: entity.reference ?? '',
+    mailType: entity.mailType ?? '',
     status: entity.status,
     mailTo: entity.mailTo,
     mailReplyTo: entity.mailReplyTo || '',
@@ -448,5 +501,6 @@ module.exports = {
   createStore, createTableStore, createLocalStore, isConfigured, sharedKeySignature,
   toEntity, fromEntity, toOutboxEntity, fromOutboxEntity,
   createManagedIdentityTokenProvider, createTokenCache, hasManagedIdentity,
+  tableRequest, tableUrl, rowTarget,
   MANAGED_IDENTITY_SCOPE_SUFFIX
 };
