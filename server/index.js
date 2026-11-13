@@ -8,7 +8,7 @@ const http = require('node:http');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { handleAvailability } = require('./calendar/availability');
-const { handleBookingRequest } = require('./booking/requests');
+const { handleBookingRequest, createRateLimiter } = require('./booking/requests');
 const { loadRules, publicRules } = require('./booking/rules');
 const { createStore, isConfigured } = require('./booking/store');
 
@@ -214,11 +214,28 @@ function readJsonBody(req, limit = 16 * 1024) {
   });
 }
 
+function clientIp(req) {
+  // App Service lägger till klientens IP sist i X-Forwarded-For. Ta sista
+  // posten så att en klient inte kan kringgå hastighetsbegränsningen genom
+  // att skicka en egen, påhittad X-Forwarded-For.
+  const forwarded = req.headers['x-forwarded-for'];
+  if (typeof forwarded === 'string') {
+    const parts = forwarded.split(',').map((part) => part.trim()).filter(Boolean);
+    if (parts.length) return parts[parts.length - 1];
+  }
+  return req.socket.remoteAddress || 'okänd';
+}
+
 function createRequestListener(options = {}) {
   const root = path.resolve(options.root ?? path.join(__dirname, '..', 'dist'));
   const availabilityHandler = options.availabilityHandler ?? handleAvailability;
+  const rateLimiter = options.rateLimiter ?? createRateLimiter(options.rateLimit);
   const bookingHandler = options.bookingHandler ??
-    ((request, context) => handleBookingRequest(request, context, { ...options, store: createStore(options) }));
+    ((request, context) => handleBookingRequest(request, context, {
+      ...options,
+      store: createStore(options),
+      rateLimiter
+    }));
   const rulesHandler = options.rulesHandler ?? (async () => publicRules(await loadRules(options)));
   const warn = options.warn ?? ((message) => console.error(message));
   // Kanoniskt värdnamn: rotdomänen 301-omdirigeras till www. Endast exakt
@@ -277,9 +294,7 @@ function createRequestListener(options = {}) {
         sendJson(res, 400, { error: 'Förfrågan kunde inte tolkas.' });
         return;
       }
-      const forwarded = req.headers['x-forwarded-for'];
-      const ip = (typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : '') ||
-        req.socket.remoteAddress || 'okänd';
+      const ip = clientIp(req);
       try {
         const result = await bookingHandler(
           { body, idempotencyKey: req.headers['idempotency-key'], ip },

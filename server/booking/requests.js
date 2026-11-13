@@ -301,6 +301,8 @@ async function saveOutbox(store, record, context) {
       await store.save({
         partition: 'outbox',
         idempotencyKey: `outbox-${record.idempotencyKey}-${key}`,
+        reference: record.reference,
+        mailType: key === 'host' ? 'HOST_NEW_REQUEST' : 'GUEST_REQUEST_ACK',
         status: 'Utkorg',
         mailTo: notification.to,
         mailReplyTo: notification.replyTo ?? '',
@@ -439,9 +441,17 @@ async function handleBookingRequest(request, context, options = {}) {
     ...validated.record,
     idempotencyKey,
     reference,
+    statusCode: 'PENDING',
     status: 'Inväntar godkännande',
+    bookingSource: 'WEB',
+    version: 1,
+    paymentStatus: 'UNPAID',
+    amountPaid: 0,
+    balance: validated.record.total,
+    latestNote: '',
     overlaps,
-    createdAt: now.toISOString()
+    createdAt: now.toISOString(),
+    updatedAt: now.toISOString()
   };
   try {
     const saved = await store.save(record, { warn });

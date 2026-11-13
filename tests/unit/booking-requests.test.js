@@ -162,6 +162,11 @@ test('giltig förfrågan sparas med status Inväntar godkännande och unik refer
   assert.equal(record.guests, 4);
   assert.equal(record.addons.linenCount, 4);
   assert.equal(record.rulesVersion, 'test-2026-11-10');
+  assert.equal(record.statusCode, 'PENDING');
+  assert.equal(record.bookingSource, 'WEB');
+  assert.equal(record.paymentStatus, 'UNPAID');
+  assert.equal(record.balance, record.total);
+  assert.equal(record.amountPaid, 0);
   // Utkorgsposter för värd och gäst ska finnas.
   assert.equal([...stored.values()].filter((item) => item.status === 'Utkorg').length, 2);
 });
@@ -386,6 +391,10 @@ test('utkorgspost innehåller komplett mejlmall för Logic Apps', async () => {
   assert.equal(host.mailReplyTo, 'skadevigard@gmail.com');
   const guest = outbox.find((item) => item.mailTo === 'anna@example.com');
   assert.ok(guest.mailHtml.includes('Tack för din bokningsförfrågan'));
+  assert.equal(host.reference, guest.reference);
+  assert.match(host.reference, /^SK-2026-/);
+  assert.equal(host.mailType, 'HOST_NEW_REQUEST');
+  assert.equal(guest.mailType, 'GUEST_REQUEST_ACK');
 });
 
 test('misslyckad utkorgssparning stoppar inte registreringen', async () => {
