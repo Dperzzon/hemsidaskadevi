@@ -226,10 +226,41 @@ function escapeHtml(value) {
     .replaceAll("'", '&#39;');
 }
 
+const MAIL_BRAND = {
+  gold: '#c9a96e',
+  dark: '#333333',
+  background: '#f7f5f0',
+  border: '#e0dcd3',
+  muted: '#6b665d'
+};
+
+// Gemensam, e-postvänlig ram (inline-stilar, tabellayout) med Skadevis
+// visuella identitet. Allt användarinnehåll escapeas innan det läggs in.
+function emailShell(title, contentHtml) {
+  return `<!doctype html><html lang="sv"><body style="margin:0;padding:0;background:${MAIL_BRAND.background};">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${MAIL_BRAND.background};">
+<tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:640px;background:#ffffff;border:1px solid ${MAIL_BRAND.border};border-top:4px solid ${MAIL_BRAND.gold};">
+<tr><td style="padding:26px 28px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.65;color:${MAIL_BRAND.dark};">
+<div style="font-family:Georgia,'Times New Roman',serif;font-size:23px;letter-spacing:1px;color:${MAIL_BRAND.dark};">Skadevi Herrgård</div>
+<div style="height:2px;width:56px;background:${MAIL_BRAND.gold};margin:12px 0 22px;"></div>
+<h1 style="font-family:Georgia,'Times New Roman',serif;font-size:20px;font-weight:normal;color:${MAIL_BRAND.dark};margin:0 0 18px;">${escapeHtml(title)}</h1>
+${contentHtml}
+<p style="margin:26px 0 0;padding-top:16px;border-top:1px solid ${MAIL_BRAND.border};font-size:12px;color:${MAIL_BRAND.muted};">Detta mejl skickades av Skadevi Herrgårds bokningssystem.</p>
+</td></tr></table>
+</td></tr></table>
+</body></html>`;
+}
+
+function mailList(rows) {
+  return `<ul style="margin:10px 0 18px;padding-left:20px;">${rows.map((row) => `<li style="margin:5px 0;">${row}</li>`).join('')}</ul>`;
+}
+
 // Bygger notiserna (värd + gäst) som läggs i utkorgen i lagringen. Den
 // verkliga e-postleveransen sker i Logic Apps (recurrence-pollning av
 // utkorgspartitionen, se infra/logicapp/). Varje mejl märker tydligt att
-// förfrågan inte är en bekräftad bokning.
+// förfrågan inte är en bekräftad bokning och använder den serverberäknade
+// prissnapshoten — inga belopp räknas om här.
 function buildNotifications(record) {
   const addonLines = record.addonLines ?? [];
   const priceLines = [
@@ -240,6 +271,9 @@ function buildNotifications(record) {
     `TOTALPRIS FÖR HELA VISTELSEN: ${record.total} kr`,
     `Prisreglernas version: ${record.priceVersion}`
   ].filter(Boolean);
+  const addonLinesText = addonLines.length
+    ? addonLines.map((line) => `${line.label}: ${line.amount} kr`)
+    : ['- Inga'];
   const summary = [
     `Referens: ${record.reference}`,
     `Status: ${record.status}`,
@@ -253,7 +287,7 @@ function buildNotifications(record) {
     'Prisöversikt (serverberäknad):',
     ...priceLines,
     'Tillval:',
-    ...(addonLines.length ? addonLines.map((line) => `${line.label}: ${line.amount} kr`) : ['- Inga']),
+    ...addonLinesText,
     `Bokningsregler godkända (version ${record.rulesVersion})`,
     record.overlaps?.length ? `VARNING — ÖVERLAPP med annan väntande förfrågan: ${record.overlaps.join(', ')}. Avgör själv vilken som ska godkännas. Ingen av dem är bekräftad.` : null,
     record.message ? `Önskemål: ${record.message}` : null
@@ -271,26 +305,51 @@ function buildNotifications(record) {
     'Prisöversikt (serverberäknad):',
     ...priceLines.map((row) => escapeHtml(row)),
     'Tillval:',
-    ...(addonLines.length ? addonLines.map((line) => escapeHtml(`${line.label}: ${line.amount} kr`)) : ['- Inga']),
+    ...addonLinesText.map(escapeHtml),
     `Bokningsregler godkända (version ${escapeHtml(record.rulesVersion)})`,
     record.overlaps?.length ? `VARNING — ÖVERLAPP med annan väntande förfrågan: ${record.overlaps.map(escapeHtml).join(', ')}. Avgör själv vilken som ska godkännas. Ingen av dem är bekräftad.` : null,
     record.message ? `Önskemål: ${escapeHtml(record.message)}` : null
-  ].filter(Boolean).map((row) => `<li>${row}</li>`).join('');
+  ].filter(Boolean);
   const disclaimer = 'OBS: Detta är en bokningsförfrågan (status: Inväntar godkännande) — inte en bekräftad bokning.';
+  const guestPriceLines = [
+    `Boendepris efter rabatt: ${record.lodgingAfterDiscount} kr`,
+    record.discount ? `Rabatt (${record.discount.label} ${record.discount.percent} %): − ${record.discountAmount} kr` : null,
+    `Summa tillval: ${record.totalAddons} kr`,
+    record.total != null ? `Beräknat totalpris: ${record.total} kr` : null
+  ].filter(Boolean);
+  const guestLines = [
+    `Referens: ${record.reference}`,
+    `Vistelse: ${record.arrival} → ${record.departure} (${record.nights} nätter)`,
+    `Gäster: ${record.guests}`,
+    ...guestPriceLines,
+    'Tillval:',
+    ...addonLinesText
+  ];
+  const guestIntro = 'Tack för din bokningsförfrågan! Vi har tagit emot dina önskemål och återkommer med besked om tillgänglighet och bokning.';
+  const notConfirmed = 'Din vistelse är ännu inte bekräftad. Detta är inte en bekräftad bokning. Vi återkommer när förfrågan har behandlats.';
+  const hostContent = `<div style="background:#fff8e6;border-left:4px solid ${MAIL_BRAND.gold};padding:12px 16px;margin:0 0 18px;"><strong>Status: ${escapeHtml(record.status)}</strong><br>Detta är en bokningsförfrågan — inte en bekräftad bokning.</div>${mailList(htmlRows)}`;
+  const guestContent = `<p style="margin:0 0 12px;">Hej ${escapeHtml(record.firstName)},</p>
+<p style="margin:0 0 16px;">${escapeHtml(guestIntro)}</p>
+<div style="background:#fff8e6;border-left:4px solid ${MAIL_BRAND.gold};padding:12px 16px;margin:0 0 20px;"><strong>${escapeHtml(notConfirmed)}</strong></div>
+${mailList(guestLines.map(escapeHtml))}
+<p style="margin:0 0 16px;">Har du frågor är du välkommen att svara direkt på detta mejl.</p>
+<p style="margin:0;">Vänliga hälsningar,<br><strong>Skadevi Herrgård</strong></p>`;
   return {
     host: {
+      mailType: 'HOST_NEW_REQUEST',
       to: MAIL.hostRecipient,
       replyTo: MAIL.replyTo,
-      subject: `Bokningsförfrågan ${record.reference} — Inväntar godkännande`,
-      body: summary,
-      html: `<h2>Bokningsförfrågan ${escapeHtml(record.reference)}</h2><p><strong>${disclaimer}</strong></p><ul>${htmlRows}</ul>`
+      subject: `Ny bokningsförfrågan – ${record.reference}`,
+      body: `${summary}\n\n${disclaimer}`,
+      html: emailShell(`Ny bokningsförfrågan – ${record.reference}`, hostContent)
     },
     guest: {
+      mailType: 'GUEST_REQUEST_ACK',
       to: record.email,
       replyTo: MAIL.replyTo,
       subject: `Vi har tagit emot din bokningsförfrågan (${record.reference})`,
-      body: `Tack för din bokningsförfrågan! Vi har tagit emot dina önskemål och återkommer med besked om tillgänglighet och bokning. Din vistelse är ännu inte bekräftad. ${disclaimer}`,
-      html: `<p>Tack för din bokningsförfrågan! Vi har tagit emot dina önskemål och återkommer med besked om tillgänglighet och bokning. <strong>Din vistelse är ännu inte bekräftad.</strong></p><p>${disclaimer}</p>`
+      body: `${guestIntro}\n\n${notConfirmed}\n\n${guestLines.join('\n')}\n\n${disclaimer}`,
+      html: emailShell('Tack för din bokningsförfrågan', guestContent)
     }
   };
 }
@@ -302,12 +361,16 @@ async function saveOutbox(store, record, context) {
         partition: 'outbox',
         idempotencyKey: `outbox-${record.idempotencyKey}-${key}`,
         reference: record.reference,
-        mailType: key === 'host' ? 'HOST_NEW_REQUEST' : 'GUEST_REQUEST_ACK',
+        mailType: notification.mailType,
         status: 'Utkorg',
         mailTo: notification.to,
         mailReplyTo: notification.replyTo ?? '',
         mailSubject: notification.subject,
         mailHtml: notification.html,
+        mailText: notification.body,
+        dispatchEligible: 'true',
+        outboxVersion: '1',
+        deliveryStatus: 'Ej skickad',
         attemptCount: 0,
         createdAt: record.createdAt
       }, context);

@@ -243,7 +243,8 @@ test('buildNotifications beskriver förfrågan utan att markera den bekräftad',
     priceVersion: '2026-11-11.1', rulesVersion: 'test-2026-11-10'
   };
   const { host, guest } = buildNotifications(record);
-  assert.match(host.subject, /Inväntar godkännande/);
+  assert.equal(host.subject, 'Ny bokningsförfrågan – SK-2026-ABC234');
+  assert.match(host.body, /Status: Inväntar godkännande/);
   assert.match(host.body, /Slutstädning \(exklusive kök\): 2500 kr/);
   assert.match(host.body, /Boendepris före rabatt: 24000 kr/);
   assert.match(host.body, /Rabatt \(Veckorabatt 30 %\)/);
@@ -385,12 +386,23 @@ test('utkorgspost innehåller komplett mejlmall för Logic Apps', async () => {
     assert.equal(row.status, 'Utkorg');
     assert.ok(row.mailSubject.includes('SK-2026-'));
     assert.ok(row.mailHtml.includes('inte en bekräftad bokning'));
+    assert.ok(row.mailText.includes('inte en bekräftad bokning'), 'plaintext-version saknas');
     assert.equal(row.attemptCount, 0);
+    assert.equal(row.dispatchEligible, 'true', 'nya utkorgsposter måste vara uttryckligen sändningsbara');
+    assert.equal(row.outboxVersion, '1');
+    assert.equal(row.deliveryStatus, 'Ej skickad');
+    assert.ok(row.idempotencyKey.length <= 256, 'Resends idempotensnyckel får vara max 256 tecken');
   }
   const host = outbox.find((item) => item.mailTo === 'skadevigard@gmail.com');
   assert.equal(host.mailReplyTo, 'skadevigard@gmail.com');
+  assert.ok(host.mailSubject.includes('Ny bokningsförfrågan'));
   const guest = outbox.find((item) => item.mailTo === 'anna@example.com');
   assert.ok(guest.mailHtml.includes('Tack för din bokningsförfrågan'));
+  assert.ok(guest.mailHtml.includes('Referens:'));
+  assert.ok(guest.mailHtml.includes('ännu inte bekräftad'));
+  assert.ok(guest.mailHtml.includes('Beräknat totalpris:'));
+  assert.ok(guest.mailText.includes('Tillval:'));
+  assert.ok(guest.mailHtml.includes('Skadevi Herrgård'), 'gästmejlet ska använda Skadevis visuella identitet');
   assert.equal(host.reference, guest.reference);
   assert.match(host.reference, /^SK-2026-/);
   assert.equal(host.mailType, 'HOST_NEW_REQUEST');
