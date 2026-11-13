@@ -54,17 +54,19 @@ function addonTable(booking) {
 }
 
 function priceSummary(booking) {
-  const discount = booking.discountAmount > 0
+  const hasDiscount = Number(booking.discountAmount) > 0;
+  const discount = hasDiscount
     ? `<div class="price-row"><span>${escapeHtml(booking.discountLabel || 'Rabatt')}${booking.discountPercent ? ` (${booking.discountPercent} %)` : ''}</span><strong>− ${escapeHtml(formatMoney(booking.discountAmount))}</strong></div>`
     : '';
+  const lodgingLabel = hasDiscount ? 'Boendepris efter rabatt' : 'Boendepris';
+  const lodgingAmount = booking.lodgingAfterDiscount ?? booking.lodgingBase;
   const agreed = booking.agreedTotal !== null && booking.agreedTotal !== undefined
     ? `<div class="price-row price-adjustment"><span>Avtalat pris (orsak: ${escapeHtml(booking.priceAdjustmentReason || 'saknas')})</span><strong>${escapeHtml(formatMoney(booking.agreedTotal))}</strong></div>
        <p class="price-note">Serverberäknat pris vid skapandet: ${escapeHtml(formatMoney(booking.calculatedTotal))}.</p>`
     : '';
   return `<div class="price-summary">
-    <div class="price-row"><span>Boendepris före rabatt</span><strong>${escapeHtml(formatMoney(booking.lodgingBase))}</strong></div>
     ${discount}
-    <div class="price-row"><span>Boendepris efter rabatt</span><strong>${escapeHtml(formatMoney(booking.lodgingAfterDiscount))}</strong></div>
+    <div class="price-row"><span>${escapeHtml(lodgingLabel)}</span><strong>${escapeHtml(formatMoney(lodgingAmount))}</strong></div>
     <div class="price-row"><span>Summa tillval</span><strong>${escapeHtml(formatMoney(booking.totalAddons))}</strong></div>
     <div class="price-row price-total"><span>Totalpris</span><strong>${escapeHtml(formatMoney(booking.total))}</strong></div>
     ${agreed}

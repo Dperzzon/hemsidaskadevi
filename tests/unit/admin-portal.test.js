@@ -242,10 +242,53 @@ test('detaljvyn visar samtliga tillval och prissnapshot', () => {
   assert.match(html, /Slutstädning/);
   assert.match(html, /Sparat prissnapshot/);
   assert.match(html, /24.100 kr/);
+  assert.match(html, /Boendepris efter rabatt/);
+  assert.match(html, /21.600 kr/);
+  assert.match(html, /Veckorabatt/);
+  assert.doesNotMatch(html, /Boendepris före rabatt/);
   assert.match(html, /resend-1/);
   assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
   assert.doesNotMatch(html, /<script>alert\(1\)<\/script>/);
   assert.match(html, /data-booking-action="confirm"/);
+});
+
+test('detaljvyn visar endast Boendepris när ingen rabatt har tillämpats', () => {
+  const principal = { name: 'Test', roles: ['Owner'], email: 'test@example.se', isDemo: true };
+  const booking = normalizeBooking(bookingRecord({
+    lodgingBase: 21000,
+    discount: null,
+    discountAmount: 0,
+    lodgingAfterDiscount: 21000,
+    totalAddons: 4250,
+    total: 25250,
+    pricing: { addonLines: [] }
+  }));
+  const html = renderBookingDetail({ booking, principal, demo: true, csrfToken: 'csrf' });
+  assert.match(html, /Boendepris/);
+  assert.match(html, /21.000 kr/);
+  assert.match(html, /Summa tillval/);
+  assert.match(html, /25.250 kr/);
+  assert.doesNotMatch(html, /Boendepris före rabatt/);
+  assert.doesNotMatch(html, /Boendepris efter rabatt/);
+});
+
+test('detaljvyn använder Boendepris när rabattbeloppet är 0 kr', () => {
+  const principal = { name: 'Test', roles: ['Owner'], email: 'test@example.se', isDemo: true };
+  const booking = normalizeBooking(bookingRecord({
+    lodgingBase: 21000,
+    discount: { label: 'Veckorabatt', percent: 30, amount: 0 },
+    discountAmount: 0,
+    lodgingAfterDiscount: 21000,
+    totalAddons: 0,
+    total: 21000,
+    pricing: { addonLines: [] }
+  }));
+  const html = renderBookingDetail({ booking, principal, demo: true, csrfToken: 'csrf' });
+  assert.match(html, /Boendepris/);
+  assert.match(html, /21.000 kr/);
+  assert.doesNotMatch(html, /Boendepris före rabatt/);
+  assert.doesNotMatch(html, /Boendepris efter rabatt/);
+  assert.doesNotMatch(html, /Veckorabatt/);
 });
 
 test('demoläget serverar dashboard, lista och detalj utan Azure', async () => {
