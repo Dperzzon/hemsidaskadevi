@@ -69,7 +69,7 @@ param secretAdminPrincipalId string = ''
 @description('Namn på lagringskontot för bokningsförfrågningar (Azure Table Storage, Sweden Central). Tomt = bokningslagring förbereds ännu inte. Sätts först efter Skadevis godkännande.')
 param bookingStorageAccountName string = ''
 
-@description('Objekt-ID (principalId) för Logic Appens system-assigned managed identity i Splat Reality-prenumerationen. Får Storage Table Data Contributor på bokningstabellen. Fylls i FÖRST efter att Logic App-flödet har deployerats i Splat Reality (tvåfas: deploya Logic App → hämta principalId → skicka hit).')
+@description('Objekt-ID (principalId) för Logic Appens system-assigned managed identity. Lämnas tom: Logic Appens tabellroll tilldelas i logic-app-notify-modulen (samma tenant). Parametern finns kvar endast för bakåtkompatibilitet med storage-tables-modulen.')
 #disable-next-line secure-secrets-in-params
 param logicAppPrincipalId string = ''
 
@@ -110,9 +110,8 @@ module webapp 'modules/webapp.bicep' = {
 
 // Permanent lagring för bokningsförfrågningar (Azure Table Storage).
 // Skapas bara när bookingStorageAccountName är angivet — inga nya resurser
-// skapas utan Skadevis uttryckliga godkännande. Logic Appens identitet finns
-// i en annan prenumeration (Splat Reality, där Gmail-anslutningen bor) och
-// tilldelas sin RBAC-roll separat när Logic App-flödet har deployerats.
+// skapas utan Skadevis uttryckliga godkännande. Logic Appens identitet skapas
+// i logicAppNotify-modulen (samma tenant) och får sin tabellroll där.
 module bookingStorage 'modules/storage-tables.bicep' = if (!empty(bookingStorageAccountName)) {
   name: 'booking-storage'
   scope: rg
@@ -123,6 +122,23 @@ module bookingStorage 'modules/storage-tables.bicep' = if (!empty(bookingStorage
     owner: owner
     webAppPrincipalId: webapp.outputs.webAppPrincipalId
     logicAppPrincipalId: logicAppPrincipalId
+  }
+}
+
+// Logic App för bokningsnotiser (Resend via HTTP, API-nyckel i Key Vault).
+// Skapas bara när bokningslagringen är beslutad — samma villkor som
+// bookingStorage. Deployas i Disabled-läge; aktivering kräver godkännande.
+module logicAppNotify 'modules/logic-app-notify.bicep' = if (!empty(bookingStorageAccountName)) {
+  name: 'logic-app-notify'
+  scope: rg
+  params: {
+    location: location
+    storageAccountName: bookingStorageAccountName
+    storageEndpoint: 'https://${bookingStorageAccountName}.table.core.windows.net'
+    bookingTableResourceId: subscriptionResourceId('Microsoft.Storage/storageAccounts', bookingStorageAccountName, 'tableServices', 'default', 'tables', 'bookingrequests')
+    keyVaultName: keyVaultName
+    environment: environment
+    owner: owner
   }
 }
 

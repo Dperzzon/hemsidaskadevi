@@ -144,14 +144,32 @@ test('utkorgsentiteten innehåller mejlmall och försöksräknare', () => {
     mailReplyTo: 'skadevigard@gmail.com',
     mailSubject: 'Bokningsförfrågan SK-2026-TEST01',
     mailHtml: '<p>Hej</p>',
+    mailText: 'Hej',
+    dispatchEligible: 'true',
+    outboxVersion: '1',
+    deliveryStatus: 'Ej skickad',
     attemptCount: 0,
     createdAt: '2026-11-10T12:00:00.000Z'
   };
-  const round = fromOutboxEntity(toOutboxEntity(record));
+  const entity = toOutboxEntity(record);
+  const round = fromOutboxEntity(entity);
   assert.equal(round.mailTo, record.mailTo);
   assert.equal(round.mailHtml, record.mailHtml);
+  assert.equal(round.mailText, record.mailText);
+  assert.equal(round.dispatchEligible, 'true');
+  assert.equal(round.outboxVersion, '1');
+  assert.equal(round.deliveryStatus, 'Ej skickad');
   assert.equal(round.attemptCount, 0);
-  assert.equal(toOutboxEntity(record).PartitionKey, 'outbox');
+  assert.equal(entity.PartitionKey, 'outbox');
+});
+
+test('utkorgspost utan uttryckligt sändningstillstånd kan aldrig bli sändningsbar', () => {
+  const entity = toOutboxEntity({
+    partition: 'outbox', idempotencyKey: 'outbox-gammal', status: 'Utkorg',
+    mailTo: 'skadevigard@gmail.com', mailSubject: 's', mailHtml: 'h', createdAt: '2026-11-10T12:00:00.000Z'
+  });
+  assert.equal(entity.dispatchEligible, '');
+  assert.equal(entity.outboxVersion, '');
 });
 
 test('lokal lagring: persistens över processer (läs från fil)', async () => {
