@@ -295,3 +295,53 @@ test('POST med felaktig JSON avvisas med 400', async () => {
     assert.equal(res.status, 400);
   } finally { close(server); }
 });
+
+test('hastighetsbegränsningen delas mellan förfrågningar i samma serverinstans', async () => {
+  const root = withTempRoot();
+  const saved = new Map();
+  const store = {
+    type: 'azure-table',
+    async save(record) {
+      if (saved.has(record.idempotencyKey)) return { duplicate: true, record: saved.get(record.idempotencyKey) };
+      saved.set(record.idempotencyKey, record);
+      return { duplicate: false, record };
+    },
+    async findByIdempotencyKey(key) { return saved.get(key) ?? null; },
+    async findByReference(reference) { return [...saved.values()].find((item) => item.reference === reference) ?? null; },
+    async listPending() { return []; }
+  };
+  const server = await listen(createRequestListener({
+    root,
+    enabled: true,
+    rules: { published: true, version: 'test-2026-11-10', text: 'Regler.' },
+    store,
+    availabilityHandler: async () => ({ status: 200, jsonBody: { blocked: [] } }),
+    rateLimit: { max: 2, windowMs: 60000 },
+    now: new Date('2026-11-10T12:00:00Z'),
+    makeReference: (() => {
+      let index = 0;
+      return () => `SK-2026-TEST${++index}`;
+    })()
+  }));
+  const body = {
+    arrival: '2027-01-12',
+    departure: '2027-01-15',
+    firstName: 'Test',
+    lastName: 'Testsson',
+    email: 'test@example.com',
+    phone: '0701234567',
+    guests: 2,
+    addons: {},
+    rulesVersion: 'test-2026-11-10',
+    consentRules: true
+  };
+  try {
+    const port = server.address().port;
+    const first = await post(port, '/api/booking-requests', body, { 'Idempotency-Key': 'rate-limit-test-0001' });
+    const second = await post(port, '/api/booking-requests', body, { 'Idempotency-Key': 'rate-limit-test-0002' });
+    const third = await post(port, '/api/booking-requests', body, { 'Idempotency-Key': 'rate-limit-test-0003' });
+    assert.equal(first.status, 201);
+    assert.equal(second.status, 201);
+    assert.equal(third.status, 429);
+  } finally { close(server); }
+});
