@@ -293,6 +293,99 @@
     });
   });
 
+  function copyPaymentLink(url, button) {
+    if (!url) return;
+    if (!navigator.clipboard?.writeText) {
+      window.prompt('Kopiera betalningslänken:', url);
+      if (button) button.disabled = false;
+      return;
+    }
+    navigator.clipboard.writeText(url)
+      .then(() => showToast('Betalningslänken är kopierad.'))
+      .catch(() => window.prompt('Kopiera betalningslänken:', url));
+    if (button) button.disabled = false;
+  }
+
+  function showPaymentLinkResult(url, anchor) {
+    const panel = document.createElement('div');
+    panel.className = 'notice';
+    const heading = document.createElement('strong');
+    heading.textContent = 'Betalningssida skapad';
+    const text = document.createElement('p');
+    text.textContent = 'Kopiera länken nu. Av säkerhetsskäl visas den inte igen efter att sidan laddats om.';
+    const row = document.createElement('p');
+    row.className = 'payment-link-row';
+    const code = document.createElement('code');
+    code.textContent = url;
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'btn btn-secondary btn-small';
+    copy.textContent = 'Kopiera länk';
+    copy.addEventListener('click', () => copyPaymentLink(url, copy));
+    row.append(code, copy);
+    panel.append(heading, text, row);
+    const section = anchor?.closest('section');
+    if (section) section.prepend(panel);
+    else document.body.prepend(panel);
+    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  document.querySelectorAll('[data-copy-payment-link]').forEach((button) => {
+    button.addEventListener('click', () => copyPaymentLink(button.dataset.url || '', button));
+  });
+
+  document.querySelectorAll('[data-stripe-payment-link]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      if (!window.confirm('Skapa en ny betalningssida? En befintlig länk blir då ogiltig.')) {
+        return;
+      }
+      button.disabled = true;
+      try {
+        const data = await api(
+          `/api/admin/bookings/${encodeURIComponent(button.dataset.reference)}/payment-link`,
+          {
+            headers: { 'Idempotency-Key': crypto.randomUUID() },
+            body: { expectedEtag: button.dataset.etag || undefined }
+          }
+        );
+        showToast(data.emailQueued
+          ? 'Betalningssidan är skapad och mejlet ligger i utkorgen.'
+          : 'Betalningssidan är skapad.');
+        document.querySelectorAll('[data-stripe-payment-link], [data-revoke-payment-link]')
+          .forEach((element) => { element.dataset.etag = ''; });
+        showPaymentLinkResult(data.paymentLink.url, button);
+      } catch (error) {
+        showToast(errorText(error));
+        button.disabled = false;
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-revoke-payment-link]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      if (!window.confirm('Återkalla betalningslänken? Gästen kan inte längre betala via den.')) {
+        return;
+      }
+      button.disabled = true;
+      try {
+        await api(
+          `/api/admin/bookings/${encodeURIComponent(button.dataset.reference)}/payment-link/revoke`,
+          {
+            headers: { 'Idempotency-Key': crypto.randomUUID() },
+            body: {
+              expectedEtag: button.dataset.etag || undefined,
+              reason: 'Återkallad av Owner i adminportalen'
+            }
+          }
+        );
+        window.location.reload();
+      } catch (error) {
+        showToast(errorText(error));
+        button.disabled = false;
+      }
+    });
+  });
+
   function formValue(form, name) {
     const element = form.elements[name];
     return element ? element.value : '';
@@ -366,6 +459,21 @@
               expectedEtag: form.dataset.etag || undefined
             }
           });
+          window.location.reload();
+          return;
+        }
+        if (type === 'invoice-status') {
+          await api(
+            `/api/admin/bookings/${encodeURIComponent(form.dataset.reference)}/invoice-requests/${encodeURIComponent(form.dataset.requestId)}`,
+            {
+              method: 'PATCH',
+              body: {
+                status: formValue(form, 'status'),
+                reason: formValue(form, 'reason'),
+                expectedEtag: form.dataset.etag || undefined
+              }
+            }
+          );
           window.location.reload();
           return;
         }

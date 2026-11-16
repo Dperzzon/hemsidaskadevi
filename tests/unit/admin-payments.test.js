@@ -251,7 +251,7 @@ test('överbetalning visas tydligt och historiken behålls', async () => {
     const paid = await record(port, csrf, reference, {
       amount: String(booking.total),
       paymentDate: '2026-11-15',
-      method: 'CARD'
+      method: 'SWISH'
     }, 'payment-over-0001');
     assert.equal(paid.status, 201);
     assert.equal(paid.json.paymentStatus, 'PAID');
@@ -387,7 +387,7 @@ test('rättelse kräver motivering, behåller historiken och auditloggas', async
     const payment = await record(port, csrf, reference, {
       amount: '2000',
       paymentDate: '2026-11-10',
-      method: 'CARD'
+      method: 'SWISH'
     }, 'payment-correct-0001');
     assert.equal(payment.status, 201);
 

@@ -633,3 +633,63 @@ Airbnb-varningar i detta steg. Auditloggen får `WARNING_RECHECKED` respektive
 `WARNING_ACKNOWLEDGED`.
 
 Fokuserade tester finns i `tests/unit/admin-warnings.test.js`.
+
+## 18. Swish och faktura – Owner bekräftar först, gästen betalar sedan
+
+Betalningsflödet följer affärsmodell A och erbjuder endast Swish eller faktura:
+
+1. Gästen skickar en bokningsförfrågan.
+2. Owner godkänner och bekräftar bokningen. Först då finns giltig intern
+   kalenderlåsning.
+3. Owner skapar en personlig betalningssida från bokningsdetaljen. Länken kan
+   kopieras eller skickas via utkorgen. En ny länk ogiltiggör den gamla.
+4. Gästen öppnar `/betala/<token>` och väljer **Betala med Swish** eller
+   **Begär faktura**.
+5. Swish startar Stripe Checkout med endast `swish` och valutan `sek`.
+   Kort och Klarna kan inte visas.
+6. Stripes signerade webhook registrerar betalningen som `SWISH` i
+   betalningsliggaren. Bokningens status ändras aldrig automatiskt.
+7. Fakturabegäran sparas som `Begärd` och hanteras manuellt av Owner. Den
+   markerar aldrig bokningen som betald.
+
+Endast `CONFIRMED` med giltig kalenderlåsning får en betalningssida.
+`PRELIMINARY` och `PENDING` nekas. Avbokning, nekande eller prisändring
+återkallar länken och makulerar öppna fakturabegäranden.
+
+Admin-API:
+
+```text
+POST  /api/admin/bookings/:reference/payment-link
+POST  /api/admin/bookings/:reference/payment-link/revoke
+PATCH /api/admin/bookings/:reference/invoice-requests/:id
+```
+
+Kräver Owner, CSRF och valfri ETag via `If-Match` eller `expectedEtag`.
+
+Publik betalningssida:
+
+```text
+GET  /betala/:token
+POST /api/payments/:token/swish
+POST /api/payments/:token/invoice-request
+POST /api/stripe/webhook
+```
+
+Token är kryptografiskt säker, har begränsad giltighetstid och kan återkallas.
+Endast en hash av token sparas. Webhooken verifierar HMAC-signatur, belopp,
+valuta, referens, Stripe-session och test/live-läge, och är idempotent per
+session.
+
+Betalningar är inaktiverade som standard i produktion:
+
+```text
+STRIPE_ENABLED=0            # admin: skapa betalningssidor; publik app: Swish
+STRIPE_WEBHOOK_ENABLED=0    # publik app: ta emot webhooks
+STRIPE_ALLOW_LIVE=0         # blockerar sk_live_/rk_live_ utan godkännande
+```
+
+Se `docs/stripe-betalning.md` för testläge, Swish-inställningar, fakturastatus,
+aktivering och säkerhetsregler. Fokuserade tester finns i
+`tests/unit/stripe.test.js`, `tests/unit/stripe-webhook.test.js`,
+`tests/unit/payment-page.test.js` och
+`tests/unit/admin-stripe-payment-link.test.js`.

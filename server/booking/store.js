@@ -210,6 +210,11 @@ function toEntity(record, partition) {
     balance: String(record.balance ?? (Number(record.total) - Number(record.amountPaid ?? 0))),
     paymentOpeningBalanceOre: String(record.paymentOpeningBalanceOre ?? ''),
     payments: JSON.stringify(record.payments ?? []),
+    paymentRequests: JSON.stringify(record.paymentRequests ?? []),
+    paymentRequest: record.paymentRequest ? JSON.stringify(record.paymentRequest) : '',
+    paymentTokenHash: String(record.paymentTokenHash ?? ''),
+    paymentAccess: record.paymentAccess ? JSON.stringify(record.paymentAccess) : '',
+    invoiceRequests: JSON.stringify(record.invoiceRequests ?? []),
     latestNote: record.latestNote ?? '',
     blockId: record.blockId ?? '',
     airbnbBlockedAt: record.airbnbBlockedAt ?? '',
@@ -278,6 +283,11 @@ function fromEntity(entity) {
       ? null
       : Number(entity.paymentOpeningBalanceOre),
     payments: parse(entity.payments, []),
+    paymentRequests: parse(entity.paymentRequests, []),
+    paymentRequest: parse(entity.paymentRequest, null),
+    paymentTokenHash: entity.paymentTokenHash ?? '',
+    paymentAccess: parse(entity.paymentAccess, null),
+    invoiceRequests: parse(entity.invoiceRequests, []),
     latestNote: entity.latestNote ?? '',
     blockId: entity.blockId ?? '',
     airbnbBlockedAt: entity.airbnbBlockedAt ?? '',
@@ -364,6 +374,135 @@ function createTableStore(options = {}) {
       if (result.status !== 200 || !result.json?.value) return null;
       return result.json.value.length ? fromEntity(result.json.value[0]) : null;
     },
+    async getByReference(reference) {
+      const safe = String(reference ?? '').replaceAll("'", "''");
+      const result = await tableRequest({
+        accountName, method: 'GET', table,
+        query: [['$filter', `PartitionKey eq 'request' and reference eq '${safe}'`]],
+        fetchImpl: options.fetchImpl, auth
+      });
+      if (result.status !== 200 || !Array.isArray(result.json?.value) || !result.json.value.length) {
+        return null;
+      }
+      const row = result.json.value[0];
+      const single = await tableRequest({
+        accountName, method: 'GET', table,
+        target: rowTarget('request', row.RowKey),
+        fetchImpl: options.fetchImpl, auth
+      });
+      if (single.status !== 200 || !single.json) return null;
+      return { record: fromEntity(single.json), etag: single.etag };
+    },
+    async getByPaymentTokenHash(tokenHash) {
+      const safe = String(tokenHash ?? '').replaceAll("'", "''");
+      if (!/^[0-9a-f]{64}$/i.test(safe)) return null;
+      const result = await tableRequest({
+        accountName, method: 'GET', table,
+        query: [['$filter', `PartitionKey eq 'request' and paymentTokenHash eq '${safe}'`]],
+        fetchImpl: options.fetchImpl, auth
+      });
+      if (result.status !== 200 || !Array.isArray(result.json?.value) || !result.json.value.length) {
+        return null;
+      }
+      const row = result.json.value[0];
+      const single = await tableRequest({
+        accountName, method: 'GET', table,
+        target: rowTarget('request', row.RowKey),
+        fetchImpl: options.fetchImpl, auth
+      });
+      if (single.status !== 200 || !single.json) return null;
+      return { record: fromEntity(single.json), etag: single.etag };
+    },
+    async listCalendarByReference(reference) {
+      const safe = String(reference ?? '').replaceAll("'", "''");
+      const result = await tableRequest({
+        accountName, method: 'GET', table,
+        query: [['$filter', `PartitionKey eq 'calendar' and reference eq '${safe}'`]],
+        fetchImpl: options.fetchImpl, auth
+      });
+      if (result.status !== 200 || !Array.isArray(result.json?.value)) {
+        return null;
+      }
+      return result.json.value.map((row) => ({
+        night: row.RowKey,
+        type: row.type ?? '',
+        reference: row.reference ?? '',
+        blockId: row.blockId ?? '',
+        source: row.source ?? '',
+        note: row.note ?? '',
+        createdBy: row.createdBy ?? '',
+        createdAt: row.createdAt ?? ''
+      }));
+    },
+    async listCalendar(from, to) {
+      const safeFrom = String(from ?? '').replaceAll("'", "''");
+      const safeTo = String(to ?? '').replaceAll("'", "''");
+      const result = await tableRequest({
+        accountName, method: 'GET', table,
+        query: [['$filter', `PartitionKey eq 'calendar' and RowKey ge '${safeFrom}' and RowKey lt '${safeTo}'`]],
+        fetchImpl: options.fetchImpl, auth
+      });
+      if (result.status !== 200 || !Array.isArray(result.json?.value)) {
+        return null;
+      }
+      return result.json.value.map((row) => ({
+        night: row.RowKey,
+        type: row.type ?? '',
+        reference: row.reference ?? '',
+        blockId: row.blockId ?? '',
+        source: row.source ?? '',
+        note: row.note ?? '',
+        createdBy: row.createdBy ?? '',
+        createdAt: row.createdAt ?? ''
+      }));
+    },
+    async updateRequest(record, { ifMatch } = {}) {
+      const rowKey = record.rowKey ?? record.idempotencyKey;
+      const result = await tableRequest({
+        accountName, method: 'PUT', table,
+        target: rowTarget('request', rowKey),
+        body: toEntity({ ...record, rowKey }, 'request'),
+        ifMatch: ifMatch ?? '*',
+        fetchImpl: options.fetchImpl, auth
+      });
+      if (result.status === 412 || result.status === 409) {
+        const conflict = new Error('ETag-konflikt');
+        conflict.status = 409;
+        throw conflict;
+      }
+      if (result.status === 404) {
+        const missing = new Error('Bokningen hittades inte');
+        missing.status = 404;
+        throw missing;
+      }
+      if (![200, 204].includes(result.status)) {
+        throw new Error(`Bokningen kunde inte uppdateras (${result.status})`);
+      }
+      return { record, etag: result.etag ?? '' };
+    },
+    async appendHistory(entry) {
+      const result = await tableRequest({
+        accountName, method: 'POST', table,
+        body: {
+          PartitionKey: 'history',
+          RowKey: entry.idempotencyKey,
+          reference: entry.reference,
+          action: entry.action,
+          fromStatus: entry.fromStatus ?? '',
+          toStatus: entry.toStatus ?? '',
+          changes: entry.changes ?? '{}',
+          reason: entry.reason ?? '',
+          actorId: entry.actorId ?? '',
+          actorName: entry.actorName ?? '',
+          correlationId: entry.correlationId ?? '',
+          at: entry.at
+        },
+        fetchImpl: options.fetchImpl, auth
+      });
+      if (result.status !== 201) {
+        throw new Error(`Historikposten kunde inte sparas (${result.status})`);
+      }
+    },
     async listPending() {
       const result = await tableRequest({
         accountName, method: 'GET', table,
@@ -404,8 +543,12 @@ function createTableStore(options = {}) {
 
 function createLocalStore(options = {}) {
   const file = path.resolve(options.file ?? path.join(process.cwd(), 'data', 'booking-requests.jsonl'));
+  const historyFile = path.resolve(options.historyFile ?? path.join(path.dirname(file), 'booking-history.jsonl'));
   const records = new Map();
   let loaded = false;
+  function etagFor(record) {
+    return `local-${record.version ?? 1}-${record.updatedAt ?? record.createdAt ?? ''}`;
+  }
   async function loadOnce(context = {}) {
     if (loaded) return;
     loaded = true;
@@ -441,6 +584,51 @@ function createLocalStore(options = {}) {
     async findByReference(reference) {
       await loadOnce();
       return [...records.values()].find((record) => record.reference === reference) ?? null;
+    },
+    async getByReference(reference) {
+      await loadOnce();
+      const record = [...records.values()].find((item) => item.reference === reference);
+      return record ? { record, etag: etagFor(record) } : null;
+    },
+    async getByPaymentTokenHash(tokenHash) {
+      await loadOnce();
+      if (!/^[0-9a-f]{64}$/i.test(String(tokenHash ?? ''))) return null;
+      const record = [...records.values()].find((item) => item.paymentTokenHash === tokenHash);
+      return record ? { record, etag: etagFor(record) } : null;
+    },
+    async listCalendarByReference() {
+      return [];
+    },
+    async listCalendar() {
+      return [];
+    },
+    async updateRequest(record, { ifMatch } = {}) {
+      await loadOnce();
+      const current = records.get(record.idempotencyKey) ??
+        [...records.values()].find((item) => item.reference === record.reference);
+      if (!current) {
+        const missing = new Error('Bokningen hittades inte');
+        missing.status = 404;
+        throw missing;
+      }
+      if (ifMatch && ifMatch !== etagFor(current)) {
+        const conflict = new Error('ETag-konflikt');
+        conflict.status = 409;
+        throw conflict;
+      }
+      const stored = {
+        ...record,
+        idempotencyKey: current.idempotencyKey,
+        rowKey: current.rowKey ?? current.idempotencyKey
+      };
+      records.set(stored.idempotencyKey, stored);
+      await fsp.mkdir(path.dirname(file), { recursive: true });
+      await fsp.appendFile(file, `${JSON.stringify(stored)}\n`, 'utf8');
+      return { record: stored, etag: etagFor(stored) };
+    },
+    async appendHistory(entry) {
+      await fsp.mkdir(path.dirname(historyFile), { recursive: true });
+      await fsp.appendFile(historyFile, `${JSON.stringify(entry)}\n`, 'utf8');
     },
     async listPending() {
       await loadOnce();

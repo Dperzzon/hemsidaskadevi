@@ -44,6 +44,11 @@ const {
   DocumentError,
   renderDocument
 } = require('./documents');
+const {
+  createPaymentLink,
+  revokePaymentLink,
+  changeInvoiceRequestStatus
+} = require('./stripe-payment-service');
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
@@ -237,6 +242,18 @@ function parseCalendarRange(searchParams, now = new Date()) {
   return { from: monthStart, to: next.toISOString().slice(0, 10) };
 }
 
+function redactPaymentLinks(booking, principal) {
+  if (!booking || principal?.roles?.includes('Owner')) return booking;
+  const redact = (request) => request ? { ...request, url: '' } : request;
+  return {
+    ...booking,
+    paymentRequest: redact(booking.paymentRequest),
+    paymentRequests: Array.isArray(booking.paymentRequests)
+      ? booking.paymentRequests.map(redact)
+      : []
+  };
+}
+
 function serviceOptions(context) {
   return {
     now: context.now,
@@ -245,7 +262,11 @@ function serviceOptions(context) {
     availabilityHandler: context.availabilityHandler,
     requireAirbnbCheck: context.requireAirbnbCheck,
     availability: context.availability,
-    outboxEnabled: context.outboxEnabled
+    outboxEnabled: context.outboxEnabled,
+    stripeEnabled: context.stripeEnabled,
+    stripeMode: context.stripeMode,
+    paymentLinkTtlMs: context.paymentLinkTtlMs,
+    publicBaseUrl: context.publicBaseUrl
   };
 }
 
@@ -301,7 +322,11 @@ async function handleApi(req, res, url, context) {
       easyAuthTrusted: auth.trustEasyAuth,
       dataSource: repository.type,
       readOnly: !context.writesEnabled,
-      writesEnabled: context.writesEnabled
+      writesEnabled: context.writesEnabled,
+      payments: {
+        stripeEnabled: context.stripeEnabled === true,
+        stripeMode: context.stripeMode ?? 'disabled'
+      }
     });
     return;
   }
@@ -314,7 +339,8 @@ async function handleApi(req, res, url, context) {
 
   if (pathname === '/api/admin/bookings' && req.method === 'GET') {
     const filters = parseFilters(url.searchParams);
-    const bookings = await repository.listBookings(filters, now);
+    const bookings = (await repository.listBookings(filters, now))
+      .map((booking) => redactPaymentLinks(booking, principal));
     sendJson(req, res, 200, { bookings, filters, count: bookings.length });
     return;
   }
@@ -407,7 +433,7 @@ async function handleApi(req, res, url, context) {
       return;
     }
     await enrichWarnings(repository, booking, now);
-    sendJson(req, res, 200, { booking });
+    sendJson(req, res, 200, { booking: redactPaymentLinks(booking, principal) });
     return;
   }
 
@@ -518,6 +544,58 @@ async function handleApi(req, res, url, context) {
     return;
   }
 
+  const paymentLinkMatch = /^\/api\/admin\/bookings\/([^/]+)\/payment-link$/.exec(pathname);
+  if (paymentLinkMatch && req.method === 'POST') {
+    if (!guardWrite(req, res, context)) return;
+    const parsed = await readBodyOrError(req, res, true);
+    if (!parsed) return;
+    const result = await createPaymentLink(
+      repository,
+      principal,
+      decodeURIComponent(paymentLinkMatch[1]),
+      parsed.body,
+      serviceOptions(context),
+      { warn: context.warn }
+    );
+    sendJson(req, res, result.status, result.jsonBody);
+    return;
+  }
+
+  const paymentLinkRevokeMatch = /^\/api\/admin\/bookings\/([^/]+)\/payment-link\/revoke$/.exec(pathname);
+  if (paymentLinkRevokeMatch && req.method === 'POST') {
+    if (!guardWrite(req, res, context)) return;
+    const parsed = await readBodyOrError(req, res, true);
+    if (!parsed) return;
+    const result = await revokePaymentLink(
+      repository,
+      principal,
+      decodeURIComponent(paymentLinkRevokeMatch[1]),
+      parsed.body,
+      serviceOptions(context),
+      { warn: context.warn }
+    );
+    sendJson(req, res, result.status, result.jsonBody);
+    return;
+  }
+
+  const invoiceRequestMatch = /^\/api\/admin\/bookings\/([^/]+)\/invoice-requests\/([^/]+)$/.exec(pathname);
+  if (invoiceRequestMatch && req.method === 'PATCH') {
+    if (!guardWrite(req, res, context)) return;
+    const parsed = await readBodyOrError(req, res);
+    if (!parsed) return;
+    const result = await changeInvoiceRequestStatus(
+      repository,
+      principal,
+      decodeURIComponent(invoiceRequestMatch[1]),
+      decodeURIComponent(invoiceRequestMatch[2]),
+      parsed.body,
+      serviceOptions(context),
+      { warn: context.warn }
+    );
+    sendJson(req, res, result.status, result.jsonBody);
+    return;
+  }
+
   const paymentMatch = /^\/api\/admin\/bookings\/([^/]+)\/payment$/.exec(pathname);
   if (paymentMatch && req.method === 'PATCH') {
     if (!guardWrite(req, res, context)) return;
@@ -599,6 +677,12 @@ function createAdminRequestListener(options = {}) {
       ? process.env.ADMIN_REQUIRE_AIRBNB_CHECK !== '0'
       : false);
   const outboxEnabled = options.outboxEnabled ?? process.env.ADMIN_MAIL_OUTBOX_ENABLED === '1';
+  const stripeEnabled = options.stripeEnabled ?? process.env.STRIPE_ENABLED === '1';
+  const stripeMode = options.stripeMode ?? (
+    !stripeEnabled
+      ? 'disabled'
+      : (String(process.env.STRIPE_MODE ?? 'test').toLowerCase() === 'live' ? 'live' : 'test')
+  );
   const warn = options.warn ?? ((message) => console.error(message));
 
   return async function adminRequestListener(req, res) {
@@ -683,6 +767,10 @@ let calendarParserReady = false;
           writesEnabled,
           requireAirbnbCheck,
           outboxEnabled,
+          stripeEnabled,
+          stripeMode,
+          paymentLinkTtlMs: options.paymentLinkTtlMs,
+          publicBaseUrl: options.publicBaseUrl,
           availabilityHandler: options.availabilityHandler,
           availability: options.availability,
           rules: options.rules,
@@ -712,7 +800,8 @@ let calendarParserReady = false;
       if (url.pathname === '/admin/bookings' || url.pathname === '/admin/bookings/') {
         const filters = parseFilters(url.searchParams);
         const all = await repository.allBookings(now);
-        const bookings = sortBookings(filterBookings(all, filters), filters.sort, filters.dir);
+        const bookings = sortBookings(filterBookings(all, filters), filters.sort, filters.dir)
+          .map((booking) => redactPaymentLinks(booking, principal));
         sendHtml(req, res, 200, renderBookings({
           bookings,
           filters,
@@ -768,7 +857,9 @@ let calendarParserReady = false;
         const history = await repository.listHistory(reference).catch(() => []);
         await enrichWarnings(repository, booking, now);
         sendHtml(req, res, 200, renderBookingDetail({
-          booking, principal, demo, csrfToken, writesEnabled, history, today: todayKey(now)
+          booking: redactPaymentLinks(booking, principal),
+          principal, demo, csrfToken, writesEnabled, history, today: todayKey(now),
+          stripeEnabled, stripeMode
         }));
         return;
       }

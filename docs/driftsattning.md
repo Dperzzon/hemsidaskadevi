@@ -270,3 +270,11 @@ az webapp log tail --name hemsida-skadevi-prod --resource-group rg-skadevi-prod
 - Inga DNS-poster skapas av mallen; certifikat + bindning styrs av
   `customDomainStage` (stegvis aktivering) och kräver CNAME + TXT hos
   domänleverantören.
+- Swish och faktura är inaktiverade i produktion som standard
+  (`enableStripeWebhook=false`, `enableSwishPayments=false`,
+  `enableStripePayments=false`). Webhooken svarar `503`, gästsidan visar endast
+  faktura och adminportalen skapar inga betalningssidor förrän funktionen
+  aktiveras med Key Vault-referenser. Endast den publika appen behöver Stripes
+  hemliga nyckel; adminportalen behöver ingen Stripe-nyckel.
+  Se `docs/stripe-betalning.md` för Swish-inställningar, testläge och säker
+  aktivering.

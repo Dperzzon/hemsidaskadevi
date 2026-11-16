@@ -5,7 +5,9 @@
 // mejlstatus för visning. Den räknar aldrig om priser och skriver aldrig.
 
 const { deriveWarnings, applyWarnings } = require('./warnings');
-const { computePaymentSummary } = require('./payments');
+const { computePaymentSummary, normalizePaymentRequests, latestPaymentRequest } = require('./payments');
+const { normalizeInvoiceRequests, activeInvoiceRequest } = require('../booking/invoice-requests');
+const { paymentAccessState } = require('../booking/payment-access');
 
 const STATUS_META = {
   PENDING: {
@@ -262,6 +264,24 @@ function normalizeBooking(record = {}, options = {}) {
   const bookingSource = String(record.bookingSource ?? 'WEB').toUpperCase();
   const isBlock = statusCode === 'BLOCKED' || /^BLOCK-/.test(String(record.reference ?? ''));
   const paymentSummary = computePaymentSummary(record);
+  const paymentRequests = normalizePaymentRequests(record);
+  const invoiceRequests = normalizeInvoiceRequests(record);
+  const accessState = paymentAccessState(record, now);
+  const paymentLinkStatus = !record.paymentAccess
+    ? 'NONE'
+    : statusCode !== 'CONFIRMED'
+      ? 'BLOCKED'
+      : accessState.ok
+        ? 'OPEN'
+        : accessState.code.replace('PAYMENT_LINK_', '');
+  const paymentLinkLabels = {
+    NONE: 'Ingen länk',
+    OPEN: 'Aktiv',
+    EXPIRED: 'Utgången',
+    REVOKED: 'Återkallad',
+    MISSING: 'Ingen länk',
+    BLOCKED: 'Blockerad'
+  };
   const booking = {
     idempotencyKey: record.idempotencyKey ?? record.RowKey ?? '',
     rowKey: record.rowKey ?? record.RowKey ?? record.idempotencyKey ?? '',
@@ -313,6 +333,21 @@ function normalizeBooking(record = {}, options = {}) {
     amountPaid: paymentSummary.amountPaid,
     balance: paymentSummary.balance,
     payments: paymentSummary.payments,
+    paymentRequests,
+    paymentRequest: latestPaymentRequest(paymentRequests),
+    paymentLink: {
+      status: paymentLinkStatus,
+      statusLabel: paymentLinkLabels[paymentLinkStatus] ?? 'Okänd',
+      createdAt: String(record.paymentAccess?.createdAt ?? ''),
+      expiresAt: String(record.paymentAccess?.expiresAt ?? ''),
+      createdBy: String(record.paymentAccess?.createdBy ?? ''),
+      revokedAt: String(record.paymentAccess?.revokedAt ?? ''),
+      revokedReason: String(record.paymentAccess?.revokedReason ?? ''),
+      amountOre: paymentSummary.remainingOre,
+      amount: paymentSummary.balance
+    },
+    invoiceRequests,
+    activeInvoiceRequest: activeInvoiceRequest(record),
     openingBalanceOre: paymentSummary.openingBalanceOre,
     totalOre: paymentSummary.totalOre,
     amountPaidOre: paymentSummary.paidOre,

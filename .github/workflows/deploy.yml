@@ -49,7 +49,7 @@ jobs:
       - name: Kontrollera att alla sidor och resurser byggs
         run: |
           set -e
-          for page in index 404 pages/foretag pages/fest pages/brollop pages/semester pages/boende pages/aktiviteter pages/priser pages/mat-dryck pages/om-oss pages/vanliga-fragor pages/kontakt pages/digital-visning pages/boka pages/lediga-datum; do
+          for page in index 404 pages/foretag pages/fest pages/brollop pages/semester pages/boende pages/aktiviteter pages/priser pages/mat-dryck pages/om-oss pages/vanliga-fragor pages/kontakt pages/digital-visning pages/boka pages/lediga-datum pages/betalning-klar pages/betalning-avbruten; do
             test -f "dist/${page}.html" || { echo "::error::Saknas i bygget: dist/${page}.html"; exit 1; }
           done
           test -f dist/robots.txt

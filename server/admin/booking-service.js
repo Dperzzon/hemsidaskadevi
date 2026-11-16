@@ -17,6 +17,8 @@ const crypto = require('node:crypto');
 const { quote, PRICE_VERSION } = require('../booking/pricing');
 const { handleAvailability } = require('../calendar/availability');
 const { MAIL } = require('../booking/mail');
+const { revokePaymentAccess } = require('../booking/payment-access');
+const { cancelOpenInvoiceRequests } = require('../booking/invoice-requests');
 const {
   STATUS_META,
   todayKey,
@@ -885,6 +887,14 @@ async function changeStatus(repo, principal, reference, action, body = {}, optio
   if (nextStatus === 'DECLINED') record.declinedAt = now.toISOString();
   if (nextStatus === 'CANCELLED') record.cancelledAt = now.toISOString();
   if (nextStatus === 'CONFIRMED') record.actionFlags = { ...(record.actionFlags ?? {}), airbnbBlocked: false };
+  if (nextStatus !== 'CONFIRMED') {
+    revokePaymentAccess(record, { now, reason: `Status ändrad till ${nextStatus}` });
+    cancelOpenInvoiceRequests(record, {
+      now,
+      reason,
+      actorName: actorOf(principal).name
+    });
+  }
 
   try {
     const updated = await repo.updateRequest(record, { ifMatch: raw.etag });
@@ -990,6 +1000,9 @@ async function updatePayment(repo, principal, reference, body = {}, options = {}
     updatedAt: now.toISOString(),
     updatedBy: actorOf(principal).name
   };
+  if (record.balance <= 0 && paymentStatus === 'PAID') {
+    revokePaymentAccess(record, { now, reason: 'Bokningen är fullbetald' });
+  }
   try {
     const updated = await repo.updateRequest(record, { ifMatch: raw.etag });
     await audit(repo, principal, 'PAYMENT_UPDATED', record, {
@@ -1126,6 +1139,9 @@ async function recordPayment(repo, principal, reference, body = {}, options = {}
   record.amountPaid = summary.amountPaid;
   record.balance = summary.balance;
   record.paymentStatus = summary.paymentStatus;
+  if (summary.remainingOre <= 0) {
+    revokePaymentAccess(record, { now, reason: 'Bokningen är fullbetald' });
+  }
   record.version = Number(record.version || 1) + 1;
   record.updatedAt = now.toISOString();
   record.updatedBy = actor.name;
@@ -1236,6 +1252,9 @@ async function correctPayment(repo, principal, reference, paymentId, body = {}, 
   record.amountPaid = summary.amountPaid;
   record.balance = summary.balance;
   record.paymentStatus = summary.paymentStatus;
+  if (summary.remainingOre <= 0) {
+    revokePaymentAccess(record, { now, reason: 'Bokningen är fullbetald' });
+  }
   record.version = Number(record.version || 1) + 1;
   record.updatedAt = now.toISOString();
   record.updatedBy = actor.name;
@@ -1316,6 +1335,20 @@ async function updateAddons(repo, principal, reference, body = {}, options = {},
     updatedAt: now.toISOString(),
     updatedBy: actorOf(principal).name
   };
+  const addonsChanged = JSON.stringify(record.addons ?? null) !== JSON.stringify(addons);
+  if ((addonsChanged || Number(record.total) !== Number(total)) && updatedRecord.paymentAccess) {
+    revokePaymentAccess(updatedRecord, {
+      now,
+      reason: 'Tillval eller pris ändrades'
+    });
+  }
+  if (addonsChanged || Number(record.total) !== Number(total)) {
+    cancelOpenInvoiceRequests(updatedRecord, {
+      now,
+      reason: 'Tillval eller pris ändrades',
+      actorName: actorOf(principal).name
+    });
+  }
   try {
     const updated = await repo.updateRequest(updatedRecord, { ifMatch: raw.etag });
     await audit(repo, principal, 'ADDONS_UPDATED', updatedRecord, {

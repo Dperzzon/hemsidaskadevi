@@ -10,3 +10,5 @@ param environment = 'prod'
 param owner = 'Skadevi'
 param adminTrustEasyAuth = '1'
 param githubDeployPrincipalId = 'ee380faf-83af-489d-82bb-ea48eab13ad5'
+param enableStripePayments = false
+param publicBaseUrl = 'https://www.skadeviherrgard.com'

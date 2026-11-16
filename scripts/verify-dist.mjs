@@ -14,7 +14,7 @@ const expectedPages = [
   '404.html',
   ...['foretag', 'fest', 'brollop', 'semester', 'boende', 'aktiviteter', 'priser',
     'mat-dryck', 'om-oss', 'vanliga-fragor', 'kontakt', 'digital-visning', 'boka',
-    'lediga-datum'].map((name) => `pages/${name}.html`)
+    'lediga-datum', 'betalning-klar', 'betalning-avbruten'].map((name) => `pages/${name}.html`)
 ];
 
 for (const page of expectedPages) {
@@ -35,7 +35,8 @@ for (const asset of ['robots.txt', 'sitemap.xml', 'images/logo.png']) {
 
 // Kontrollera att alla lokala referenser i HTML-filerna pekar på existerande filer.
 const PAGE_ROUTES = new Set(['foretag', 'fest', 'brollop', 'semester', 'boende', 'aktiviteter',
-  'priser', 'mat-dryck', 'om-oss', 'vanliga-fragor', 'kontakt', 'digital-visning', 'boka', 'lediga-datum']);
+  'priser', 'mat-dryck', 'om-oss', 'vanliga-fragor', 'kontakt', 'digital-visning', 'boka', 'lediga-datum',
+  'betalning-klar', 'betalning-avbruten']);
 const htmlFiles = [
   ...expectedPages,
   ...(await readdir(path.join(dist, 'pages'))).filter((name) => name.endsWith('.html') && !expectedPages.includes(`pages/${name}`)).map((name) => `pages/${name}`)

@@ -54,3 +54,13 @@ param secretAdminPrincipalId = '3e197323-a929-40b0-a164-c8cb5b33b521'
 // (steg 3). Namnet deklareras nu så att framtida infra-deployments hanterar
 // lagringen idempotent (Nochange). Kör alltid what-if först.
 param bookingStorageAccountName = 'stskadevibokningprod'
+
+// Stripe är inaktivt i produktion. Aktivera först efter godkännande och efter
+// att webhookhemligheten finns i Key Vault.
+param enableStripeWebhook = false
+
+param enableSwishPayments = false
+
+param stripeSecretUri = ''
+
+param stripeWebhookSecretUri = ''

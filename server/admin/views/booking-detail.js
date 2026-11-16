@@ -16,6 +16,10 @@ const {
   sortPayments
 } = require('../payments');
 const {
+  INVOICE_REQUEST_STATUSES,
+  INVOICE_REQUEST_TRANSITIONS
+} = require('../../booking/invoice-requests');
+const {
   statusBadge,
   emailBadge,
   deliveryBadge,
@@ -300,7 +304,94 @@ function paymentHistory(booking, isOwner, writesEnabled) {
   return `<ul class="payment-history">${rows.join('')}</ul>`;
 }
 
-function paymentPanel(booking, isOwner, writesEnabled, today) {
+function stripePaymentSection(booking, isOwner, writesEnabled, stripeEnabled, stripeMode) {
+  const link = booking.paymentLink ?? { status: 'NONE', statusLabel: 'Ingen länk' };
+  const remainingOre = Number(booking.remainingOre ?? 0);
+  const confirmed = booking.statusCode === 'CONFIRMED';
+  const canCreate = isOwner && writesEnabled && stripeEnabled && confirmed && remainingOre > 0;
+  const active = link.status === 'OPEN';
+  const createButton = canCreate
+    ? `<button type="button" class="btn btn-primary" data-stripe-payment-link data-reference="${escapeHtml(booking.reference)}" data-etag="${escapeHtml(booking.etag || '')}">${active ? 'Skapa ny länk' : 'Skapa betalningslänk'}</button>`
+    : '';
+  const revokeButton = active && isOwner && writesEnabled
+    ? `<button type="button" class="btn btn-ghost" data-revoke-payment-link data-reference="${escapeHtml(booking.reference)}" data-etag="${escapeHtml(booking.etag || '')}">Återkalla länk</button>`
+    : '';
+  const linkBlock = link.status === 'NONE'
+    ? '<p class="muted">Ingen betalningssida är skapad.</p>'
+    : `<div class="notice">
+        <strong>${escapeHtml(link.statusLabel)}</strong>
+        <p>Utestående: ${escapeHtml(formatOre(remainingOre))}</p>
+        ${link.expiresAt ? `<p>Gäller till: ${escapeHtml(formatDateTime(link.expiresAt))}</p>` : ''}
+        ${link.createdAt ? `<p class="payment-entry-actor">Skapad av ${escapeHtml(link.createdBy || 'Okänd')} ${escapeHtml(formatDateTime(link.createdAt))}</p>` : ''}
+        ${link.revokedAt ? `<p class="payment-entry-actor">Återkallad ${escapeHtml(formatDateTime(link.revokedAt))}</p>` : ''}
+        ${active ? '<p class="price-note">Av säkerhetsskäl visas inte själva länken igen. Skapa en ny länk om den behöver skickas på nytt; den gamla blir då ogiltig.</p>' : ''}
+      </div>`;
+  let notice = '';
+  if (!stripeEnabled) {
+    notice = '<p class="notice">Betalningslänkar är inte aktiverade i denna miljö.</p>';
+  } else if (!confirmed) {
+    notice = '<p class="notice">Betalningslänk kan endast skapas för en bekräftad bokning.</p>';
+  } else if (remainingOre <= 0) {
+    notice = '<p class="notice">Bokningen är fullbetald. Ingen ny betalningslänk behövs.</p>';
+  }
+  const modeNote = stripeEnabled && stripeMode === 'test'
+    ? '<p class="price-note">Swish är i Stripe testläge. Inga riktiga betalningar genomförs.</p>'
+    : stripeEnabled && stripeMode === 'live'
+      ? '<p class="inline-warning">Swish är i live-läge. Betalningar kan dras på riktigt.</p>'
+      : '';
+  return `<div class="panel-heading payment-history-heading"><div><p class="eyebrow">Swish</p><h3>Betalningssida</h3></div></div>
+    ${linkBlock}
+    ${notice}
+    ${(createButton || revokeButton) ? `<div class="button-row">${createButton}${revokeButton}</div>` : ''}
+    ${modeNote}`;
+}
+
+function invoiceRequestCard(booking, request, isOwner, writesEnabled) {
+  const transitions = INVOICE_REQUEST_TRANSITIONS[request.status] ?? [];
+  const options = transitions
+    .map((status) => `<option value="${escapeHtml(status)}">${escapeHtml(INVOICE_REQUEST_STATUSES[status])}</option>`)
+    .join('');
+  const statusForm = isOwner && writesEnabled && options
+    ? `<form data-admin-form="invoice-status" data-reference="${escapeHtml(booking.reference)}" data-request-id="${escapeHtml(request.id)}" data-etag="${escapeHtml(booking.etag || '')}">
+        <div class="form-grid">
+          <label class="booking-field">Ny status
+            <select name="status">${options}</select>
+          </label>
+          <label class="booking-field">Orsak (krävs vid makulering)
+            <input type="text" name="reason" maxlength="500">
+          </label>
+        </div>
+        <div class="button-row"><button type="submit" class="btn btn-secondary btn-small">Uppdatera fakturabegäran</button></div>
+      </form>`
+    : '';
+  return `<div class="notice">
+      <strong>${escapeHtml(request.statusLabel)}</strong>
+      <p>Belopp: ${escapeHtml(formatOre(request.amountOre))} · Begärd ${escapeHtml(formatDateTime(request.createdAt))}</p>
+      <div class="fact-grid">
+        ${fact('Faktureras till', escapeHtml(request.invoiceName || '—'))}
+        ${fact('Organisationsnummer', escapeHtml(request.invoiceOrgNumber || '—'))}
+        ${fact('Adress', escapeHtml([request.invoiceAddress, request.invoicePostalCode, request.invoiceCity].filter(Boolean).join(', ') || '—'))}
+        ${fact('E-post', escapeHtml(request.invoiceEmail || '—'))}
+        ${fact('Referens', escapeHtml(request.invoiceReference || '—'))}
+      </div>
+      ${request.invoiceNotes ? `<p class="prose">${escapeHtml(request.invoiceNotes)}</p>` : ''}
+      ${request.reason ? `<p class="payment-entry-actor">Senaste orsak: ${escapeHtml(request.reason)}</p>` : ''}
+      ${statusForm}
+    </div>`;
+}
+
+function invoicePanel(booking, isOwner, writesEnabled) {
+  const requests = Array.isArray(booking.invoiceRequests) ? booking.invoiceRequests : [];
+  return `<section class="panel">
+    <div class="panel-heading"><div><p class="eyebrow">Faktura</p><h2>Fakturabegäranden</h2></div></div>
+    ${requests.length
+      ? requests.map((request) => invoiceRequestCard(booking, request, isOwner, writesEnabled)).join('')
+      : '<p class="muted">Inga fakturabegäranden.</p>'}
+    <p class="price-note">En fakturabegäran markerar aldrig bokningen som betald. Ingen faktura skickas automatiskt i detta steg.</p>
+  </section>`;
+}
+
+function paymentPanel(booking, isOwner, writesEnabled, today, stripeEnabled, stripeMode) {
   const totalOre = Number(booking.totalOre ?? Math.round(Number(booking.total || 0) * 100));
   const paidOre = Number(booking.amountPaidOre ?? Math.round(Number(booking.amountPaid || 0) * 100));
   const remainingOre = Number(booking.remainingOre ?? (totalOre - paidOre));
@@ -332,13 +423,14 @@ function paymentPanel(booking, isOwner, writesEnabled, today) {
       <div class="price-row"><span>Betalstatus</span><strong>${escapeHtml(booking.paymentLabel || PAYMENT_LABELS[booking.paymentStatus] || 'Okänd')}</strong></div>
     </div>
     ${form}
+    ${stripePaymentSection(booking, isOwner, writesEnabled, stripeEnabled, stripeMode)}
     <div class="panel-heading payment-history-heading"><div><p class="eyebrow">Historik</p><h3>Betalningshistorik</h3></div></div>
     ${paymentHistory(booking, isOwner, writesEnabled)}
   </section>`;
 }
 
 function renderBookingDetail(options) {
-  const { booking, principal, demo, csrfToken, writesEnabled, history = [], today } = options;
+  const { booking, principal, demo, csrfToken, writesEnabled, history = [], today, stripeEnabled = false, stripeMode = 'disabled' } = options;
   const isOwner = principal.roles?.includes('Owner');
   const content = `
     <div class="detail-header">
@@ -438,7 +530,9 @@ function renderBookingDetail(options) {
             : '<p class="notice">Endast Owner kan ändra status, pris, betalning och blockeringar i denna version.</p>'}
         </section>
 
-        ${booking.isBlock ? '' : paymentPanel(booking, isOwner, writesEnabled, today)}
+        ${booking.isBlock ? '' : paymentPanel(booking, isOwner, writesEnabled, today, stripeEnabled, stripeMode)}
+
+        ${booking.isBlock ? '' : invoicePanel(booking, isOwner, writesEnabled)}
 
         <section class="panel">
           <div class="panel-heading"><div><p class="eyebrow">Kommunikation</p><h2>Mejlstatus</h2></div></div>

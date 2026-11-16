@@ -47,6 +47,19 @@ param airbnbSecretName string = 'airbnb-ical-url'
 @description('Fullständig SecretUri till airbnb-ical-url, utan versionsnummer. Sätts först vid aktivering och innehåller ingen hemlighet i sig.')
 param airbnbIcalSecretUri string = ''
 
+@description('Aktiverar betalningslänkar i adminportalen. false = API och UI visar att betalningar är inaktiva.')
+param enableStripePayments bool = false
+
+@description('Visar vilket Stripe-läge som används i gränssnittet. Själva nyckeln hanteras av den publika appen.')
+@allowed([
+  'test'
+  'live'
+])
+param stripeMode string = 'test'
+
+@description('Publik bas-URL för gästens betalningssida.')
+param publicBaseUrl string = 'https://www.skadeviherrgard.com'
+
 @description('Tenantverifierat rolldefinitions-ID för Storage Table Data Contributor (0a9a7e1f-... i Skadevis tenant).')
 param tableDataContributorRoleId string = '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3'
 
@@ -136,6 +149,18 @@ resource adminApp 'Microsoft.Web/sites@2024-11-01' = {
         {
           name: 'ADMIN_REQUIRE_AIRBNB_CHECK'
           value: '1'
+        }
+        {
+          name: 'STRIPE_ENABLED'
+          value: enableStripePayments ? '1' : '0'
+        }
+        {
+          name: 'STRIPE_MODE'
+          value: stripeMode
+        }
+        {
+          name: 'PUBLIC_BASE_URL'
+          value: publicBaseUrl
         }
       ], enableBookingWrites && !empty(airbnbIcalSecretUri) ? [
         {

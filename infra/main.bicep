@@ -69,6 +69,18 @@ param secretAdminPrincipalId string = ''
 @description('Namn på lagringskontot för bokningsförfrågningar (Azure Table Storage, Sweden Central). Tomt = bokningslagring förbereds ännu inte. Sätts först efter Skadevis godkännande.')
 param bookingStorageAccountName string = ''
 
+@description('Aktiverar Stripe-webhooken på den publika appen. Standard false: endpointen svarar 503 och ingen betalning registreras.')
+param enableStripeWebhook bool = false
+
+@description('Aktiverar Swish-betalningar på gästens betalningssida. Standard false: endast fakturabegäran visas.')
+param enableSwishPayments bool = false
+
+@description('SecretUri till Stripes hemliga nyckel i befintligt Key Vault. Ingen hemlighet anges i Git. Tomt = fail-closed.')
+param stripeSecretUri string = ''
+
+@description('SecretUri till Stripe-webhookens hemlighet i befintligt Key Vault. Ingen hemlighet anges i Git. Tomt = fail-closed.')
+param stripeWebhookSecretUri string = ''
+
 @description('Objekt-ID (principalId) för Logic Appens system-assigned managed identity. Lämnas tom: Logic Appens tabellroll tilldelas i logic-app-notify-modulen (samma tenant). Parametern finns kvar endast för bakåtkompatibilitet med storage-tables-modulen.')
 #disable-next-line secure-secrets-in-params
 param logicAppPrincipalId string = ''
@@ -105,6 +117,10 @@ module webapp 'modules/webapp.bicep' = {
     keyVaultSecretName: keyVaultSecretName
     secretAdminPrincipalId: secretAdminPrincipalId
     bookingStorageAccountName: bookingStorageAccountName
+    enableStripeWebhook: enableStripeWebhook
+    enableSwishPayments: enableSwishPayments
+    stripeSecretUri: stripeSecretUri
+    stripeWebhookSecretUri: stripeWebhookSecretUri
   }
 }
 

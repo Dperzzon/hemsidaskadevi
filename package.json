@@ -18,6 +18,7 @@
     "smoke:admin": "node scripts/smoke-admin-package.mjs",
     "test": "node --test \"tests/unit/*.test.js\" \"tests/unit/*.test.mjs\"",
     "test:smoke": "node scripts/smoke-test.mjs",
+    "stripe:test-mode": "node scripts/stripe-test-mode-check.mjs",
     "seed:test-outbox": "node scripts/test-outbox-seed.mjs",
     "mock:resend": "node scripts/mock-resend.mjs",
     "test:e2e": "playwright test --grep-invert @visual",
