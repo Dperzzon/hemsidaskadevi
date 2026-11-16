@@ -41,7 +41,7 @@ const stripeMock = http.createServer(async (req, res) => {
     const params = new URLSearchParams(body);
     const amount = Number(params.get('line_items[0][price_data][unit_amount]'));
     const reference = params.get('metadata[reference]');
-    const paymentMethod = params.get('payment_method_types[0]');
+    const paymentMethod = params.get('allowed_payment_method_types[0]');
     assert(Number.isSafeInteger(amount) && amount > 0, 'Mock: ogiltigt belopp');
     assert(reference, 'Mock: referens saknas');
     assert(paymentMethod === 'swish', `Mock: oväntad betalmetod ${paymentMethod}`);

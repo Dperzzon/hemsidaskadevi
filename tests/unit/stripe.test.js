@@ -73,8 +73,8 @@ test('Checkout-session skickas med serverbelopp, metadata och idempotensnyckel',
   assert.equal(calls[0].init.headers['Idempotency-Key'], 'idem-123');
   const body = calls[0].init.body;
   assert.match(body, /mode=payment/);
-  assert.match(body, /payment_method_types%5B0%5D=swish/);
-  assert.doesNotMatch(body, /payment_method_types%5B0%5D=card/);
+  assert.match(body, /allowed_payment_method_types%5B0%5D=swish/);
+  assert.doesNotMatch(body, /(?:^|&)payment_method_types%5B0%5D/);
   assert.match(body, /unit_amount%5D=250000/);
   assert.match(body, /currency%5D=sek/);
   assert.match(body, /client_reference_id=SK-2026-TEST01/);

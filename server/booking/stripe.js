@@ -153,7 +153,7 @@ function createStripeClient(options = {}) {
       const params = [
         ['mode', 'payment'],
         ['locale', 'sv'],
-        ['payment_method_types[0]', 'swish'],
+        ['allowed_payment_method_types[0]', 'swish'],
         ['line_items[0][quantity]', '1'],
         ['line_items[0][price_data][currency]', currency],
         ['line_items[0][price_data][unit_amount]', String(amountOre)],

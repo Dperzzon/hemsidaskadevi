@@ -6,9 +6,10 @@ Skadevi Herrgård erbjuder endast två betalningsvägar:
 2. **Faktura** som en spårbar begäran som Skadevi hanterar manuellt.
 
 Kortbetalningar, Klarna och andra betalningsmetoder är borttagna från
-gästflödet. Stripe Checkout skapas med en uttrycklig lista som endast innehåller
-`swish`, aldrig med dynamiska betalningsmetoder. Äldre historiska kortposter kan
-fortfarande visas i betalningsliggaren, men nya kortbetalningar kan inte väljas.
+gästflödet. Stripe Checkout använder dynamiska betalmetoder med filtret
+`allowed_payment_method_types[0]=swish`; endast Swish får vara aktiverat i
+Dashboard. Äldre historiska kortposter kan fortfarande visas i
+betalningsliggaren, men nya kortbetalningar kan inte väljas.
 
 ## Affärsregler
 
@@ -67,7 +68,9 @@ fortfarande visas i betalningsliggaren, men nya kortbetalningar kan inte väljas
 - Formulär kräver samma origin. Token fungerar som kapacitetsbevis.
 - Endast Owner kan skapa/återkalla länkar och ändra fakturastatus.
 - Staff ser betalstatus och fakturabegäranden men inte betalningslänken.
-- Stripe Checkout skapas alltid med `payment_method_types[0]=swish`.
+- Stripe Checkout använder dynamiska betalmetoder med filtret
+  `allowed_payment_method_types[0]=swish`. Swish måste vara aktiverat i Stripe
+  Dashboard; kort och Klarna får inte vara aktiva för kontot.
 - Serverbelopp i öre används alltid. Klientens belopp ignoreras.
 - Webhooksignaturen verifieras med HMAC-SHA256 och 5 minuters tidsfönster.
 - Webhooken är idempotent per Stripe-session och skyddad mot samtidiga anrop
@@ -116,10 +119,60 @@ Hemligheter får aldrig ligga i Git. I Azure läses de som Key Vault-referenser
 när funktionen aktiveras. Adminportalen behöver ingen Stripe-nyckel; endast den
 publika appen skapar Swish-sessioner.
 
+## Swish-berättigande
+
+Stripe stödjer Swish för konton med verksamhetsland i Sverige, presentmentvaluta
+SEK och kund i Sverige. Kontrollera följande i Stripe Dashboard innan Swish
+aktiveras:
+
+- **Affärsmodell:** Swish stöds för B2C. B2B är inte behörigt enligt Stripes
+  nuvarande villkor. Om kontot är registrerat som ren B2B kan Swish saknas.
+- **MCC-kod:** vissa koder är förbjudna, bland annat `6513 Real Estate Agents
+  and Managers - Rentals`. En felaktig MCC för uthyrning kan göra Swish
+  otillgängligt.
+- **Land och valuta:** Sverige och SEK.
+- **Åtkomst:** Swish kan kräva att åtkomst begärs via Stripes Swish-preview
+  eller support innan det visas under `Settings → Payments → Payment methods`.
+- **Dashboard:** endast Swish ska vara aktiverat. Kort och Klarna ska vara
+  avstängda.
+
+Om Swish inte finns i listan är det ett konto-/behörighetsproblem, inte ett
+kodproblem. Använd då Stripes payment method troubleshooting och begär åtkomst;
+ersätt aldrig med kort eller Klarna.
+
+## Stripe Tax och moms
+
+Stripe Tax är inte aktiverat i koden eller i produktion. Innan det slås på
+behöver Skadevi och en skatterådgivare bekräfta:
+
+- vilka tjänster som är momspliktiga och vilka undantag som gäller,
+- rätt `tax_code` per tjänst (accommodation, event, mat, tillval med mera),
+- svenska momsregistreringar och eventuella utlandsregistreringar.
+
+Rekommenderad konfiguration när det är godkänt:
+
+1. Aktivera Stripe Tax i Dashboard och ange head office.
+2. Välj **Inclusive** som standard `tax_behavior` för SEK, eftersom befintliga
+   bokningspriser redan är avtalade inklusive moms. Stripe får då inte lägga
+   moms ovanpå befintligt belopp.
+3. Skapa separata produkter eller line items med verifierad `tax_code` för
+   tjänster som har olika momshantering. Gissa aldrig `txcd_`-koder.
+4. Lägg in registreringar under Tax → Locations. Utan registrering blir
+   skatteberäkningen noll.
+5. Sätt `automatic_tax.enabled=true` först i en separat, godkänd ändring och
+   testa i sandbox. Med inclusive-priser ska kundens totalsumma vara oförändrad.
+6. Använd Stripe Tax även för framtida Stripe Invoicing, men aktivera inte
+   Invoicing automatiskt i detta steg.
+
+Fakturabegäran fortsätter vara manuell och får inte innehålla påhittade
+momsuppgifter.
+
 ## Testläge
 
 1. Aktivera **Swish** i Stripe Dashboard under
-   `Settings > Payments > Payment methods`.
+   `Settings > Payments > Payment methods`. Checkout använder dynamiska
+   betalmetoder; koden filtrerar med `allowed_payment_method_types[0]=swish`.
+   Kort och Klarna får inte vara aktiva.
 2. Använd en testnyckel `sk_test_...` och en webhookhemlighet `whsec_...`.
 3. Starta den publika appen med `STRIPE_ENABLED=1` och admin med
    `STRIPE_ENABLED=1`.
