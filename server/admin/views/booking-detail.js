@@ -93,6 +93,23 @@ function paymentOptions(current) {
   ).join('');
 }
 
+function documentActions(booking) {
+  const reference = encodeURIComponent(booking.reference);
+  const quoteHref = `/api/admin/bookings/${reference}/quote.pdf`;
+  const confirmationHref = `/api/admin/bookings/${reference}/confirmation.pdf`;
+  const confirmation = booking.statusCode === 'CONFIRMED'
+    ? `<a class="btn btn-secondary" href="${confirmationHref}" download>Ladda ned bokningsbekräftelse (PDF)</a>`
+    : `<p class="muted">Bokningsbekräftelse är endast tillgänglig för bekräftade bokningar.</p>`;
+  return `<section class="panel">
+    <div class="panel-heading"><div><p class="eyebrow">Dokument</p><h2>Offert och bekräftelse</h2></div></div>
+    <div class="button-stack">
+      <a class="btn btn-primary" href="${quoteHref}" download>Ladda ned offert (PDF)</a>
+      ${confirmation}
+    </div>
+    <p class="price-note">Dokumenten genereras från bokningens sparade uppgifter och ändrar inte bokningen, statusen eller betalningarna.</p>
+  </section>`;
+}
+
 function statusActions(booking) {
   if (booking.isBlock) {
     return `<div class="button-stack">
@@ -215,6 +232,8 @@ function renderBookingDetail(options) {
       </div>
 
       <aside class="detail-side">
+        ${booking.isBlock ? '' : documentActions(booking)}
+
         <section class="panel action-panel">
           <div class="panel-heading"><div><p class="eyebrow">Bokning</p><h2>Åtgärder</h2></div></div>
           ${isOwner

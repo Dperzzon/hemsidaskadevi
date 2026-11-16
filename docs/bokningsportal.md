@@ -58,6 +58,8 @@ Därför använder portalen `Referrer-Policy: same-origin` och skickar
 | GET | `/api/admin/bookings` | Lista med `q`, `status`, `from`, `to`, `sort`, `dir` |
 | GET | `/api/admin/bookings/:reference` | En bokning |
 | GET | `/api/admin/bookings/:reference/history` | Append-only auditlogg |
+| GET | `/api/admin/bookings/:reference/quote.pdf` | Servergenererad PDF-offert; alla bokningar utom datumblockeringar |
+| GET | `/api/admin/bookings/:reference/confirmation.pdf` | PDF-bokningsbekräftelse; endast `CONFIRMED` |
 | POST | `/api/admin/bookings` | Manuell bokning; `Idempotency-Key` krävs |
 | POST | `/api/admin/bookings/:reference/status` | `approve`, `preliminary`, `decline`, `confirm`, `cancel`; ETag |
 | POST | `/api/admin/bookings/:reference/notes` | Intern anteckning; ETag |
@@ -105,6 +107,27 @@ historiken aldrig räknas om automatiskt.
 
 Samma formulär kan växla till **ren datumblockering**. Då krävs inga
 gästuppgifter, ingen gästmejl skapas och blockeringen får referens `BLOCK-…`.
+
+### PDF-offert och bokningsbekräftelse
+
+Bokningsdetaljen har knappar för att ladda ned två servergenererade
+A4-dokument. PDF:erna skapas med PDFKit på servern och använder den befintliga
+logotypen i `public/images/logo.png`. Ingen bokningsdata ändras och inga
+publika länkar skapas.
+
+- **Offert** kan skapas för alla bokningar utom datumblockeringar. Offertnumret
+  är `OFF-` följt av bokningsreferensen. Offerten visar att den inte är en
+  bekräftad bokning och låser inga datum.
+- **Bokningsbekräftelse** kan endast skapas för `CONFIRMED`. För `PENDING`,
+  `DECLINED`, `BLOCKED` och `CANCELLED` svarar API:et `409` med
+  `CONFIRMATION_REQUIRES_CONFIRMED`.
+
+Priserna hämtas från bokningens sparade prissnapshot. Finns ett avtalat pris
+visas det som totalpris tillsammans med det beräknade priset. Rabatt visas
+endast som en separat informationsrad när den redan är avdragen från
+boendepriset. Betalningar och återstående belopp visas endast i
+bokningsbekräftelsen. Dokumenten kräver samma Microsoft Entra-inloggning som
+övriga admin-API:er och är tillgängliga för Owner och Staff.
 
 ## 5. Status, kalender och samtidighet
 

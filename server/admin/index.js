@@ -33,6 +33,11 @@ const {
   removeBlock,
   calendarRange
 } = require('./booking-service');
+const {
+  DOCUMENT_KINDS,
+  DocumentError,
+  renderDocument
+} = require('./documents');
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
@@ -102,6 +107,21 @@ function sendHtml(req, res, status, html, extraHeaders = {}) {
   };
   res.writeHead(status, headers);
   res.end(req.method === 'HEAD' ? undefined : html);
+}
+
+function sendPdf(req, res, document) {
+  const asciiName = document.filename.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '_');
+  const encodedName = encodeURIComponent(document.filename).replace(/'/g, '%27');
+  const headers = {
+    ...securityHeaders(req),
+    'Content-Type': 'application/pdf',
+    'Content-Disposition': `attachment; filename="${asciiName}"; filename*=UTF-8''${encodedName}`,
+    'Content-Length': document.buffer.length,
+    'Cache-Control': 'no-store',
+    'X-Robots-Tag': 'noindex, nofollow'
+  };
+  res.writeHead(200, headers);
+  res.end(req.method === 'HEAD' ? undefined : document.buffer);
 }
 
 function redirect(req, res, status, location) {
@@ -345,6 +365,33 @@ async function handleApi(req, res, url, context) {
     return;
   }
 
+  const documentMatch = /^\/api\/admin\/bookings\/([^/]+)\/(quote|confirmation)\.pdf$/.exec(pathname);
+  if (documentMatch && (req.method === 'GET' || req.method === 'HEAD')) {
+    const reference = decodeURIComponent(documentMatch[1]);
+    const booking = await repository.getBooking(reference, now);
+    if (!booking) {
+      sendJson(req, res, 404, { error: 'Bokningen hittades inte.' });
+      return;
+    }
+    const kind = documentMatch[2] === 'quote'
+      ? DOCUMENT_KINDS.QUOTE
+      : DOCUMENT_KINDS.CONFIRMATION;
+    try {
+      const document = await renderDocument(kind, booking, {
+        now,
+        rules: context.rules
+      });
+      sendPdf(req, res, document);
+    } catch (error) {
+      if (!(error instanceof DocumentError)) throw error;
+      sendJson(req, res, error.status, {
+        error: error.message,
+        code: error.code
+      });
+    }
+    return;
+  }
+
   const detailMatch = /^\/api\/admin\/bookings\/([^/]+)$/.exec(pathname);
   if (detailMatch && req.method === 'GET') {
     const reference = decodeURIComponent(detailMatch[1]);
@@ -556,6 +603,7 @@ let calendarParserReady = false;
           outboxEnabled,
           availabilityHandler: options.availabilityHandler,
           availability: options.availability,
+          rules: options.rules,
           warn
         });
         return;

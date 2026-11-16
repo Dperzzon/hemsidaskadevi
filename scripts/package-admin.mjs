@@ -19,6 +19,8 @@ const allowed = [
   'server/booking/store.js',
   'server/booking/pricing.js',
   'server/booking/mail.js',
+  'server/booking/rules.js',
+  'server/booking/house-rules.json',
   'shared',
   'src/css/fonts.css',
   'public/fonts',
@@ -36,6 +38,8 @@ const required = [
   'server/booking/store.js',
   'server/booking/pricing.js',
   'server/booking/mail.js',
+  'server/booking/rules.js',
+  'server/booking/house-rules.json',
   'shared/pricing-config.json',
   'src/css/fonts.css',
   'public/images/logo.png',
@@ -44,8 +48,6 @@ const required = [
 
 const forbidden = [
   'server/booking/requests.js',
-  'server/booking/rules.js',
-  'server/booking/house-rules.json',
   'server/index.js',
   'infra',
   '.github',
@@ -113,7 +115,8 @@ async function main() {
     env: { ...process.env, NODE_ENV: 'production' },
     shell: process.platform === 'win32'
   });
-  if (!(await exists('node_modules/node-ical')) || !(await exists('node_modules/temporal-polyfill'))) {
+  if (!(await exists('node_modules/node-ical')) || !(await exists('node_modules/temporal-polyfill')) ||
+      !(await exists('node_modules/pdfkit'))) {
     throw new Error('Adminpaketet saknar runtime-beroenden');
   }
 
