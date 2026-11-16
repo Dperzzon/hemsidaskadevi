@@ -22,8 +22,15 @@ const {
   todayKey,
   validDateKey,
   nightsBetween,
-  nightKeys
+  nightKeys,
+  normalizeBooking
 } = require('./domain');
+const {
+  deriveWarnings,
+  applyWarnings,
+  findWarning,
+  stayFingerprint
+} = require('./warnings');
 
 const MAX_GUESTS = 24;
 const MAX_NIGHTS = 93;
@@ -385,6 +392,248 @@ async function releaseCalendar(repo, reference) {
   }
 }
 
+async function warningContext(repo, record, now) {
+  let calendarRows = [];
+  let calendarUnavailable = false;
+  try {
+    calendarRows = await repo.listCalendar(record.arrival, record.departure);
+  } catch {
+    calendarRows = null;
+    calendarUnavailable = true;
+  }
+  const calendarConflicts = Array.isArray(calendarRows)
+    ? calendarRows.filter((row) => row.reference !== record.reference)
+    : [];
+  let internalConflicts = [];
+  let internalUnavailable = false;
+  try {
+    const all = await repo.allBookings(now);
+    internalConflicts = all.filter((booking) =>
+      booking.reference !== record.reference &&
+      (booking.statusCode === 'CONFIRMED' || booking.statusCode === 'BLOCKED') &&
+      booking.arrival < record.departure &&
+      booking.departure > record.arrival
+    );
+  } catch {
+    internalConflicts = [];
+    internalUnavailable = true;
+  }
+  return { calendarRows, calendarConflicts, internalConflicts, calendarUnavailable, internalUnavailable };
+}
+
+async function enrichWarnings(repo, booking, now) {
+  const context = await warningContext(repo, booking, now);
+  return applyWarnings(booking, { now, ...context });
+}
+
+async function acknowledgeWarning(repo, principal, reference, body = {}, options = {}, context = {}) {
+  if (!principal?.roles?.includes('Owner')) {
+    return error(403, 'Endast Owner kan hantera varningar.');
+  }
+  if (!REFERENCE_PATTERN.test(reference)) return error(404, 'Bokningen hittades inte.');
+  const warningId = cleanString(body.warningId, 120);
+  const reason = cleanString(body.reason, 500);
+  if (!warningId) {
+    return error(400, 'Välj en varning att hantera.', { fields: { warningId: 'Varning krävs.' } });
+  }
+  if (reason.length < 3) {
+    return error(400, 'Ange en kort motivering till varför varningen är hanterad.', {
+      fields: { reason: 'Motivering krävs.' }
+    });
+  }
+  const raw = await repo.getRawBooking(reference);
+  if (!raw) return error(404, 'Bokningen hittades inte.');
+  const expectedEtag = body.expectedEtag ?? options.expectedEtag;
+  if (expectedEtag && raw.etag && expectedEtag !== raw.etag) {
+    return error(409, 'Bokningen har ändrats av någon annan. Uppdatera sidan och försök igen.');
+  }
+  const now = options.now ?? new Date();
+  const record = { ...raw.record };
+  let normalized = null;
+  try { normalized = await repo.getBooking(reference, now); } catch { normalized = null; }
+  if (!normalized) normalized = normalizeBooking(record, { now });
+  const conflicts = await warningContext(repo, record, now);
+  const warnings = deriveWarnings(normalized, { now, ...conflicts });
+  const target = findWarning(warnings, warningId);
+  if (!target) {
+    return error(404, 'Varningen hittades inte eller gäller inte längre.', { code: 'WARNING_NOT_FOUND' });
+  }
+  if (target.severity === 'handled') {
+    return error(409, 'Varningen är redan hanterad.', { code: 'WARNING_ALREADY_HANDLED' });
+  }
+  if (!target.dismissible) {
+    return error(409, 'Den här varningen kan inte markeras som hanterad. Åtgärda orsaken i stället.', {
+      code: 'WARNING_NOT_DISMISSIBLE',
+      warningId,
+      warningTitle: target.title
+    });
+  }
+  const actor = actorOf(principal);
+  const acknowledgement = {
+    warningId,
+    fingerprint: target.fingerprint,
+    type: target.type,
+    title: target.title,
+    reason,
+    actorId: actor.id,
+    actorName: actor.name,
+    at: now.toISOString()
+  };
+  const existing = Array.isArray(record.warningAcknowledgements) ? record.warningAcknowledgements : [];
+  const acknowledgements = existing.filter((row) =>
+    !(row && row.warningId === warningId && row.fingerprint === target.fingerprint)
+  );
+  acknowledgements.push(acknowledgement);
+  record.warningAcknowledgements = acknowledgements.slice(-100);
+  record.version = Number(record.version || 1) + 1;
+  record.updatedAt = now.toISOString();
+  record.updatedBy = actor.name;
+
+  try {
+    const updated = await repo.updateRequest(record, { ifMatch: raw.etag });
+    await audit(repo, principal, 'WARNING_ACKNOWLEDGED', record, {
+      fromStatus: record.statusCode,
+      toStatus: record.statusCode,
+      reason,
+      changes: {
+        warningId,
+        warningTitle: target.title,
+        fingerprint: target.fingerprint,
+        type: target.type
+      },
+      context
+    });
+    let after = null;
+    try { after = await repo.getBooking(reference, now); } catch { after = null; }
+    if (!after) after = normalizeBooking(record, { now });
+    const afterWarnings = deriveWarnings(after, { now, ...conflicts });
+    return {
+      status: 200,
+      jsonBody: {
+        reference,
+        warningId,
+        acknowledged: true,
+        etag: updated.etag,
+        warnings: afterWarnings,
+        unresolved: afterWarnings.filter((warning) => warning.severity !== 'handled').map((warning) => warning.id)
+      }
+    };
+  } catch (cause) {
+    const mapped = normalizeRepoError(cause);
+    if (mapped) return mapped;
+    throw cause;
+  }
+}
+
+async function recheckWarning(repo, principal, reference, body = {}, options = {}, context = {}) {
+  if (!principal?.roles?.includes('Owner')) {
+    return error(403, 'Endast Owner kan kontrollera varningar igen.');
+  }
+  if (!REFERENCE_PATTERN.test(reference)) return error(404, 'Bokningen hittades inte.');
+  const warningId = cleanString(body.warningId, 120);
+  if (!warningId) {
+    return error(400, 'Välj en varning att kontrollera.', { fields: { warningId: 'Varning krävs.' } });
+  }
+  const raw = await repo.getRawBooking(reference);
+  if (!raw) return error(404, 'Bokningen hittades inte.');
+  const expectedEtag = body.expectedEtag ?? options.expectedEtag;
+  if (expectedEtag && raw.etag && expectedEtag !== raw.etag) {
+    return error(409, 'Bokningen har ändrats av någon annan. Uppdatera sidan och försök igen.');
+  }
+  const now = options.now ?? new Date();
+  const record = { ...raw.record };
+  let normalized = null;
+  try { normalized = await repo.getBooking(reference, now); } catch { normalized = null; }
+  if (!normalized) normalized = normalizeBooking(record, { now });
+  const conflicts = await warningContext(repo, record, now);
+  const warnings = deriveWarnings(normalized, { now, ...conflicts });
+  const target = findWarning(warnings, warningId);
+  if (!target) {
+    return error(404, 'Varningen hittades inte eller gäller inte längre.', { code: 'WARNING_NOT_FOUND' });
+  }
+  if (!target.recheckable) {
+    return error(409, 'Den här varningen kan inte kontrolleras igen.', { code: 'WARNING_NOT_RECHECKABLE' });
+  }
+  if (target.type !== 'AIRBNB') {
+    return error(422, 'Endast Airbnb-varningar kan kontrolleras igen just nu.', { code: 'RECHECK_UNSUPPORTED' });
+  }
+
+  const nights = nightKeys(record.arrival, record.departure);
+  let status = 'unavailable';
+  let blockedNights = [];
+  let checkError = 'unavailable';
+  try {
+    const handler = options.availabilityHandler ?? handleAvailability;
+    const query = new URLSearchParams({ start: record.arrival, end: record.departure });
+    const result = await handler({ query }, context, options.availability ?? {});
+    if (result.status === 200 && Array.isArray(result.jsonBody?.blocked)) {
+      blockedNights = nights.filter((night) => result.jsonBody.blocked.includes(night));
+      status = blockedNights.length === 0
+        ? 'available'
+        : (blockedNights.length === nights.length ? 'blocked' : 'partial');
+      checkError = '';
+    }
+  } catch {
+    status = 'unavailable';
+    checkError = 'exception';
+  }
+
+  const checkedAt = now.toISOString();
+  const actor = actorOf(principal);
+  record.airbnbVerification = {
+    status,
+    blockedNights,
+    checkedAt,
+    checkedBy: actor.name,
+    fingerprint: stayFingerprint(record),
+    source: 'ical',
+    error: checkError
+  };
+  // Endast en lyckad läsning som visar att alla nätter är blockerade får
+  // sätta det verifierade blockdatet. Okänd eller tillgänglig kalender får
+  // aldrig se ut som ett verifierat OK.
+  if (status === 'blocked') {
+    record.airbnbBlockedAt = checkedAt;
+    record.actionFlags = { ...(record.actionFlags ?? {}), airbnbBlocked: true };
+  } else {
+    record.airbnbBlockedAt = '';
+    record.actionFlags = { ...(record.actionFlags ?? {}), airbnbBlocked: false };
+  }
+  record.version = Number(record.version || 1) + 1;
+  record.updatedAt = checkedAt;
+  record.updatedBy = actor.name;
+
+  try {
+    const updated = await repo.updateRequest(record, { ifMatch: raw.etag });
+    await audit(repo, principal, 'WARNING_RECHECKED', record, {
+      fromStatus: record.statusCode,
+      toStatus: record.statusCode,
+      reason: cleanString(body.reason, 500),
+      changes: { warningId, status, blockedNights, checkedAt },
+      context
+    });
+    let after = null;
+    try { after = await repo.getBooking(reference, now); } catch { after = null; }
+    if (!after) after = normalizeBooking(record, { now });
+    const afterWarnings = deriveWarnings(after, { now, ...conflicts });
+    return {
+      status: 200,
+      jsonBody: {
+        reference,
+        warningId,
+        verification: record.airbnbVerification,
+        etag: updated.etag,
+        warnings: afterWarnings,
+        unresolved: afterWarnings.filter((warning) => warning.severity !== 'handled').map((warning) => warning.id)
+      }
+    };
+  } catch (cause) {
+    const mapped = normalizeRepoError(cause);
+    if (mapped) return mapped;
+    throw cause;
+  }
+}
+
 async function audit(repo, principal, action, record, details = {}) {
   const now = new Date();
   const actor = actorOf(principal);
@@ -476,7 +725,10 @@ async function createManualBooking(repo, principal, body, options = {}, context 
     airbnbOverrideReason: '',
     airbnbOverrideApprovedBy: '',
     airbnbOverrideApprovedAt: '',
+    airbnbOverrideFingerprint: '',
     airbnbBlockedNights: [],
+    airbnbVerification: null,
+    warningAcknowledgements: [],
     overlaps: []
   };
 
@@ -493,6 +745,7 @@ async function createManualBooking(repo, principal, body, options = {}, context 
         record.airbnbOverrideApprovedBy = actor.name;
         record.airbnbOverrideApprovedAt = now.toISOString();
         record.airbnbBlockedNights = confirmable.blockedNights;
+        record.airbnbOverrideFingerprint = stayFingerprint(record);
         overrideAudit = {
           reason: record.airbnbOverrideReason,
           blockedNights: confirmable.blockedNights
@@ -599,6 +852,7 @@ async function changeStatus(repo, principal, reference, action, body = {}, optio
       record.airbnbOverrideApprovedBy = actor.name;
       record.airbnbOverrideApprovedAt = now.toISOString();
       record.airbnbBlockedNights = confirmable.blockedNights;
+      record.airbnbOverrideFingerprint = stayFingerprint(record);
       overrideAudit = {
         reason: record.airbnbOverrideReason,
         blockedNights: confirmable.blockedNights
@@ -921,5 +1175,9 @@ module.exports = {
   assertConfirmable,
   lockCalendar,
   releaseCalendar,
+  warningContext,
+  enrichWarnings,
+  acknowledgeWarning,
+  recheckWarning,
   nightKeys
 };

@@ -31,7 +31,10 @@ const {
   updatePayment,
   updateAddons,
   removeBlock,
-  calendarRange
+  calendarRange,
+  enrichWarnings,
+  acknowledgeWarning,
+  recheckWarning
 } = require('./booking-service');
 const {
   DOCUMENT_KINDS,
@@ -400,6 +403,7 @@ async function handleApi(req, res, url, context) {
       sendJson(req, res, 404, { error: 'Bokningen hittades inte.' });
       return;
     }
+    await enrichWarnings(repository, booking, now);
     sendJson(req, res, 200, { booking });
     return;
   }
@@ -479,6 +483,40 @@ async function handleApi(req, res, url, context) {
       repository,
       principal,
       decodeURIComponent(paymentMatch[1]),
+      parsed.body,
+      serviceOptions(context),
+      { warn: context.warn }
+    );
+    sendJson(req, res, result.status, result.jsonBody);
+    return;
+  }
+
+  const acknowledgeMatch = /^\/api\/admin\/bookings\/([^/]+)\/warnings\/acknowledge$/.exec(pathname);
+  if (acknowledgeMatch && req.method === 'POST') {
+    if (!guardWrite(req, res, context)) return;
+    const parsed = await readBodyOrError(req, res);
+    if (!parsed) return;
+    const result = await acknowledgeWarning(
+      repository,
+      principal,
+      decodeURIComponent(acknowledgeMatch[1]),
+      parsed.body,
+      serviceOptions(context),
+      { warn: context.warn }
+    );
+    sendJson(req, res, result.status, result.jsonBody);
+    return;
+  }
+
+  const recheckMatch = /^\/api\/admin\/bookings\/([^/]+)\/warnings\/recheck$/.exec(pathname);
+  if (recheckMatch && req.method === 'POST') {
+    if (!guardWrite(req, res, context)) return;
+    const parsed = await readBodyOrError(req, res);
+    if (!parsed) return;
+    const result = await recheckWarning(
+      repository,
+      principal,
+      decodeURIComponent(recheckMatch[1]),
       parsed.body,
       serviceOptions(context),
       { warn: context.warn }
@@ -684,6 +722,7 @@ let calendarParserReady = false;
           return;
         }
         const history = await repository.listHistory(reference).catch(() => []);
+        await enrichWarnings(repository, booking, now);
         sendHtml(req, res, 200, renderBookingDetail({
           booking, principal, demo, csrfToken, writesEnabled, history
         }));

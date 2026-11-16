@@ -4,6 +4,8 @@
 // normaliserar befintliga bokningsposter, statusar, prissnapshot och
 // mejlstatus för visning. Den räknar aldrig om priser och skriver aldrig.
 
+const { deriveWarnings, applyWarnings } = require('./warnings');
+
 const STATUS_META = {
   PENDING: {
     code: 'PENDING',
@@ -242,33 +244,9 @@ function normalizeEmailStatus(record = {}, outbox = []) {
 }
 
 function deriveActionReasons(booking, now = new Date()) {
-  const reasons = [];
-  const today = todayKey(now);
-  const created = booking.createdAt ? new Date(booking.createdAt) : null;
-  const ageDays = created && Number.isFinite(created.getTime())
-    ? Math.floor((now.getTime() - created.getTime()) / 86400000)
-    : 0;
-
-  if (booking.statusCode === 'PENDING' && ageDays >= 2) {
-    reasons.push('Förfrågan väntar på beslut');
-  }
-  if (booking.actionFlags?.overlap || booking.overlaps?.length) {
-    reasons.push('Överlappar annan förfrågan eller bokning');
-  }
-  if (booking.actionFlags?.conflict) {
-    reasons.push('Kalenderkonflikt');
-  }
-  if (booking.mailStatus.host.needsReview || booking.mailStatus.guest.needsReview) {
-    reasons.push('Mejl kräver manuell kontroll');
-  }
-  if (booking.statusCode === 'CONFIRMED' && !booking.airbnbBlockedAt && !booking.actionFlags?.airbnbBlocked) {
-    reasons.push('Airbnb är inte blockerad');
-  }
-  if (booking.statusCode === 'CONFIRMED' && booking.paymentStatus === 'UNPAID' &&
-    booking.arrival >= today && booking.total > 0) {
-    reasons.push('Betalning saknas');
-  }
-  return [...new Set(reasons)];
+  return deriveWarnings(booking, { now })
+    .filter((warning) => warning.severity !== 'handled')
+    .map((warning) => warning.title);
 }
 
 function normalizeBooking(record = {}, options = {}) {
@@ -338,14 +316,41 @@ function normalizeBooking(record = {}, options = {}) {
     airbnbOverrideApprovedBy: String(record.airbnbOverrideApprovedBy ?? ''),
     airbnbOverrideApprovedAt: String(record.airbnbOverrideApprovedAt ?? ''),
     airbnbBlockedNights: Array.isArray(record.airbnbBlockedNights) ? record.airbnbBlockedNights : [],
+    airbnbOverrideFingerprint: String(record.airbnbOverrideFingerprint ?? ''),
+    airbnbVerification: record.airbnbVerification && typeof record.airbnbVerification === 'object'
+      ? {
+        status: String(record.airbnbVerification.status ?? ''),
+        blockedNights: Array.isArray(record.airbnbVerification.blockedNights)
+          ? record.airbnbVerification.blockedNights
+          : [],
+        checkedAt: String(record.airbnbVerification.checkedAt ?? ''),
+        checkedBy: String(record.airbnbVerification.checkedBy ?? ''),
+        fingerprint: String(record.airbnbVerification.fingerprint ?? ''),
+        source: String(record.airbnbVerification.source ?? ''),
+        error: String(record.airbnbVerification.error ?? '')
+      }
+      : null,
+    warningAcknowledgements: Array.isArray(record.warningAcknowledgements)
+      ? record.warningAcknowledgements
+        .filter((row) => row && typeof row === 'object')
+        .map((row) => ({
+          warningId: String(row.warningId ?? ''),
+          fingerprint: String(row.fingerprint ?? ''),
+          type: String(row.type ?? ''),
+          title: String(row.title ?? ''),
+          reason: String(row.reason ?? ''),
+          actorId: String(row.actorId ?? ''),
+          actorName: String(row.actorName ?? ''),
+          at: String(row.at ?? '')
+        }))
+      : [],
     overlaps: Array.isArray(record.overlaps) ? record.overlaps : [],
     actionFlags: record.actionFlags && typeof record.actionFlags === 'object' ? record.actionFlags : {},
     isDemo: record.isDemo === true || String(record.reference ?? '').startsWith('DEMO-')
   };
   booking.paymentLabel = PAYMENT_LABELS[booking.paymentStatus] ?? 'Okänd';
   booking.mailStatus = normalizeEmailStatus(record, options.outbox);
-  booking.actionReasons = deriveActionReasons(booking, now);
-  booking.hasAction = booking.actionReasons.length > 0;
+  applyWarnings(booking, { now });
   booking.searchText = [
     booking.reference,
     booking.guestName,

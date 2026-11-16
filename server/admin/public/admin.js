@@ -222,6 +222,49 @@
     });
   });
 
+  document.querySelectorAll('[data-warning-recheck]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      try {
+        await api(`/api/admin/bookings/${encodeURIComponent(button.dataset.reference)}/warnings/recheck`, {
+          body: {
+            warningId: button.dataset.warningRecheck,
+            expectedEtag: button.dataset.etag || undefined
+          }
+        });
+        window.location.reload();
+      } catch (error) {
+        showToast(errorText(error));
+        button.disabled = false;
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-warning-ack]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const reason = window.prompt('Kort motivering till varför varningen är hanterad:');
+      if (reason === null) return;
+      if (!reason.trim()) {
+        showToast('En motivering krävs.');
+        return;
+      }
+      button.disabled = true;
+      try {
+        await api(`/api/admin/bookings/${encodeURIComponent(button.dataset.reference)}/warnings/acknowledge`, {
+          body: {
+            warningId: button.dataset.warningAck,
+            reason: reason.trim(),
+            expectedEtag: button.dataset.etag || undefined
+          }
+        });
+        window.location.reload();
+      } catch (error) {
+        showToast(errorText(error));
+        button.disabled = false;
+      }
+    });
+  });
+
   function formValue(form, name) {
     const element = form.elements[name];
     return element ? element.value : '';

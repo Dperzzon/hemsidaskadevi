@@ -12,7 +12,6 @@ const {
   statusBadge,
   emailBadge,
   deliveryBadge,
-  actionChips,
   actionButton,
   historyList,
   pageHeader
@@ -93,6 +92,123 @@ function paymentOptions(current) {
   ).join('');
 }
 
+function warningButton(label, attribute, warning, booking, variant = 'secondary') {
+  return `<button type="button" class="btn btn-${escapeHtml(variant)} btn-small" ` +
+    `${attribute}="${escapeHtml(warning.id)}" ` +
+    `data-reference="${escapeHtml(booking.reference)}" ` +
+    `data-etag="${escapeHtml(booking.etag || '')}">${escapeHtml(label)}</button>`;
+}
+
+function warningActions(warning, booking, isOwner, writesEnabled) {
+  if (warning.severity === 'handled') {
+    return warning.recheckable && isOwner && writesEnabled
+      ? `<div class="warning-actions">${warningButton('Kontrollera igen', 'data-warning-recheck', warning, booking)}</div>`
+      : '';
+  }
+  const buttons = [];
+  if (warning.recheckable && isOwner && writesEnabled) {
+    buttons.push(warningButton('Kontrollera igen', 'data-warning-recheck', warning, booking));
+  } else {
+    buttons.push(`<a class="btn btn-secondary btn-small" href="/admin/bookings/${encodeURIComponent(booking.reference)}">Kontrollera igen</a>`);
+  }
+  let lock = '';
+  if (warning.dismissible) {
+    if (isOwner && writesEnabled) {
+      buttons.push(warningButton('Markera som hanterad', 'data-warning-ack', warning, booking, 'primary'));
+    } else {
+      lock = `<p class="warning-lock">${isOwner
+        ? 'Skrivfunktioner är inte aktiverade i denna miljö.'
+        : 'Endast Owner kan kontrollera och markera varningar som hanterade.'}</p>`;
+    }
+  }
+  return `<div class="warning-actions">${buttons.join('')}</div>${lock}`;
+}
+
+function warningCard(warning, booking, isOwner, writesEnabled) {
+  const handled = warning.severity === 'handled';
+  const details = [];
+  if (handled) {
+    if (warning.handledAt) {
+      details.push(`<p class="warning-meta">Hanterad av ${escapeHtml(warning.handledBy || 'Owner')} den ${escapeHtml(formatDateTime(warning.handledAt))}.</p>`);
+    }
+    if (warning.handledReason) {
+      details.push(`<p class="warning-reason"><strong>Motivering:</strong> ${escapeHtml(warning.handledReason)}</p>`);
+    }
+    if (Array.isArray(warning.details?.blockedNights) && warning.details.blockedNights.length) {
+      details.push(`<p class="warning-meta">Upptagna nätter: ${escapeHtml(warning.details.blockedNights.join(', '))}.</p>`);
+    }
+    if (warning.details?.caveat) {
+      details.push(`<p class="warning-caveat">${escapeHtml(warning.details.caveat)}</p>`);
+    }
+  }
+  return `<article class="warning-card warning-card-${escapeHtml(warning.severity)}" data-warning-id="${escapeHtml(warning.id)}">
+    <h3>${escapeHtml(warning.title)}</h3>
+    <p class="warning-what">${escapeHtml(warning.what)}</p>
+    <p class="warning-why"><strong>Varför:</strong> ${escapeHtml(warning.why)}</p>
+    ${handled
+      ? details.join('')
+      : `<p class="warning-recommendation"><strong>Rekommendation:</strong> ${escapeHtml(warning.recommendation)}</p>`}
+    ${warningActions(warning, booking, isOwner, writesEnabled)}
+  </article>`;
+}
+
+function warningSections(booking, isOwner, writesEnabled) {
+  const actionWarnings = booking.actionWarnings ?? [];
+  const verifyWarnings = booking.verifyWarnings ?? [];
+  const handledWarnings = booking.handledWarnings ?? [];
+  const sections = [];
+  if (actionWarnings.length) {
+    sections.push(`<section class="warning-banner warning-banner-action" aria-label="Kräver åtgärd">
+      <div class="warning-banner-head"><strong>Kräver åtgärd</strong><span>${actionWarnings.length} olösta problem</span></div>
+      ${actionWarnings.map((warning) => warningCard(warning, booking, isOwner, writesEnabled)).join('')}
+    </section>`);
+  }
+  if (verifyWarnings.length) {
+    sections.push(`<section class="warning-group warning-group-verify" aria-label="Behöver kontrolleras">
+      <div class="warning-group-head"><h2>Behöver kontrolleras</h2><span>${verifyWarnings.length}</span></div>
+      ${verifyWarnings.map((warning) => warningCard(warning, booking, isOwner, writesEnabled)).join('')}
+    </section>`);
+  }
+  if (handledWarnings.length) {
+    sections.push(`<section class="warning-group warning-group-handled" aria-label="Hanterade varningar">
+      <div class="warning-group-head"><h2>Hanterad</h2><span>${handledWarnings.length}</span></div>
+      ${handledWarnings.map((warning) => warningCard(warning, booking, isOwner, writesEnabled)).join('')}
+    </section>`);
+  }
+  return sections.join('');
+}
+
+function warningHistory(booking) {
+  const current = new Set((booking.handledWarnings ?? [])
+    .map((warning) => `${warning.id}|${warning.fingerprint}`));
+  const stale = (booking.warningAcknowledgements ?? [])
+    .filter((ack) => !current.has(`${ack.warningId}|${ack.fingerprint}`));
+  if (!stale.length) return '';
+  return `<details class="warning-group warning-group-handled warning-history">
+    <summary><strong>Tidigare hanterade varningar</strong> (${stale.length})</summary>
+    <ul class="warning-history-list">
+      ${stale.slice().reverse().map((ack) => `<li>
+        <strong>${escapeHtml(ack.title || ack.warningId)}</strong>
+        <span>${escapeHtml(ack.actorName || 'Owner')} · ${escapeHtml(formatDateTime(ack.at))}</span>
+        <p>${escapeHtml(ack.reason || 'Motivering saknas')}</p>
+        <p class="warning-caveat">Gäller inte längre eftersom bokningens uppgifter har ändrats.</p>
+      </li>`).join('')}
+    </ul>
+  </details>`;
+}
+
+function overridePanel(booking) {
+  if (!booking.airbnbOverride) return '';
+  const shownAsHandled = (booking.handledWarnings ?? []).some((warning) => warning.id === 'airbnb.override');
+  if (shownAsHandled) return '';
+  return `<div class="notice-banner">
+    <strong>Godkänt Airbnb-undantag.</strong> ${escapeHtml(booking.airbnbOverrideReason || 'Motivering saknas')} ·
+    Godkänd av ${escapeHtml(booking.airbnbOverrideApprovedBy || 'okänd')} ${escapeHtml(formatDateTime(booking.airbnbOverrideApprovedAt))}.
+    ${booking.airbnbBlockedNights?.length ? `Upptagna nätter: ${escapeHtml(booking.airbnbBlockedNights.join(', '))}.` : ''}
+    Undantaget är ett administrativt godkännande, inte ett bevis på att Airbnb är blockerat.
+  </div>`;
+}
+
 function documentActions(booking) {
   const reference = encodeURIComponent(booking.reference);
   const quoteHref = `/api/admin/bookings/${reference}/quote.pdf`;
@@ -153,12 +269,9 @@ function renderBookingDetail(options) {
       </div>
     </div>
 
-    ${booking.actionReasons.length ? `<div class="attention-banner"><strong>Kräver åtgärd</strong>${actionChips(booking)}</div>` : ''}
-    ${booking.airbnbOverride ? `<div class="notice-banner">
-      <strong>Airbnb-blockering åsidosatt.</strong> ${escapeHtml(booking.airbnbOverrideReason || 'Motivering saknas')} ·
-      Godkänd av ${escapeHtml(booking.airbnbOverrideApprovedBy || 'okänd')} ${formatDateTime(booking.airbnbOverrideApprovedAt)}.
-      ${booking.airbnbBlockedNights.length ? `Upptagna nätter: ${escapeHtml(booking.airbnbBlockedNights.join(', '))}.` : ''}
-    </div>` : ''}
+    ${warningSections(booking, isOwner, writesEnabled)}
+    ${overridePanel(booking)}
+    ${warningHistory(booking)}
 
     <div class="detail-layout">
       <div class="detail-main">

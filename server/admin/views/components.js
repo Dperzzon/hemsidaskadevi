@@ -22,9 +22,12 @@ function deliveryBadge(level) {
 }
 
 function actionChips(booking) {
-  if (!booking.actionReasons?.length) return '<span class="muted">Ingen åtgärd</span>';
-  return `<ul class="action-chips">${booking.actionReasons.map((reason) =>
-    `<li>${escapeHtml(reason)}</li>`).join('')}</ul>`;
+  const warnings = Array.isArray(booking.unresolvedWarnings) && booking.unresolvedWarnings.length
+    ? booking.unresolvedWarnings
+    : (booking.actionReasons ?? []).map((title) => ({ title, severity: 'action' }));
+  if (!warnings.length) return '<span class="muted">Ingen åtgärd</span>';
+  return `<ul class="action-chips">${warnings.map((warning) =>
+    `<li class="action-chip-${escapeHtml(warning.severity)}">${escapeHtml(warning.title)}</li>`).join('')}</ul>`;
 }
 
 function preparedButton(label, action, variant = 'secondary', note = '', requiresRole = '') {
@@ -59,6 +62,8 @@ function historyList(entries = []) {
     NOTE_ADDED: 'Anteckning tillagd',
     PAYMENT_UPDATED: 'Betalstatus uppdaterad',
     ADDONS_UPDATED: 'Tillval uppdaterade',
+    WARNING_ACKNOWLEDGED: 'Varning hanterad',
+    WARNING_RECHECKED: 'Varning kontrollerad igen',
     approve: 'Godkänd som preliminär',
     preliminary: 'Godkänd som preliminär',
     decline: 'Nekad',

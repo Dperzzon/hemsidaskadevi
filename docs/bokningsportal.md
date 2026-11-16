@@ -591,3 +591,45 @@ Lagringskontot har `allowSharedKeyAccess=false`, så live-testet kräver en
 dataplansroll på `bookingrequeststest`. Testet städar endast de egna raderna
 och vägrar alla andra tabeller/konton. I steg 8M kördes 26/26 kontroller live
 mot `bookingrequeststest`; den tillfälliga rollen togs bort efteråt.
+
+## 17. Administrativa varningar och hanterade undantag
+
+Bokningsdetaljen visar tre nivåer:
+
+- **Kräver åtgärd** för verkliga, olösta problem.
+- **Behöver kontrolleras** när uppgifterna inte kan verifieras.
+- **Hanterad** för varningar som Owner uttryckligen har godkänt eller kvitterat.
+
+Varje varning har en rekommendation. Owner kan **Kontrollera igen** och, när
+varningen är kvitteringsbar, **Markera som hanterad** med obligatorisk
+motivering. Staff kan läsa varningarna men får `403` på båda åtgärderna.
+
+Kvitteringar sparas på bokningen som `warningAcknowledgements` med vem, när,
+vilken varning och ett fingeravtryck av datum, status, källa och varningsdata.
+Ändras relevanta uppgifter slutar kvitteringen att gälla och varningen blir
+olöst igen. En kvittering ändrar aldrig bokningens status, datum, pris,
+betalning eller interna kalenderlås.
+
+Airbnb-kontrollen sparar `airbnbVerification`. Endast en lyckad läsning som
+visar att alla nätter är blockerade får sätta `airbnbBlockedAt`. Okänd eller
+tillgänglig kalender visas som okänd/tillgänglig, aldrig som verifierat OK.
+Ett godkänt Airbnb-undantag visas som **Hanterad** med godkännare, tid och
+motivering, men beskrivs uttryckligen som ett administrativt godkännande och
+inte som bevis på blockering. Ett nytt eller ändrat underlag ger en ny varning.
+
+Interna kalenderkonflikter, intern dubbelbokning, saknad intern kalenderlåsning,
+saknad betalning och väntande förfrågningar är inte kvitteringsbara. De måste
+åtgärdas i sak.
+
+API:
+
+```text
+POST /api/admin/bookings/:reference/warnings/recheck
+POST /api/admin/bookings/:reference/warnings/acknowledge
+```
+
+Båda kräver Owner, CSRF och ETag. Recheck är endast implementerad för
+Airbnb-varningar i detta steg. Auditloggen får `WARNING_RECHECKED` respektive
+`WARNING_ACKNOWLEDGED`.
+
+Fokuserade tester finns i `tests/unit/admin-warnings.test.js`.
