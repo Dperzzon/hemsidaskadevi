@@ -57,6 +57,9 @@ param enableStripePayments bool = false
 ])
 param stripeMode string = 'test'
 
+@description('Visar om Swish är aktiverat i den publika betalningssidan.')
+param stripeSwishEnabled bool = false
+
 @description('Publik bas-URL för gästens betalningssida.')
 param publicBaseUrl string = 'https://www.skadeviherrgard.com'
 
@@ -157,6 +160,10 @@ resource adminApp 'Microsoft.Web/sites@2024-11-01' = {
         {
           name: 'STRIPE_MODE'
           value: stripeMode
+        }
+        {
+          name: 'STRIPE_SWISH_ENABLED'
+          value: stripeSwishEnabled ? '1' : '0'
         }
         {
           name: 'PUBLIC_BASE_URL'

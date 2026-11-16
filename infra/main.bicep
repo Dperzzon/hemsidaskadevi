@@ -72,8 +72,11 @@ param bookingStorageAccountName string = ''
 @description('Aktiverar Stripe-webhooken på den publika appen. Standard false: endpointen svarar 503 och ingen betalning registreras.')
 param enableStripeWebhook bool = false
 
-@description('Aktiverar Swish-betalningar på gästens betalningssida. Standard false: endast fakturabegäran visas.')
-param enableSwishPayments bool = false
+@description('Aktiverar kortbetalningar på gästens betalningssida. Standard false: endast faktura.')
+param enableCardCheckout bool = false
+
+@description('Aktiverar Swish-betalningar på gästens betalningssida. Standard false: endast kort och faktura.')
+param enableSwishCheckout bool = false
 
 @description('SecretUri till Stripes hemliga nyckel i befintligt Key Vault. Ingen hemlighet anges i Git. Tomt = fail-closed.')
 param stripeSecretUri string = ''
@@ -118,7 +121,8 @@ module webapp 'modules/webapp.bicep' = {
     secretAdminPrincipalId: secretAdminPrincipalId
     bookingStorageAccountName: bookingStorageAccountName
     enableStripeWebhook: enableStripeWebhook
-    enableSwishPayments: enableSwishPayments
+    enableCardCheckout: enableCardCheckout
+    enableSwishCheckout: enableSwishCheckout
     stripeSecretUri: stripeSecretUri
     stripeWebhookSecretUri: stripeWebhookSecretUri
   }

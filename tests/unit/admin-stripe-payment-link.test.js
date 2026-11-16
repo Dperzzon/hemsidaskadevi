@@ -356,7 +356,7 @@ test('föråldrad ETag och ogiltig publik bas-URL spärrar länken', async () =>
   }
 });
 
-test('detaljvyn visar Swish-panel och fakturabegäranden', async () => {
+test('detaljvyn visar kortpanel, Swish-status och fakturabegäranden', async () => {
   const repository = createDemoRepository({ now: FIXED_NOW });
   const raw = await repository.getRawBooking('DEMO-2026-F6');
   const created = createInvoiceRequest(raw.record, {
@@ -381,7 +381,8 @@ test('detaljvyn visar Swish-panel och fakturabegäranden', async () => {
     const html = page.buffer.toString('utf8');
     assert.match(html, /Betalningssida/);
     assert.match(html, /data-stripe-payment-link/);
-    assert.match(html, /Swish är i Stripe testläge/);
+    assert.match(html, /Kortbetalning är i Stripe testläge/);
+    assert.match(html, /Swish är avstängt/);
     assert.match(html, /Fakturabegäranden/);
     assert.match(html, /Testbolaget AB/);
     assert.match(html, /data-admin-form="invoice-status"/);

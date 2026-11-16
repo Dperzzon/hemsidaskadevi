@@ -287,16 +287,46 @@ test('obetald, fel valuta och fel läge ignoreras', async () => {
 test('annan betalmetod registreras med granskningsvarning', async () => {
   const store = createMemoryStore(bookingRecord());
   const response = await callWebhook(store, event('checkout.session.completed', session({
-    payment_method_types: ['card']
+    payment_method_types: ['klarna']
   })));
   assert.equal(response.status, 200);
   assert.equal(store.current.payments.length, 1);
   assert.equal(store.current.payments[0].method, 'OTHER');
-  assert.match(store.current.paymentRequest.reviewRequired, /annan betalmetod än Swish/);
+  assert.match(store.current.paymentRequest.reviewRequired, /okänd eller otillåten betalmetod/);
   assert.match(
     store.outbox.find((row) => row.mailType === 'HOST_PAYMENT_RECEIVED').mailText,
     /VARNING/
   );
+});
+
+test('kortbetalning registreras som CARD och uppdaterar saldo och PDF-underlag', async () => {
+  const cardRequest = paymentRequest({
+    paymentMethod: 'card',
+    sessionId: 'cs_test_card1',
+    idempotencyKey: 'card-request-1'
+  });
+  const store = createMemoryStore(bookingRecord({
+    paymentRequests: [cardRequest],
+    paymentRequestValue: cardRequest
+  }));
+  const response = await callWebhook(store, event('checkout.session.completed', session({
+    id: 'cs_test_card1',
+    payment_method_types: ['card'],
+    payment_intent: 'pi_test_card1'
+  })));
+  assert.equal(response.status, 200);
+  assert.equal(response.jsonBody.received, true);
+  const record = store.current;
+  assert.equal(record.payments.length, 1);
+  assert.equal(record.payments[0].method, 'CARD');
+  assert.equal(record.payments[0].methodLabel, 'Kort');
+  assert.equal(record.payments[0].stripePaymentIntentId, 'pi_test_card1');
+  assert.equal(record.paymentStatus, 'PAID');
+  assert.equal(record.amountPaid, 20000);
+  assert.equal(record.balance, 0);
+  assert.equal(record.paymentRequest.status, 'PAID');
+  assert.equal(record.paymentRequest.reviewRequired, '');
+  assert.equal(store.history[0].action, 'CARD_PAYMENT_RECEIVED');
 });
 
 test('utgången Checkout-session markerar betalningsbegäran som utgången', async () => {

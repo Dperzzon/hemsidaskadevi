@@ -29,8 +29,8 @@ class StripeSignatureError extends Error {
 function stripeKeyMode(secretKey) {
   if (typeof secretKey !== 'string') return '';
   const key = secretKey.trim();
-  if (key.startsWith('sk_test_') || key.startsWith('rk_test_')) return 'test';
-  if (key.startsWith('sk_live_') || key.startsWith('rk_live_')) return 'live';
+  if (key.startsWith('sk_test_') || key.startsWith('rk_test_') || key.startsWith('rkcs_test_')) return 'test';
+  if (key.startsWith('sk_live_') || key.startsWith('rk_live_') || key.startsWith('rkcs_live_')) return 'live';
   return '';
 }
 
@@ -76,6 +76,8 @@ function createStripeClient(options = {}) {
   const fetchImpl = options.fetchImpl ?? fetch;
   const apiBase = options.apiBase ?? DEFAULT_API_BASE;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const cardEnabled = options.cardEnabled ?? process.env.STRIPE_CARD_ENABLED !== '0';
+  const swishEnabled = options.swishEnabled ?? process.env.STRIPE_SWISH_ENABLED === '1';
 
   async function request(method, pathname, params, requestOptions = {}) {
     const url = new URL(pathname, apiBase);
@@ -129,6 +131,8 @@ function createStripeClient(options = {}) {
 
   return {
     mode,
+    cardEnabled,
+    swishEnabled,
     async createCheckoutSession(input) {
       const amountOre = Number(input.amountOre);
       if (!Number.isSafeInteger(amountOre) || amountOre <= 0) {
@@ -136,11 +140,23 @@ function createStripeClient(options = {}) {
       }
       const currency = String(input.currency ?? 'sek').toLowerCase();
       if (currency !== 'sek') {
-        throw new StripeError(400, 'STRIPE_CURRENCY_INVALID', 'Swish kräver valutan SEK.');
+        throw new StripeError(400, 'STRIPE_CURRENCY_INVALID', 'Betalningen kräver valutan SEK.');
       }
-      const paymentMethods = Array.isArray(input.paymentMethods) ? input.paymentMethods : ['swish'];
-      if (paymentMethods.length !== 1 || paymentMethods[0] !== 'swish') {
-        throw new StripeError(400, 'STRIPE_PAYMENT_METHOD_INVALID', 'Endast Swish är tillåtet.');
+      const requestedMethods = Array.isArray(input.paymentMethods) ? input.paymentMethods : ['card'];
+      const paymentMethods = [...new Set(requestedMethods.map((method) => String(method).toLowerCase()))];
+      if (!paymentMethods.length) {
+        throw new StripeError(400, 'STRIPE_PAYMENT_METHOD_INVALID', 'Minst en betalmetod krävs.');
+      }
+      for (const method of paymentMethods) {
+        if (method !== 'card' && method !== 'swish') {
+          throw new StripeError(400, 'STRIPE_PAYMENT_METHOD_INVALID', 'Betalmetoden är inte tillåten.');
+        }
+        if (method === 'card' && !cardEnabled) {
+          throw new StripeError(400, 'STRIPE_CARD_DISABLED', 'Kortbetalningar är avstängda.');
+        }
+        if (method === 'swish' && !swishEnabled) {
+          throw new StripeError(400, 'STRIPE_SWISH_DISABLED', 'Swish är avstängt.');
+        }
       }
       const reference = String(input.reference ?? '').trim();
       if (!reference) {
@@ -150,10 +166,11 @@ function createStripeClient(options = {}) {
       const cancelUrl = assertHttpsUrl(input.cancelUrl, 'cancel_url');
       const expiresAt = Number(input.expiresAt ?? Math.floor(Date.now() / 1000) + 86400);
       const metadata = input.metadata && typeof input.metadata === 'object' ? input.metadata : {};
+      const paymentMethodLabel = paymentMethods.join(',');
       const params = [
         ['mode', 'payment'],
         ['locale', 'sv'],
-        ['allowed_payment_method_types[0]', 'swish'],
+        ...paymentMethods.map((method, index) => [`allowed_payment_method_types[${index}]`, method]),
         ['line_items[0][quantity]', '1'],
         ['line_items[0][price_data][currency]', currency],
         ['line_items[0][price_data][unit_amount]', String(amountOre)],
@@ -164,9 +181,9 @@ function createStripeClient(options = {}) {
         ['expires_at', String(expiresAt)],
         ['metadata[reference]', reference.slice(0, 500)],
         ['metadata[amountOre]', String(amountOre)],
-        ['metadata[paymentMethod]', 'swish'],
+        ['metadata[paymentMethod]', paymentMethodLabel],
         ['payment_intent_data[metadata][reference]', reference.slice(0, 500)],
-        ['payment_intent_data[metadata][paymentMethod]', 'swish']
+        ['payment_intent_data[metadata][paymentMethod]', paymentMethodLabel]
       ];
       if (input.customerEmail) params.push(['customer_email', String(input.customerEmail).slice(0, 320)]);
       if (input.description) {

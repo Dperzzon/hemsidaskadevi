@@ -634,23 +634,26 @@ Airbnb-varningar i detta steg. Auditloggen får `WARNING_RECHECKED` respektive
 
 Fokuserade tester finns i `tests/unit/admin-warnings.test.js`.
 
-## 18. Swish och faktura – Owner bekräftar först, gästen betalar sedan
+## 18. Kort, Swish (avstängt) och faktura – Owner bekräftar först
 
-Betalningsflödet följer affärsmodell A och erbjuder endast Swish eller faktura:
+Betalningsflödet följer affärsmodell A och erbjuder just nu kort eller faktura:
 
 1. Gästen skickar en bokningsförfrågan.
 2. Owner godkänner och bekräftar bokningen. Först då finns giltig intern
    kalenderlåsning.
 3. Owner skapar en personlig betalningssida från bokningsdetaljen. Länken kan
    kopieras eller skickas via utkorgen. En ny länk ogiltiggör den gamla.
-4. Gästen öppnar `/betala/<token>` och väljer **Betala med Swish** eller
+4. Gästen öppnar `/betala/<token>` och väljer **Betala med kort** eller
    **Begär faktura**.
-5. Swish startar Stripe Checkout med endast `swish` och valutan `sek`.
-   Kort och Klarna kan inte visas.
-6. Stripes signerade webhook registrerar betalningen som `SWISH` i
+5. Kort startar Stripe Checkout med dynamiska betalmetoder filtrerade till
+   `card` och valutan `sek`. Swish, Klarna och banköverföring kan inte visas.
+6. Stripes signerade webhook registrerar betalningen som `CARD` i
    betalningsliggaren. Bokningens status ändras aldrig automatiskt.
 7. Fakturabegäran sparas som `Begärd` och hanteras manuellt av Owner. Den
    markerar aldrig bokningen som betald.
+
+Swish finns kvar bakom `STRIPE_SWISH_ENABLED=0` och kan aktiveras senare när
+Stripe har aktiverat metoden för kontot.
 
 Endast `CONFIRMED` med giltig kalenderlåsning får en betalningssida.
 `PRELIMINARY` och `PENDING` nekas. Avbokning, nekande eller prisändring
@@ -670,7 +673,8 @@ Publik betalningssida:
 
 ```text
 GET  /betala/:token
-POST /api/payments/:token/swish
+POST /api/payments/:token/card
+POST /api/payments/:token/swish            # endast med Swish-flaggan
 POST /api/payments/:token/invoice-request
 POST /api/stripe/webhook
 ```
@@ -683,13 +687,15 @@ session.
 Betalningar är inaktiverade som standard i produktion:
 
 ```text
-STRIPE_ENABLED=0            # admin: skapa betalningssidor; publik app: Swish
+STRIPE_ENABLED=0            # master för betalningssidor och digital betalning
+STRIPE_CARD_ENABLED=1       # kort när master är på
+STRIPE_SWISH_ENABLED=0      # Swish avstängt
 STRIPE_WEBHOOK_ENABLED=0    # publik app: ta emot webhooks
 STRIPE_ALLOW_LIVE=0         # blockerar sk_live_/rk_live_ utan godkännande
 ```
 
-Se `docs/stripe-betalning.md` för testläge, Swish-inställningar, fakturastatus,
-aktivering och säkerhetsregler. Fokuserade tester finns i
+Se `docs/stripe-betalning.md` för testläge, kort/Swish-inställningar,
+fakturastatus, aktivering och säkerhetsregler. Fokuserade tester finns i
 `tests/unit/stripe.test.js`, `tests/unit/stripe-webhook.test.js`,
 `tests/unit/payment-page.test.js` och
 `tests/unit/admin-stripe-payment-link.test.js`.

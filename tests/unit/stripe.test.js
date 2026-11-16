@@ -23,6 +23,7 @@ function fakeResponse(payload, status = 200) {
 test('Stripe-nyckelns läge härleds och live blockeras utan uttryckligt godkännande', () => {
   assert.equal(stripeKeyMode('sk_test_123'), 'test');
   assert.equal(stripeKeyMode('rk_test_123'), 'test');
+  assert.equal(stripeKeyMode('rkcs_test_123'), 'test');
   assert.equal(stripeKeyMode('sk_live_123'), 'live');
   assert.equal(stripeKeyMode('rk_live_123'), 'live');
   assert.equal(stripeKeyMode('pk_test_123'), '');
@@ -73,13 +74,13 @@ test('Checkout-session skickas med serverbelopp, metadata och idempotensnyckel',
   assert.equal(calls[0].init.headers['Idempotency-Key'], 'idem-123');
   const body = calls[0].init.body;
   assert.match(body, /mode=payment/);
-  assert.match(body, /allowed_payment_method_types%5B0%5D=swish/);
+  assert.match(body, /allowed_payment_method_types%5B0%5D=card/);
   assert.doesNotMatch(body, /(?:^|&)payment_method_types%5B0%5D/);
   assert.match(body, /unit_amount%5D=250000/);
   assert.match(body, /currency%5D=sek/);
   assert.match(body, /client_reference_id=SK-2026-TEST01/);
   assert.match(body, /metadata%5Breference%5D=SK-2026-TEST01/);
-  assert.match(body, /metadata%5BpaymentMethod%5D=swish/);
+  assert.match(body, /metadata%5BpaymentMethod%5D=card/);
   assert.match(body, /customer_email=gast%40example.se/);
 });
 
@@ -110,24 +111,66 @@ test('Checkout-session kräver HTTPS och ett positivt heltalsbelopp', async () =
     () => client.createCheckoutSession({
       amountOre: 100,
       currency: 'sek',
-      paymentMethods: ['card'],
+      paymentMethods: ['klarna'],
       reference: 'SK-2026-TEST',
       successUrl: 'https://example.com/ok',
       cancelUrl: 'https://example.com/cancel'
     }),
-    /Endast Swish är tillåtet/
+    /Betalmetoden är inte tillåten/
   );
   await assert.rejects(
     () => client.createCheckoutSession({
       amountOre: 100,
-      currency: 'eur',
+      currency: 'sek',
       paymentMethods: ['swish'],
       reference: 'SK-2026-TEST',
       successUrl: 'https://example.com/ok',
       cancelUrl: 'https://example.com/cancel'
     }),
-    /Swish kräver valutan SEK/
+    /Swish är avstängt/
   );
+  await assert.rejects(
+    () => client.createCheckoutSession({
+      amountOre: 100,
+      currency: 'eur',
+      paymentMethods: ['card'],
+      reference: 'SK-2026-TEST',
+      successUrl: 'https://example.com/ok',
+      cancelUrl: 'https://example.com/cancel'
+    }),
+    /Betalningen kräver valutan SEK/
+  );
+});
+
+test('Swish kan aktiveras med funktionsflaggan och skickas då som tillåten metod', async () => {
+  const calls = [];
+  const client = createStripeClient({
+    secretKey: 'sk_test_123',
+    swishEnabled: true,
+    fetchImpl: async (url, init) => {
+      calls.push({ url: String(url), init });
+      return fakeResponse({
+        id: 'cs_test_swish',
+        url: 'https://checkout.stripe.com/c/pay/cs_test_swish',
+        amount_total: 100,
+        currency: 'sek',
+        mode: 'payment',
+        payment_method_types: ['swish'],
+        livemode: false,
+        expires_at: 1800000000
+      });
+    }
+  });
+  const session = await client.createCheckoutSession({
+    amountOre: 100,
+    currency: 'sek',
+    paymentMethods: ['swish'],
+    reference: 'SK-2026-SWISH',
+    successUrl: 'https://example.com/ok',
+    cancelUrl: 'https://example.com/cancel'
+  });
+  assert.equal(session.id, 'cs_test_swish');
+  assert.match(calls[0].init.body, /allowed_payment_method_types%5B0%5D=swish/);
 });
 
 test('Stripe-signaturen verifieras med HMAC, tidsfönster och flera v1-värden', () => {

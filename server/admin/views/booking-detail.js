@@ -304,7 +304,7 @@ function paymentHistory(booking, isOwner, writesEnabled) {
   return `<ul class="payment-history">${rows.join('')}</ul>`;
 }
 
-function stripePaymentSection(booking, isOwner, writesEnabled, stripeEnabled, stripeMode) {
+function stripePaymentSection(booking, isOwner, writesEnabled, stripeEnabled, stripeMode, swishEnabled) {
   const link = booking.paymentLink ?? { status: 'NONE', statusLabel: 'Ingen länk' };
   const remainingOre = Number(booking.remainingOre ?? 0);
   const confirmed = booking.statusCode === 'CONFIRMED';
@@ -335,15 +335,19 @@ function stripePaymentSection(booking, isOwner, writesEnabled, stripeEnabled, st
     notice = '<p class="notice">Bokningen är fullbetald. Ingen ny betalningslänk behövs.</p>';
   }
   const modeNote = stripeEnabled && stripeMode === 'test'
-    ? '<p class="price-note">Swish är i Stripe testläge. Inga riktiga betalningar genomförs.</p>'
+    ? '<p class="price-note">Kortbetalning är i Stripe testläge. Inga riktiga betalningar genomförs.</p>'
     : stripeEnabled && stripeMode === 'live'
-      ? '<p class="inline-warning">Swish är i live-läge. Betalningar kan dras på riktigt.</p>'
+      ? '<p class="inline-warning">Kortbetalning är i live-läge. Betalningar kan dras på riktigt.</p>'
       : '';
-  return `<div class="panel-heading payment-history-heading"><div><p class="eyebrow">Swish</p><h3>Betalningssida</h3></div></div>
+  const swishNote = swishEnabled
+    ? '<p class="price-note">Swish är aktiverat som kompletterande betalmetod.</p>'
+    : '<p class="price-note">Swish är avstängt. Det kan aktiveras senare med STRIPE_SWISH_ENABLED=1.</p>';
+  return `<div class="panel-heading payment-history-heading"><div><p class="eyebrow">Kort</p><h3>Betalningssida</h3></div></div>
     ${linkBlock}
     ${notice}
     ${(createButton || revokeButton) ? `<div class="button-row">${createButton}${revokeButton}</div>` : ''}
-    ${modeNote}`;
+    ${modeNote}
+    ${swishNote}`;
 }
 
 function invoiceRequestCard(booking, request, isOwner, writesEnabled) {
@@ -391,7 +395,7 @@ function invoicePanel(booking, isOwner, writesEnabled) {
   </section>`;
 }
 
-function paymentPanel(booking, isOwner, writesEnabled, today, stripeEnabled, stripeMode) {
+function paymentPanel(booking, isOwner, writesEnabled, today, stripeEnabled, stripeMode, swishEnabled) {
   const totalOre = Number(booking.totalOre ?? Math.round(Number(booking.total || 0) * 100));
   const paidOre = Number(booking.amountPaidOre ?? Math.round(Number(booking.amountPaid || 0) * 100));
   const remainingOre = Number(booking.remainingOre ?? (totalOre - paidOre));
@@ -423,14 +427,14 @@ function paymentPanel(booking, isOwner, writesEnabled, today, stripeEnabled, str
       <div class="price-row"><span>Betalstatus</span><strong>${escapeHtml(booking.paymentLabel || PAYMENT_LABELS[booking.paymentStatus] || 'Okänd')}</strong></div>
     </div>
     ${form}
-    ${stripePaymentSection(booking, isOwner, writesEnabled, stripeEnabled, stripeMode)}
+    ${stripePaymentSection(booking, isOwner, writesEnabled, stripeEnabled, stripeMode, swishEnabled)}
     <div class="panel-heading payment-history-heading"><div><p class="eyebrow">Historik</p><h3>Betalningshistorik</h3></div></div>
     ${paymentHistory(booking, isOwner, writesEnabled)}
   </section>`;
 }
 
 function renderBookingDetail(options) {
-  const { booking, principal, demo, csrfToken, writesEnabled, history = [], today, stripeEnabled = false, stripeMode = 'disabled' } = options;
+  const { booking, principal, demo, csrfToken, writesEnabled, history = [], today, stripeEnabled = false, stripeMode = 'disabled', stripeSwishEnabled = false } = options;
   const isOwner = principal.roles?.includes('Owner');
   const content = `
     <div class="detail-header">
@@ -530,7 +534,7 @@ function renderBookingDetail(options) {
             : '<p class="notice">Endast Owner kan ändra status, pris, betalning och blockeringar i denna version.</p>'}
         </section>
 
-        ${booking.isBlock ? '' : paymentPanel(booking, isOwner, writesEnabled, today, stripeEnabled, stripeMode)}
+        ${booking.isBlock ? '' : paymentPanel(booking, isOwner, writesEnabled, today, stripeEnabled, stripeMode, stripeSwishEnabled)}
 
         ${booking.isBlock ? '' : invoicePanel(booking, isOwner, writesEnabled)}
 

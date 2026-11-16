@@ -96,7 +96,8 @@ async function appendAudit(repo, principal, action, record, details = {}, contex
   }
 }
 
-function buildPaymentLinkEmail(record, url, amountOre, expiresAt) {
+function buildPaymentLinkEmail(record, url, amountOre, expiresAt, options = {}) {
+  const methods = options.swishEnabled ? 'kort eller Swish' : 'kort';
   const lines = [
     `Referens: ${record.reference}`,
     `Belopp: ${formatOre(amountOre)}`,
@@ -104,8 +105,8 @@ function buildPaymentLinkEmail(record, url, amountOre, expiresAt) {
     expiresAt
       ? `Länken gäller till: ${new Date(expiresAt).toLocaleString('sv-SE', { timeZone: 'Europe/Stockholm' })}`
       : '',
-    'På sidan kan du betala med Swish eller begära faktura.',
-    'Skadevi Herrgård hanterar aldrig dina bank- eller kortuppgifter.'
+    `På sidan kan du betala med ${methods} eller begära faktura.`,
+    'Skadevi Herrgård hanterar aldrig dina kortuppgifter.'
   ].filter(Boolean);
   return {
     mailType: 'GUEST_PAYMENT_LINK',
@@ -120,7 +121,7 @@ function buildPaymentLinkEmail(record, url, amountOre, expiresAt) {
 
 async function queuePaymentLink(repo, record, url, amountOre, expiresAt, options, context) {
   if (options.outboxEnabled !== true) return false;
-  const notification = buildPaymentLinkEmail(record, url, amountOre, expiresAt);
+  const notification = buildPaymentLinkEmail(record, url, amountOre, expiresAt, options);
   try {
     await repo.saveOutbox({
       partition: 'outbox',

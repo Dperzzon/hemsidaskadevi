@@ -44,7 +44,7 @@ const stripeMock = http.createServer(async (req, res) => {
     const paymentMethod = params.get('allowed_payment_method_types[0]');
     assert(Number.isSafeInteger(amount) && amount > 0, 'Mock: ogiltigt belopp');
     assert(reference, 'Mock: referens saknas');
-    assert(paymentMethod === 'swish', `Mock: oväntad betalmetod ${paymentMethod}`);
+    assert(paymentMethod === 'card', `Mock: oväntad betalmetod ${paymentMethod}`);
     const id = `cs_test_local_${sessions.size + 1}`;
     const session = {
       id,
@@ -54,7 +54,7 @@ const stripeMock = http.createServer(async (req, res) => {
       status: 'open',
       amount_total: amount,
       currency: params.get('line_items[0][price_data][currency]') ?? 'sek',
-      payment_method_types: ['swish'],
+      payment_method_types: ['card'],
       livemode: false,
       payment_intent: `pi_test_local_${sessions.size + 1}`,
       client_reference_id: reference,
@@ -184,7 +184,7 @@ async function createBooking(csrf, email, dates = { arrival: '2027-04-10', depar
       addons: { slutstad: false, lakan: false, linenCount: 0, ved: false, tidigIncheckning: false, senUtcheckning: false },
       paymentStatus: 'UNPAID',
       amountPaid: 0,
-      latestNote: 'Swish testläge'
+      latestNote: 'Kort testläge'
     })
   });
   const booking = await response.json();
@@ -214,7 +214,7 @@ try {
   const { csrfToken } = await sessionResponse.json();
   assert(csrfToken, 'CSRF-token saknas');
 
-  const reference = await createBooking(csrfToken, 'swish-test@example.se');
+  const reference = await createBooking(csrfToken, 'kort-test@example.se');
   const link = await createPaymentLink(csrfToken, reference);
   const token = link.paymentLink.url.split('/betala/')[1];
   assert(token && token.length === 43, 'Token har fel format');
@@ -222,24 +222,25 @@ try {
   const page = await fetch(`${publicBase}/betala/${token}`);
   const pageHtml = await page.text();
   assert(page.status === 200, `Betalningssida misslyckades: ${page.status}`);
-  assert(pageHtml.includes('Betala med Swish'), 'Swish-knapp saknas');
+  assert(pageHtml.includes('Betala med kort'), 'Kortknapp saknas');
+  assert(!pageHtml.includes('Betala med Swish'), 'Swish ska vara avstängt');
   assert(pageHtml.includes('Begär faktura'), 'Fakturaval saknas');
-  assert(!/Klarna|kortbetalning/i.test(pageHtml), 'Otillåtet betalningssätt visas');
+  assert(!/Klarna/i.test(pageHtml), 'Otillåtet betalningssätt visas');
 
-  const swish = await fetch(`${publicBase}/api/payments/${token}/swish`, {
+  const card = await fetch(`${publicBase}/api/payments/${token}/card`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: '',
     redirect: 'manual'
   });
-  assert(swish.status === 303, `Swish-start misslyckades: ${swish.status}`);
-  const checkoutUrl = swish.headers.get('location');
+  assert(card.status === 303, `Kortstart misslyckades: ${card.status}`);
+  const checkoutUrl = card.headers.get('location');
   assert(checkoutUrl?.includes('cs_test_local_'), 'Mockad Checkout-URL saknas');
 
   const sessionId = checkoutUrl.split('/').pop();
   const checkoutSession = sessions.get(sessionId);
   assert(checkoutSession, 'Mockad Stripe-session saknas');
-  assert(checkoutSession.payment_method_types[0] === 'swish', 'Sessionen är inte Swish-only');
+  assert(checkoutSession.payment_method_types[0] === 'card', 'Sessionen är inte kort-only');
 
   const event = {
     id: 'evt_local_paid_1',
@@ -268,7 +269,7 @@ try {
   const stored = await repository.getRawBooking(reference);
   assert(stored.record.paymentStatus === 'PAID', 'Betalstatus uppdaterades inte');
   assert(stored.record.payments.length === 1, 'Betalningspost saknas');
-  assert(stored.record.payments[0].method === 'SWISH', 'Betalningen registrerades inte som SWISH');
+  assert(stored.record.payments[0].method === 'CARD', 'Betalningen registrerades inte som CARD');
   assert(stored.record.payments[0].stripeSessionId === sessionId, 'Fel Stripe-session sparades');
   assert(stored.record.paymentRequest.status === 'PAID', 'Betalningsbegäran markerades inte betald');
 
@@ -310,7 +311,7 @@ try {
   assert(invoiceStored.record.invoiceRequests[0].status === 'REQUESTED', 'Fel fakturastatus');
   assert(invoiceStored.record.paymentStatus === 'UNPAID', 'Faktura markerade betalning');
 
-  console.log('Stripe Swish + faktura testläge E2E OK');
+  console.log('Stripe kort + faktura testläge E2E OK');
   console.log(`  bokning: ${reference}`);
   console.log(`  checkout-session: ${sessionId}`);
   console.log(`  betalmetod: ${stored.record.payments[0].method}`);

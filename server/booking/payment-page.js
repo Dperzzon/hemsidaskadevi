@@ -145,14 +145,20 @@ function summaryBlock(record, summary) {
   </dl>`;
 }
 
+function cardBox(token, options) {
+  if (!options.stripeEnabled || options.cardEnabled === false) return '';
+  return `<div class="payment-box">
+    <h2>Betala med kort</h2>
+    <p>Betalningen genomförs i Stripes säkra kortbetalning. Skadevi ser aldrig dina kortuppgifter.</p>
+    <form method="post" action="/api/payments/${encodeURIComponent(token)}/card">
+      <button class="btn btn-primary" type="submit">Betala med kort</button>
+    </form>
+    ${options.cardError ? `<p class="payment-error">${escapeHtml(options.cardError)}</p>` : ''}
+  </div>`;
+}
+
 function swishBox(token, options) {
-  if (!options.stripeEnabled) {
-    return `<div class="payment-box">
-      <h2>Swish</h2>
-      <p class="payment-error">Swish är inte tillgängligt just nu. Inget annat betalningssätt aktiveras automatiskt.</p>
-      <p>Du kan i stället begära faktura nedan.</p>
-    </div>`;
-  }
+  if (!options.stripeEnabled || options.swishEnabled !== true) return '';
   return `<div class="payment-box">
     <h2>Betala med Swish</h2>
     <p>Betalningen genomförs i Stripes säkra betalningsflöde och godkänns i Swish-appen. Skadevi ser aldrig dina bankuppgifter.</p>
@@ -216,21 +222,26 @@ function invoiceBox(record, token, options) {
 function renderPaymentPage(record, token, summary, options = {}, status = 200) {
   const notices = [];
   if (options.notice) notices.push(options.notice);
-  if (options.query?.swish === 'success') {
+  const paymentStatus = options.query?.payment ?? options.query?.swish ?? options.query?.card;
+  if (paymentStatus === 'success') {
     notices.push('Betalningen genomfördes. Vi registrerar den så snart Stripe bekräftar den.');
-  } else if (options.query?.swish === 'cancelled') {
+  } else if (paymentStatus === 'cancelled') {
     notices.push('Betalningen avbröts. Inget belopp har dragits.');
   } else if (options.query?.invoice === 'requested') {
     notices.push('Din fakturabegäran är registrerad.');
   }
   const paid = summary.remainingOre <= 0;
+  const card = cardBox(token, options);
+  const swish = swishBox(token, options);
+  const digitalBoxes = `${card}${swish}`;
+  const noDigital = !card && !swish;
   return pageResponse(layout('Betala din bokning', `<h1>Betala din bokning</h1>
-    <p>Bokningen är bekräftad. Här kan du betala med Swish eller begära faktura.</p>
+    <p>Bokningen är bekräftad. Här kan du betala med kort eller begära faktura.</p>
     ${notices.map((notice) => `<p class="payment-error">${escapeHtml(notice)}</p>`).join('')}
     ${summaryBlock(record, summary)}
     ${paid
       ? '<div class="payment-box"><h2>Bokningen är betald</h2><p>Det finns inget utestående belopp.</p></div>'
-      : `${swishBox(token, options)}${invoiceBox(record, token, options)}`}
+      : `${noDigital ? '<div class="payment-box"><h2>Digital betalning</h2><p class="payment-error">Digital betalning är inte tillgänglig just nu. Du kan begära faktura nedan.</p></div>' : digitalBoxes}${invoiceBox(record, token, options)}`}
     ${contactBlock()}
   `), status);
 }
@@ -296,6 +307,8 @@ async function handlePaymentPage(request, context = {}, options = {}) {
     if (!result.ok) return availabilityError(result);
     return renderPaymentPage(result.record, token, result.summary, {
       stripeEnabled: options.stripeEnabled === true,
+      cardEnabled: options.cardEnabled !== false,
+      swishEnabled: options.swishEnabled === true,
       query: request?.query ?? {},
       invoiceError: options.invoiceError,
       invoiceErrors: options.invoiceErrors,
@@ -308,25 +321,37 @@ async function handlePaymentPage(request, context = {}, options = {}) {
   }
 }
 
-function stripeUnavailableMessage(error) {
+function paymentUnavailableMessage(error, method) {
   const code = String(error?.code ?? '').toLowerCase();
   const message = String(error?.message ?? '').toLowerCase();
-  if (code.includes('payment_method_not_available') ||
-      code.includes('payment_method') ||
-      message.includes('swish') ||
-      message.includes('payment method')) {
-    return 'Swish är inte aktiverat på Stripe-kontot. Kontakta Skadevi Herrgård så hjälper vi dig.';
+  const label = method === 'card' ? 'Kortbetalningen' : 'Swish';
+  const unavailable = code.includes('payment_method_not_available') ||
+    code.includes('payment_method') ||
+    message.includes('payment method') ||
+    message.includes(method);
+  if (unavailable) {
+    return method === 'card'
+      ? 'Kortbetalningen är inte aktiverad på Stripe-kontot. Kontakta Skadevi Herrgård så hjälper vi dig.'
+      : 'Swish är inte aktiverat på Stripe-kontot. Kontakta Skadevi Herrgård så hjälper vi dig.';
   }
-  return 'Swish kunde inte startas just nu. Försök igen om en stund eller begär faktura.';
+  return `${label} kunde inte startas just nu. Försök igen om en stund eller begär faktura.`;
 }
 
-async function startSwish(result, token, options, context) {
+async function startCheckout(result, token, method, options, context) {
   const now = options.now ?? new Date();
   const record = result.record;
-  if (options.stripeEnabled !== true) {
+  const methodLabel = method === 'card' ? 'Kort' : 'Swish';
+  const errorKey = method === 'card' ? 'cardError' : 'swishError';
+  const methodEnabled = method === 'card'
+    ? options.cardEnabled !== false
+    : options.swishEnabled === true;
+  if (options.stripeEnabled !== true || !methodEnabled) {
     return renderPaymentPage(record, token, result.summary, {
-      stripeEnabled: false,
-      swishError: 'Swish är inte tillgängligt just nu. Du kan begära faktura i stället.'
+      stripeEnabled: options.stripeEnabled === true,
+      cardEnabled: options.cardEnabled !== false,
+      swishEnabled: options.swishEnabled === true,
+      [errorKey]: `${methodLabel} är inte tillgängligt just nu. Du kan begära faktura i stället.`,
+      notice: `${methodLabel} är inte tillgängligt just nu. Du kan begära faktura i stället.`
     });
   }
   let stripe;
@@ -336,20 +361,24 @@ async function startSwish(result, token, options, context) {
       allowLive: options.stripeAllowLive,
       fetchImpl: options.stripeFetchImpl,
       apiBase: options.stripeApiBase,
-      timeoutMs: options.stripeTimeoutMs
+      timeoutMs: options.stripeTimeoutMs,
+      cardEnabled: options.cardEnabled,
+      swishEnabled: options.swishEnabled
     });
   } catch (error) {
-    context.warn?.(`Swish är inte konfigurerat: ${error?.code ?? 'okänt'}`);
+    context.warn?.(`${methodLabel} är inte konfigurerat: ${error?.code ?? 'okänt'}`);
     return renderPaymentPage(record, token, result.summary, {
-      stripeEnabled: true,
-      swishError: stripeUnavailableMessage(error)
+      stripeEnabled: options.stripeEnabled === true,
+      cardEnabled: options.cardEnabled !== false,
+      swishEnabled: options.swishEnabled === true,
+      [errorKey]: paymentUnavailableMessage(error, method)
     });
   }
 
   const requests = normalizePaymentRequests(record);
   const active = requests.find((request) =>
     request.status === 'OPEN' &&
-    request.paymentMethod === 'swish' &&
+    request.paymentMethod === method &&
     request.mode === stripe.mode &&
     request.amountOre === result.summary.remainingOre &&
     request.url &&
@@ -359,28 +388,30 @@ async function startSwish(result, token, options, context) {
 
   const base = options.publicBaseUrl ?? process.env.PUBLIC_BASE_URL ?? 'https://www.skadeviherrgard.com';
   const encodedToken = encodeURIComponent(token);
-  const idempotencyKey = `swish-${record.reference}-${result.summary.remainingOre}-${record.version ?? 1}-${Math.floor(now.getTime() / 3600000)}`;
+  const idempotencyKey = `${method}-${record.reference}-${result.summary.remainingOre}-${record.version ?? 1}-${Math.floor(now.getTime() / 3600000)}`;
   let session;
   try {
     session = await stripe.createCheckoutSession({
       amountOre: result.summary.remainingOre,
       currency: 'sek',
-      paymentMethods: ['swish'],
+      paymentMethods: [method],
       reference: record.reference,
       productName: `Skadevi Herrgård – ${record.reference}`,
       description: `${record.arrival} – ${record.departure}, ${record.nights} nätter, ${record.guests} gäster`,
       customerEmail: record.email,
-      successUrl: `${base}/betala/${encodedToken}?swish=success`,
-      cancelUrl: `${base}/betala/${encodedToken}?swish=cancelled`,
+      successUrl: `${base}/betala/${encodedToken}?payment=success`,
+      cancelUrl: `${base}/betala/${encodedToken}?payment=cancelled`,
       idempotencyKey,
       metadata: { reference: record.reference, source: 'guest-payment-page' }
     });
   } catch (error) {
     const code = error instanceof StripeError ? error.code : 'STRIPE_ERROR';
-    context.warn?.(`Swish Checkout misslyckades: ${code}`);
+    context.warn?.(`${methodLabel} Checkout misslyckades: ${code}`);
     return renderPaymentPage(record, token, result.summary, {
-      stripeEnabled: true,
-      swishError: stripeUnavailableMessage(error)
+      stripeEnabled: options.stripeEnabled === true,
+      cardEnabled: options.cardEnabled !== false,
+      swishEnabled: options.swishEnabled === true,
+      [errorKey]: paymentUnavailableMessage(error, method)
     }, 503);
   }
 
@@ -396,16 +427,18 @@ async function startSwish(result, token, options, context) {
     (session.client_reference_id ? session.client_reference_id === record.reference : true) &&
     (session.metadata?.reference ? session.metadata.reference === record.reference : true) &&
     (Array.isArray(session.payment_method_types)
-      ? session.payment_method_types.length === 1 && String(session.payment_method_types[0]).toLowerCase() === 'swish'
+      ? session.payment_method_types.length === 1 && String(session.payment_method_types[0]).toLowerCase() === method
       : true);
   if (!validSession) {
-    context.warn?.('Swish Checkout returnerade ett oväntat svar.');
+    context.warn?.(`${methodLabel} Checkout returnerade ett oväntat svar.`);
     if (session?.id) {
       try { await stripe.expireCheckoutSession(session.id); } catch { /* best effort */ }
     }
     return renderPaymentPage(record, token, result.summary, {
-      stripeEnabled: true,
-      swishError: 'Betalningen kunde inte verifieras. Ingen betalning har genomförts.'
+      stripeEnabled: options.stripeEnabled === true,
+      cardEnabled: options.cardEnabled !== false,
+      swishEnabled: options.swishEnabled === true,
+      [errorKey]: 'Betalningen kunde inte verifieras. Ingen betalning har genomförts.'
     }, 502);
   }
 
@@ -416,7 +449,7 @@ async function startSwish(result, token, options, context) {
   const paymentRequest = normalizePaymentRequest({
     provider: 'stripe',
     mode: stripe.mode,
-    paymentMethod: 'swish',
+    paymentMethod: method,
     status: 'OPEN',
     sessionId: session.id,
     paymentIntentId: session.payment_intent ?? '',
@@ -449,20 +482,20 @@ async function startSwish(result, token, options, context) {
         : null;
       if (existing?.url) return redirectResponse(existing.url);
     }
-    context.warn?.(`Swish-session kunde inte sparas för ${record.reference}.`);
-    return pageResponse(layout('Swish kunde inte startas', `<h1>Swish kunde inte startas</h1>
+    context.warn?.(`${methodLabel}-session kunde inte sparas för ${record.reference}.`);
+    return pageResponse(layout(`${methodLabel} kunde inte startas`, `<h1>${methodLabel} kunde inte startas</h1>
       <p class="payment-error">Betalningen kunde inte sparas. Försök igen eller begär faktura.</p>
       ${contactBlock()}`), 503);
   }
 
   try {
     await options.store.appendHistory({
-      idempotencyKey: `swish-${session.id}-started`,
+      idempotencyKey: `${method}-${session.id}-started`,
       reference: record.reference,
-      action: 'SWISH_CHECKOUT_STARTED',
+      action: method === 'card' ? 'CARD_CHECKOUT_STARTED' : 'SWISH_CHECKOUT_STARTED',
       fromStatus: record.statusCode ?? '',
       toStatus: record.statusCode ?? '',
-      changes: JSON.stringify({ sessionId: session.id, amountOre: result.summary.remainingOre }),
+      changes: JSON.stringify({ sessionId: session.id, amountOre: result.summary.remainingOre, paymentMethod: method }),
       reason: '',
       actorId: 'guest',
       actorName: 'Gäst',
@@ -470,7 +503,7 @@ async function startSwish(result, token, options, context) {
       at: now.toISOString()
     });
   } catch {
-    context.warn?.(`Swish-historik kunde inte sparas för ${record.reference}.`);
+    context.warn?.(`${methodLabel}-historik kunde inte sparas för ${record.reference}.`);
   }
 
   return redirectResponse(session.url);
@@ -549,12 +582,16 @@ async function submitInvoice(result, token, form, options, context) {
       if (created.code === 'INVOICE_REQUEST_EXISTS') {
         return renderPaymentPage(current.record, token, current.summary, {
           stripeEnabled: options.stripeEnabled === true,
+          cardEnabled: options.cardEnabled !== false,
+          swishEnabled: options.swishEnabled === true,
           notice: 'Din fakturabegäran är redan registrerad.'
         });
       }
       if (created.code === 'INVOICE_VALIDATION_FAILED') {
         return renderPaymentPage(current.record, token, current.summary, {
           stripeEnabled: options.stripeEnabled === true,
+          cardEnabled: options.cardEnabled !== false,
+          swishEnabled: options.swishEnabled === true,
           invoiceErrors: created.errors,
           invoiceDraft: form,
           invoiceError: 'Kontrollera fakturauppgifterna.'
@@ -562,12 +599,16 @@ async function submitInvoice(result, token, form, options, context) {
       }
       return renderPaymentPage(current.record, token, current.summary, {
         stripeEnabled: options.stripeEnabled === true,
+        cardEnabled: options.cardEnabled !== false,
+        swishEnabled: options.swishEnabled === true,
         invoiceError: 'Fakturabegäran kunde inte registreras. Kontakta Skadevi Herrgård.'
       });
     }
     if (created.duplicate) {
       return renderPaymentPage(current.record, token, current.summary, {
         stripeEnabled: options.stripeEnabled === true,
+        cardEnabled: options.cardEnabled !== false,
+        swishEnabled: options.swishEnabled === true,
         notice: 'Din fakturabegäran är redan registrerad.'
       });
     }
@@ -619,7 +660,8 @@ async function handlePaymentAction(request, context = {}, options = {}) {
   try {
     const result = await loadPaymentContext(options.store, token, now);
     if (!result.ok) return availabilityError(result);
-    if (request.action === 'swish') return startSwish(result, token, options, context);
+    if (request.action === 'card') return startCheckout(result, token, 'card', options, context);
+    if (request.action === 'swish') return startCheckout(result, token, 'swish', options, context);
     if (request.action === 'invoice') {
       return submitInvoice(result, token, request.form ?? {}, options, context);
     }

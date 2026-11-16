@@ -126,14 +126,14 @@ function fakeStripe(overrides = {}) {
       calls.push(input);
       if (overrides.error) throw overrides.error;
       return {
-        id: overrides.id ?? 'cs_test_swish1',
-        url: overrides.url ?? 'https://checkout.stripe.com/c/pay/cs_test_swish1',
+        id: overrides.id ?? 'cs_test_card1',
+        url: overrides.url ?? 'https://checkout.stripe.com/c/pay/cs_test_card1',
         amount_total: overrides.amountTotal ?? input.amountOre,
         currency: overrides.currency ?? 'sek',
         mode: 'payment',
-        payment_method_types: overrides.paymentMethodTypes ?? ['swish'],
+        payment_method_types: overrides.paymentMethodTypes ?? [input.paymentMethods?.[0] ?? 'card'],
         livemode: false,
-        payment_intent: 'pi_test_swish1',
+        payment_intent: 'pi_test_card1',
         expires_at: Math.floor(NOW.getTime() / 1000) + 86400,
         client_reference_id: input.reference,
         metadata: { reference: input.reference },
@@ -158,18 +158,18 @@ function options(store, stripe, overrides = {}) {
   };
 }
 
-test('betalningssidan visar endast Swish och faktura med korrekt utestående belopp', async () => {
+test('betalningssidan visar endast kort och faktura med korrekt utestående belopp', async () => {
   const { record, token } = makeRecord();
   const store = makeStore(record);
   const response = await handlePaymentPage({ token, query: {} }, {}, options(store, fakeStripe()));
   assert.equal(response.status, 200);
   const html = response.html;
-  assert.match(html, /Betala med Swish/);
+  assert.match(html, /Betala med kort/);
   assert.match(html, /Begär faktura/);
   assert.match(html, /Att betala/);
   assert.match(html, /20\s?000/);
+  assert.doesNotMatch(html, /Betala med Swish/);
   assert.doesNotMatch(html, /Klarna/i);
-  assert.doesNotMatch(html, /kortbetalning/i);
   assert.match(html, /noindex/);
   assert.match(response.headers['Referrer-Policy'], /no-referrer/);
 });
@@ -200,51 +200,72 @@ test('betalningssidan kräver en giltig, aktiv och bekräftad länk', async () =
   assert.match(denied.html, /inte bekräftad/);
 });
 
-test('Swish startar endast en Swish-session och sparar betalningsmetoden', async () => {
+test('kort startar endast en kort-session och sparar betalningsmetoden', async () => {
   const { record, token } = makeRecord();
   const store = makeStore(record);
   const stripe = fakeStripe();
-  const response = await handlePaymentAction({ token, action: 'swish', form: {} }, {}, options(store, stripe));
+  const response = await handlePaymentAction({ token, action: 'card', form: {} }, {}, options(store, stripe));
   assert.equal(response.status, 303);
-  assert.equal(response.headers.Location, 'https://checkout.stripe.com/c/pay/cs_test_swish1');
+  assert.equal(response.headers.Location, 'https://checkout.stripe.com/c/pay/cs_test_card1');
   assert.equal(stripe.calls.length, 1);
-  assert.deepEqual(stripe.calls[0].paymentMethods, ['swish']);
+  assert.deepEqual(stripe.calls[0].paymentMethods, ['card']);
   assert.equal(stripe.calls[0].currency, 'sek');
   assert.equal(stripe.calls[0].amountOre, 2000000);
-  assert.match(stripe.calls[0].successUrl, /\/betala\/.*\?swish=success/);
-  assert.match(stripe.calls[0].cancelUrl, /\/betala\/.*\?swish=cancelled/);
+  assert.match(stripe.calls[0].successUrl, /\/betala\/.*\?payment=success/);
+  assert.match(stripe.calls[0].cancelUrl, /\/betala\/.*\?payment=cancelled/);
   const stored = store.current;
   assert.equal(stored.paymentRequests.length, 1);
-  assert.equal(stored.paymentRequests[0].paymentMethod, 'swish');
+  assert.equal(stored.paymentRequests[0].paymentMethod, 'card');
   assert.equal(stored.paymentRequests[0].status, 'OPEN');
   assert.equal(stored.paymentRequests[0].amountOre, 2000000);
   assert.equal(stored.version, 2);
-  assert.equal(store.history[0].action, 'SWISH_CHECKOUT_STARTED');
+  assert.equal(store.history[0].action, 'CARD_CHECKOUT_STARTED');
 });
 
-test('Swish som inte är aktiverat visar tydligt fel och erbjuder faktura', async () => {
+test('Swish är avstängt som standard men kan slås på med flaggan', async () => {
+  const { record, token } = makeRecord();
+  const store = makeStore(record);
+  const page = await handlePaymentPage({ token, query: {} }, {}, options(store, fakeStripe()));
+  assert.doesNotMatch(page.html, /Betala med Swish/);
+
+  const swish = makeRecord();
+  const swishStore = makeStore(swish.record);
+  const swishPage = await handlePaymentPage({ token: swish.token, query: {} }, {}, options(swishStore, fakeStripe(), {
+    swishEnabled: true
+  }));
+  assert.match(swishPage.html, /Betala med kort/);
+  assert.match(swishPage.html, /Betala med Swish/);
+
+  const swishAction = await handlePaymentAction({ token: swish.token, action: 'swish', form: {} }, {}, options(swishStore, fakeStripe(), {
+    swishEnabled: true
+  }));
+  assert.equal(swishAction.status, 303);
+});
+
+test('kort som inte är aktiverat visar tydligt fel och erbjuder faktura', async () => {
   const { record, token } = makeRecord();
   const store = makeStore(record);
   const stripe = fakeStripe({
-    error: new StripeError(400, 'payment_method_not_available', 'Swish is not enabled')
+    error: new StripeError(400, 'payment_method_not_available', 'Card is not enabled')
   });
-  const response = await handlePaymentAction({ token, action: 'swish', form: {} }, {}, options(store, stripe));
+  const response = await handlePaymentAction({ token, action: 'card', form: {} }, {}, options(store, stripe));
   assert.equal(response.status, 503);
-  assert.match(response.html, /Swish är inte aktiverat/);
+  assert.match(response.html, /Kortbetalningen är inte aktiverad/);
   assert.match(response.html, /Begär faktura/);
   assert.doesNotMatch(response.html, /Klarna/i);
   assert.equal(store.current.paymentRequests.length, 0);
 });
 
-test('Swish är avstängt när funktionen är avstängd', async () => {
+test('digital betalning är avstängd när funktionen är avstängd', async () => {
   const { record, token } = makeRecord();
   const store = makeStore(record);
   const response = await handlePaymentPage({ token, query: {} }, {}, options(store, fakeStripe(), {
     stripeEnabled: false
   }));
   assert.equal(response.status, 200);
-  assert.match(response.html, /Swish är inte tillgängligt just nu/);
+  assert.match(response.html, /Digital betalning är inte tillgänglig/);
   assert.match(response.html, /Begär faktura/);
+  assert.doesNotMatch(response.html, /Betala med kort/);
   assert.doesNotMatch(response.html, /Betala med Swish/);
 });
 
@@ -317,7 +338,7 @@ test('delbetalning visar och debiterar endast återstående belopp', async () =>
   const page = await handlePaymentPage({ token, query: {} }, {}, options(store, stripe));
   assert.equal(page.status, 200);
   assert.match(page.html, /15\s?000/);
-  const response = await handlePaymentAction({ token, action: 'swish', form: {} }, {}, options(store, stripe));
+  const response = await handlePaymentAction({ token, action: 'card', form: {} }, {}, options(store, stripe));
   assert.equal(response.status, 303);
   assert.equal(stripe.calls[0].amountOre, 1500000);
 });

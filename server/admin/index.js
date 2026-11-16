@@ -325,7 +325,8 @@ async function handleApi(req, res, url, context) {
       writesEnabled: context.writesEnabled,
       payments: {
         stripeEnabled: context.stripeEnabled === true,
-        stripeMode: context.stripeMode ?? 'disabled'
+        stripeMode: context.stripeMode ?? 'disabled',
+        swishEnabled: context.stripeSwishEnabled === true
       }
     });
     return;
@@ -678,6 +679,7 @@ function createAdminRequestListener(options = {}) {
       : false);
   const outboxEnabled = options.outboxEnabled ?? process.env.ADMIN_MAIL_OUTBOX_ENABLED === '1';
   const stripeEnabled = options.stripeEnabled ?? process.env.STRIPE_ENABLED === '1';
+  const stripeSwishEnabled = options.stripeSwishEnabled ?? process.env.STRIPE_SWISH_ENABLED === '1';
   const stripeMode = options.stripeMode ?? (
     !stripeEnabled
       ? 'disabled'
@@ -768,6 +770,7 @@ let calendarParserReady = false;
           requireAirbnbCheck,
           outboxEnabled,
           stripeEnabled,
+          stripeSwishEnabled,
           stripeMode,
           paymentLinkTtlMs: options.paymentLinkTtlMs,
           publicBaseUrl: options.publicBaseUrl,
@@ -859,7 +862,7 @@ let calendarParserReady = false;
         sendHtml(req, res, 200, renderBookingDetail({
           booking: redactPaymentLinks(booking, principal),
           principal, demo, csrfToken, writesEnabled, history, today: todayKey(now),
-          stripeEnabled, stripeMode
+          stripeEnabled, stripeMode, stripeSwishEnabled
         }));
         return;
       }

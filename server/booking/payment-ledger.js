@@ -10,7 +10,7 @@ const PAYMENT_METHODS = Object.freeze({
 });
 
 const PAYMENT_METHOD_CODES = Object.freeze(
-  Object.keys(PAYMENT_METHODS).filter((code) => code !== 'CORRECTION' && code !== 'CARD')
+  Object.keys(PAYMENT_METHODS).filter((code) => code !== 'CORRECTION')
 );
 
 const PAYMENT_REQUEST_STATUSES = Object.freeze({
@@ -226,16 +226,18 @@ function stripePaymentEntry(session, now = new Date(), options = {}) {
   if (!Number.isSafeInteger(amountOre) || amountOre <= 0) {
     throw new Error('Stripe-session saknar giltigt belopp');
   }
-  const method = String(options.method ?? 'SWISH').toUpperCase() === 'SWISH' ? 'SWISH' : 'OTHER';
-  const methodText = method === 'SWISH' ? 'Swish' : 'annan betalmetod';
+  const requestedMethod = String(options.method ?? 'CARD').toUpperCase();
+  const method = requestedMethod === 'SWISH' || requestedMethod === 'CARD' ? requestedMethod : 'OTHER';
+  const methodText = method === 'SWISH' ? 'Swish' : method === 'CARD' ? 'kort' : 'annan betalmetod';
+  const methodPrefix = method === 'SWISH' ? 'Swish ' : method === 'CARD' ? 'Kort ' : '';
   return {
     id: `pay-stripe-${sessionId}`,
     type: 'PAYMENT',
     amountOre,
     paymentDate: stockholmDateKey(now),
     method,
-    methodLabel: method === 'SWISH' ? PAYMENT_METHODS.SWISH : PAYMENT_METHODS.OTHER,
-    reference: `Stripe Checkout ${method === 'SWISH' ? 'Swish ' : ''}${sessionId}`,
+    methodLabel: PAYMENT_METHODS[method],
+    reference: `Stripe Checkout ${methodPrefix}${sessionId}`,
     note: options.note ?? `Betald via ${methodText} (Stripe Checkout).`,
     reason: '',
     createdBy: 'Stripe',
@@ -288,7 +290,9 @@ function applyStripePayment(record = {}, session = {}, options = {}) {
   const paymentTypes = Array.isArray(session.payment_method_types)
     ? session.payment_method_types.map((type) => String(type).toLowerCase())
     : [];
-  const method = paymentTypes.length === 1 && paymentTypes[0] === 'swish' ? 'SWISH' : 'OTHER';
+  const paymentType = paymentTypes.length === 1 ? paymentTypes[0] : '';
+  const method = paymentType === 'card' ? 'CARD' : paymentType === 'swish' ? 'SWISH' : 'OTHER';
+  const expectedMethod = String(target.paymentMethod ?? '').toUpperCase();
 
   const payments = normalizePayments(record);
   const duplicate = payments.find((payment) =>
@@ -318,11 +322,13 @@ function applyStripePayment(record = {}, session = {}, options = {}) {
       `Bokningen hade status ${record.statusCode ?? 'okänd'} när betalningen togs emot. Kontrollera betalningen och återbetala vid behov.`
     );
   }
-  if (method !== 'SWISH') {
-    warnings.push('Betalningen använde en annan betalmetod än Swish. Kontrollera och återbetala vid behov.');
+  if (method === 'OTHER') {
+    warnings.push('Betalningen använde en okänd eller otillåten betalmetod. Kontrollera och återbetala vid behov.');
   }
-  if (target.paymentMethod && target.paymentMethod !== 'swish') {
-    warnings.push('Betalningssessionen var inte skapad för Swish. Kontrollera betalningen.');
+  if (expectedMethod && method !== expectedMethod) {
+    warnings.push(
+      `Betalningen registrerades som ${method} men betalningssessionen var skapad för ${expectedMethod}. Kontrollera betalningen.`
+    );
   }
   if (target.amountOre !== amountOre) {
     warnings.push(

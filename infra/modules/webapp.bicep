@@ -61,8 +61,11 @@ param bookingStorageAccountName string = ''
 @description('Aktiverar Stripe-webhooken. false = /api/stripe/webhook svarar 503 och inga betalningar registreras.')
 param enableStripeWebhook bool = false
 
-@description('Aktiverar Swish-betalningar på gästens betalningssida. false = endast fakturabegäran visas.')
-param enableSwishPayments bool = false
+@description('Aktiverar kortbetalningar på gästens betalningssida. false = endast faktura.')
+param enableCardCheckout bool = false
+
+@description('Aktiverar Swish-betalningar på gästens betalningssida. false = endast kort och faktura.')
+param enableSwishCheckout bool = false
 
 @description('Fullständig SecretUri till Stripes hemliga nyckel, utan versionsnummer. Krävs för Swish. Tomt = fail-closed.')
 param stripeSecretUri string = ''
@@ -108,7 +111,15 @@ var baseAppSettings = [
   }
   {
     name: 'STRIPE_ENABLED'
-    value: enableSwishPayments ? '1' : '0'
+    value: (enableCardCheckout || enableSwishCheckout) ? '1' : '0'
+  }
+  {
+    name: 'STRIPE_CARD_ENABLED'
+    value: enableCardCheckout ? '1' : '0'
+  }
+  {
+    name: 'STRIPE_SWISH_ENABLED'
+    value: enableSwishCheckout ? '1' : '0'
   }
   {
     name: 'STRIPE_MODE'
@@ -144,7 +155,7 @@ var appSettings = concat(
       value: '@Microsoft.KeyVault(SecretUri=${stripeWebhookSecretUri})'
     }
   ] : [],
-  enableSwishPayments && !empty(stripeSecretUri) ? [
+  (enableCardCheckout || enableSwishCheckout) && !empty(stripeSecretUri) ? [
     {
       name: 'STRIPE_SECRET_KEY'
       value: '@Microsoft.KeyVault(SecretUri=${stripeSecretUri})'

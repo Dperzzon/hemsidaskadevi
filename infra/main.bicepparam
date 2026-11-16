@@ -59,7 +59,9 @@ param bookingStorageAccountName = 'stskadevibokningprod'
 // att webhookhemligheten finns i Key Vault.
 param enableStripeWebhook = false
 
-param enableSwishPayments = false
+param enableCardCheckout = false
+
+param enableSwishCheckout = false
 
 param stripeSecretUri = ''
 

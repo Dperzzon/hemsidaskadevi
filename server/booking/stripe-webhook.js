@@ -41,9 +41,11 @@ function buildPaymentNotifications(record, payment, summary, options = {}) {
   const review = options.reviewRequired
     ? `VARNING: ${options.reviewRequired}`
     : '';
+  const methodText = payment.method === 'SWISH' ? 'Swish' : payment.method === 'CARD' ? 'kort' : 'betalning';
+  const guestMethodText = payment.method === 'SWISH' ? 'Swish-betalning' : payment.method === 'CARD' ? 'kortbetalning' : 'betalning';
   const hostLines = [
     `Referens: ${record.reference}`,
-    'Betalning mottagen via Swish (Stripe Checkout).',
+    `Betalning mottagen via ${methodText} (Stripe Checkout).`,
     `Belopp: ${formatOre(payment.amountOre)}`,
     `Totalt betalt: ${formatOre(summary.paidOre)}`,
     `Återstår: ${formatOre(Math.max(0, summary.remainingOre))}`,
@@ -53,7 +55,7 @@ function buildPaymentNotifications(record, payment, summary, options = {}) {
   ].filter(Boolean);
   const guestLines = [
     `Referens: ${record.reference}`,
-    `Vi har tagit emot din Swish-betalning på ${formatOre(payment.amountOre)}.`,
+    `Vi har tagit emot din ${guestMethodText} på ${formatOre(payment.amountOre)}.`,
     `Totalt betalt: ${formatOre(summary.paidOre)}`,
     `Återstår: ${formatOre(Math.max(0, summary.remainingOre))}`,
     'Betalningen är registrerad på din bokning.'
@@ -113,7 +115,9 @@ async function appendPaymentHistory(store, record, payment, summary, event, opti
     await store.appendHistory({
       idempotencyKey: `stripe-${payment.stripeSessionId}-payment`,
       reference: record.reference,
-      action: 'SWISH_PAYMENT_RECEIVED',
+      action: payment.method === 'CARD'
+        ? 'CARD_PAYMENT_RECEIVED'
+        : (payment.method === 'SWISH' ? 'SWISH_PAYMENT_RECEIVED' : 'PAYMENT_RECEIVED'),
       fromStatus: record.statusCode ?? '',
       toStatus: record.statusCode ?? '',
       changes: JSON.stringify({

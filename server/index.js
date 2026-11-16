@@ -277,6 +277,8 @@ function createRequestListener(options = {}) {
     stripeFetchImpl: options.stripeFetchImpl,
     stripeApiBase: options.stripeApiBase,
     stripeClient: options.stripeClient,
+    cardEnabled: options.cardEnabled ?? process.env.STRIPE_CARD_ENABLED !== '0',
+    swishEnabled: options.swishEnabled ?? process.env.STRIPE_SWISH_ENABLED === '1',
     publicBaseUrl: options.publicBaseUrl,
     outboxEnabled: options.outboxEnabled ?? process.env.STRIPE_OUTBOX_ENABLED === '1'
   };
@@ -376,7 +378,7 @@ function createRequestListener(options = {}) {
       return;
     }
 
-    const paymentActionMatch = /^\/api\/payments\/([A-Za-z0-9_-]{43})\/(swish|invoice-request)$/.exec(url.pathname);
+    const paymentActionMatch = /^\/api\/payments\/([A-Za-z0-9_-]{43})\/(card|swish|invoice-request)$/.exec(url.pathname);
     if (paymentActionMatch && req.method === 'POST') {
       if (!isSameOrigin(req)) {
         sendJson(res, 403, { error: 'Förfrågan kommer från en otillåten origin.' });
@@ -395,7 +397,9 @@ function createRequestListener(options = {}) {
         const result = await paymentActionHandler(
           {
             token: paymentActionMatch[1],
-            action: paymentActionMatch[2] === 'swish' ? 'swish' : 'invoice',
+            action: paymentActionMatch[2] === 'card'
+              ? 'card'
+              : (paymentActionMatch[2] === 'swish' ? 'swish' : 'invoice'),
             form
           },
           { warn },
