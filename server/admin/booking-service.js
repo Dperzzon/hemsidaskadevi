@@ -31,6 +31,13 @@ const {
   findWarning,
   stayFingerprint
 } = require('./warnings');
+const {
+  PAYMENT_METHOD_CODES,
+  parseKronorToOre,
+  normalizePayments,
+  openingBalanceOreFor,
+  computePaymentSummary
+} = require('./payments');
 
 const MAX_GUESTS = 24;
 const MAX_NIGHTS = 93;
@@ -955,6 +962,11 @@ async function addNote(repo, principal, reference, body = {}, options = {}, cont
 async function updatePayment(repo, principal, reference, body = {}, options = {}, context = {}) {
   const raw = await repo.getRawBooking(reference);
   if (!raw) return error(404, 'Bokningen hittades inte.');
+  if (Array.isArray(raw.record.payments) && raw.record.payments.length > 0) {
+    return error(409, 'Bokningen har en betalningshistorik. Registrera en rättelse i stället så att historiken bevaras.', {
+      code: 'PAYMENT_LEDGER_ACTIVE'
+    });
+  }
   const paymentStatus = String(body.paymentStatus ?? '').toUpperCase();
   if (!PAYMENT_STATUSES.has(paymentStatus)) {
     return error(400, 'Ange en giltig betalstatus.', { fields: { paymentStatus: 'Ogiltig betalstatus.' } });
@@ -990,6 +1002,268 @@ async function updatePayment(repo, principal, reference, body = {}, options = {}
     return {
       status: 200,
       jsonBody: { reference, paymentStatus, amountPaid, balance: record.balance, etag: updated.etag }
+    };
+  } catch (cause) {
+    const mapped = normalizeRepoError(cause);
+    if (mapped) return mapped;
+    throw cause;
+  }
+}
+
+function validatePaymentInput(body, now) {
+  const errors = {};
+  const amountOre = parseKronorToOre(body.amount ?? body.amountKronor);
+  if (amountOre === null || amountOre <= 0) {
+    errors.amount = 'Ange ett belopp större än 0 kr med högst två decimaler.';
+  }
+  const method = String(body.method ?? body.paymentMethod ?? '').toUpperCase();
+  if (!PAYMENT_METHOD_CODES.includes(method)) {
+    errors.method = 'Välj ett giltigt betalningssätt.';
+  }
+  const paymentDate = cleanString(body.paymentDate ?? body.date, 10);
+  if (!validDateKey(paymentDate)) {
+    errors.paymentDate = 'Ange ett giltigt betalningsdatum.';
+  } else if (paymentDate > todayKey(now)) {
+    errors.paymentDate = 'Betalningsdatum får inte vara i framtiden.';
+  }
+  const reference = cleanString(body.reference ?? body.referenceText, 500);
+  const note = cleanString(body.note, 1000);
+  return { errors, amountOre, method, paymentDate, reference, note };
+}
+
+function paymentSummaryBody(summary) {
+  return {
+    total: backToKronor(summary.totalOre),
+    totalOre: summary.totalOre,
+    amountPaid: summary.amountPaid,
+    amountPaidOre: summary.paidOre,
+    remaining: backToKronor(summary.remainingOre),
+    remainingOre: summary.remainingOre,
+    overpaid: summary.overpaid,
+    overpaidOre: summary.overpaidOre,
+    paymentStatus: summary.paymentStatus,
+    paymentLabel: summary.paymentLabel
+  };
+}
+
+function backToKronor(ore) {
+  return Number(ore || 0) / 100;
+}
+
+function newPaymentId() {
+  return `pay-${crypto.randomUUID()}`;
+}
+
+async function recordPayment(repo, principal, reference, body = {}, options = {}, context = {}) {
+  if (!principal?.roles?.includes('Owner')) {
+    return error(403, 'Endast Owner kan registrera betalningar.');
+  }
+  if (!REFERENCE_PATTERN.test(reference)) return error(404, 'Bokningen hittades inte.');
+  const raw = await repo.getRawBooking(reference);
+  if (!raw) return error(404, 'Bokningen hittades inte.');
+  const now = options.now ?? new Date();
+  const record = { ...raw.record };
+  if (record.statusCode === 'BLOCKED' || /^BLOCK-/.test(String(record.reference ?? ''))) {
+    return error(422, 'Datumblockeringar har inga betalningar.', { code: 'PAYMENT_NOT_AVAILABLE' });
+  }
+  const payments = normalizePayments(record);
+  const idempotencyKey = cleanString(options.idempotencyKey ?? body.idempotencyKey, 80);
+  if (!idempotencyKey || !/^[A-Za-z0-9-]{8,80}$/.test(idempotencyKey)) {
+    return error(400, 'Betalningen saknar en giltig idempotensnyckel. Ladda om sidan och försök igen.', {
+      code: 'IDEMPOTENCY_REQUIRED',
+      fields: { idempotencyKey: 'Idempotensnyckel krävs.' }
+    });
+  }
+  // En upprepad klickning eller ett omförsök med samma nyckel får aldrig
+  // skapa en ny betalningspost. Kontrollen sker före ETag så att ett osäkert
+  // första svar kan återanvändas.
+  const duplicate = payments.find((payment) => payment.idempotencyKey === idempotencyKey);
+  if (duplicate) {
+    const summary = computePaymentSummary(record);
+    return {
+      status: 200,
+      jsonBody: {
+        reference,
+        duplicate: true,
+        payment: duplicate,
+        etag: raw.etag,
+        ...paymentSummaryBody(summary)
+      }
+    };
+  }
+  const expectedEtag = body.expectedEtag ?? options.expectedEtag;
+  if (expectedEtag && raw.etag && expectedEtag !== raw.etag) {
+    return error(409, 'Bokningen har ändrats av någon annan. Uppdatera sidan och försök igen.', {
+      code: 'STALE'
+    });
+  }
+  const input = validatePaymentInput(body, now);
+  if (Object.keys(input.errors).length) {
+    return error(400, 'Kontrollera betalningsuppgifterna.', {
+      code: 'VALIDATION',
+      fields: input.errors
+    });
+  }
+  const actor = actorOf(principal);
+  const entry = {
+    id: newPaymentId(),
+    type: 'PAYMENT',
+    amountOre: input.amountOre,
+    paymentDate: input.paymentDate,
+    method: input.method,
+    reference: input.reference,
+    note: input.note,
+    reason: '',
+    createdBy: actor.name,
+    createdById: actor.id,
+    createdAt: now.toISOString(),
+    idempotencyKey,
+    correctsPaymentId: ''
+  };
+  record.paymentOpeningBalanceOre = openingBalanceOreFor(record, payments);
+  record.payments = [...payments, entry];
+  const summary = computePaymentSummary(record);
+  record.amountPaid = summary.amountPaid;
+  record.balance = summary.balance;
+  record.paymentStatus = summary.paymentStatus;
+  record.version = Number(record.version || 1) + 1;
+  record.updatedAt = now.toISOString();
+  record.updatedBy = actor.name;
+
+  try {
+    const updated = await repo.updateRequest(record, { ifMatch: raw.etag });
+    await audit(repo, principal, 'PAYMENT_RECORDED', record, {
+      fromStatus: record.statusCode,
+      toStatus: record.statusCode,
+      reason: cleanString(input.reference || input.note, 500),
+      changes: {
+        paymentId: entry.id,
+        amountOre: entry.amountOre,
+        paymentDate: entry.paymentDate,
+        method: entry.method,
+        totalPaidOre: summary.paidOre,
+        remainingOre: summary.remainingOre,
+        paymentStatus: summary.paymentStatus
+      },
+      context
+    });
+    return {
+      status: 201,
+      jsonBody: {
+        reference,
+        payment: entry,
+        etag: updated.etag,
+        ...paymentSummaryBody(summary)
+      }
+    };
+  } catch (cause) {
+    const mapped = normalizeRepoError(cause);
+    if (mapped) return mapped;
+    throw cause;
+  }
+}
+
+async function correctPayment(repo, principal, reference, paymentId, body = {}, options = {}, context = {}) {
+  if (!principal?.roles?.includes('Owner')) {
+    return error(403, 'Endast Owner kan rätta betalningar.');
+  }
+  if (!REFERENCE_PATTERN.test(reference)) return error(404, 'Bokningen hittades inte.');
+  const raw = await repo.getRawBooking(reference);
+  if (!raw) return error(404, 'Bokningen hittades inte.');
+  const now = options.now ?? new Date();
+  const record = { ...raw.record };
+  const payments = normalizePayments(record);
+  const target = payments.find((payment) => payment.id === paymentId && payment.type === 'PAYMENT');
+  if (!target) return error(404, 'Betalningen hittades inte.');
+  const idempotencyKey = cleanString(options.idempotencyKey ?? body.idempotencyKey, 80) ||
+    `correction-${target.id}`;
+  const duplicate = payments.find((payment) =>
+    payment.type === 'CORRECTION' && payment.idempotencyKey === idempotencyKey
+  );
+  if (duplicate) {
+    const summary = computePaymentSummary(record);
+    return {
+      status: 200,
+      jsonBody: {
+        reference,
+        duplicate: true,
+        correction: duplicate,
+        etag: raw.etag,
+        ...paymentSummaryBody(summary)
+      }
+    };
+  }
+  const alreadyCorrected = payments.some((payment) =>
+    payment.type === 'CORRECTION' && payment.correctsPaymentId === target.id
+  );
+  if (alreadyCorrected) {
+    return error(409, 'Betalningen är redan rättad. Historiken behålls och kan inte raderas.', {
+      code: 'PAYMENT_ALREADY_CORRECTED'
+    });
+  }
+  const reason = cleanString(body.reason, 500);
+  if (reason.length < 3) {
+    return error(400, 'Ange en obligatorisk motivering till rättelsen.', {
+      code: 'VALIDATION',
+      fields: { reason: 'Motivering krävs.' }
+    });
+  }
+  const expectedEtag = body.expectedEtag ?? options.expectedEtag;
+  if (expectedEtag && raw.etag && expectedEtag !== raw.etag) {
+    return error(409, 'Bokningen har ändrats av någon annan. Uppdatera sidan och försök igen.', {
+      code: 'STALE'
+    });
+  }
+  const actor = actorOf(principal);
+  const entry = {
+    id: newPaymentId(),
+    type: 'CORRECTION',
+    amountOre: -target.amountOre,
+    paymentDate: todayKey(now),
+    method: 'CORRECTION',
+    reference: target.reference,
+    note: '',
+    reason,
+    createdBy: actor.name,
+    createdById: actor.id,
+    createdAt: now.toISOString(),
+    idempotencyKey,
+    correctsPaymentId: target.id
+  };
+  record.paymentOpeningBalanceOre = openingBalanceOreFor(record, payments);
+  record.payments = [...payments, entry];
+  const summary = computePaymentSummary(record);
+  record.amountPaid = summary.amountPaid;
+  record.balance = summary.balance;
+  record.paymentStatus = summary.paymentStatus;
+  record.version = Number(record.version || 1) + 1;
+  record.updatedAt = now.toISOString();
+  record.updatedBy = actor.name;
+
+  try {
+    const updated = await repo.updateRequest(record, { ifMatch: raw.etag });
+    await audit(repo, principal, 'PAYMENT_CORRECTED', record, {
+      fromStatus: record.statusCode,
+      toStatus: record.statusCode,
+      reason,
+      changes: {
+        correctionId: entry.id,
+        correctsPaymentId: target.id,
+        amountOre: entry.amountOre,
+        totalPaidOre: summary.paidOre,
+        remainingOre: summary.remainingOre,
+        paymentStatus: summary.paymentStatus
+      },
+      context
+    });
+    return {
+      status: 201,
+      jsonBody: {
+        reference,
+        correction: entry,
+        etag: updated.etag,
+        ...paymentSummaryBody(summary)
+      }
     };
   } catch (cause) {
     const mapped = normalizeRepoError(cause);
@@ -1161,6 +1435,8 @@ module.exports = {
   changeStatus,
   addNote,
   updatePayment,
+  recordPayment,
+  correctPayment,
   updateAddons,
   removeBlock,
   calendarRange,

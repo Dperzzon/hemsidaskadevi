@@ -133,21 +133,35 @@ function priceModel(booking) {
 }
 
 function paymentModel(booking) {
-  const total = numberOrZero(booking.total);
-  const amountPaid = numberOrZero(booking.amountPaid);
-  const balance = Math.max(0, numberOrZero(booking.balance));
+  const hasOre = Number.isFinite(Number(booking.totalOre));
+  const total = hasOre ? Number(booking.totalOre) / 100 : numberOrZero(booking.total);
+  const amountPaid = Number.isFinite(Number(booking.amountPaidOre))
+    ? Number(booking.amountPaidOre) / 100
+    : numberOrZero(booking.amountPaid);
+  const remaining = Number.isFinite(Number(booking.remainingOre))
+    ? Number(booking.remainingOre) / 100
+    : numberOrZero(booking.balance);
+  const overpaidAmount = remaining < 0 ? -remaining : 0;
+  const balance = Math.max(0, remaining);
+  const status = String(booking.paymentStatus || 'UNKNOWN').toUpperCase();
+  const statusLabel = booking.paymentLabel ?? PAYMENT_LABELS[booking.paymentStatus] ?? 'Okänd';
+  const rows = [
+    { label: 'Totalpris', value: formatMoney(total) },
+    { label: 'Totalt mottagna betalningar', value: formatMoney(amountPaid) },
+    { label: 'Återstående belopp', value: formatMoney(balance) }
+  ];
+  if (overpaidAmount > 0) {
+    rows.push({ label: 'Överbetalning', value: formatMoney(overpaidAmount) });
+  }
+  rows.push({ label: 'Betalstatus', value: statusLabel });
   return {
-    status: String(booking.paymentStatus || 'UNKNOWN').toUpperCase(),
-    statusLabel: PAYMENT_LABELS[booking.paymentStatus] ?? 'Okänd',
+    status,
+    statusLabel,
     total,
     amountPaid,
     balance,
-    rows: [
-      { label: 'Totalpris', value: formatMoney(total) },
-      { label: 'Registrerat betalt', value: formatMoney(amountPaid) },
-      { label: 'Återstående belopp', value: formatMoney(balance) },
-      { label: 'Betalstatus', value: PAYMENT_LABELS[booking.paymentStatus] ?? 'Okänd' }
-    ]
+    overpaidAmount,
+    rows
   };
 }
 

@@ -6,8 +6,15 @@ const {
   formatDateRange,
   formatDateTime,
   formatMoney,
-  PAYMENT_LABELS
+  PAYMENT_LABELS,
+  todayKey
 } = require('../domain');
+const {
+  PAYMENT_METHODS,
+  PAYMENT_METHOD_CODES,
+  formatOre,
+  sortPayments
+} = require('../payments');
 const {
   statusBadge,
   emailBadge,
@@ -84,12 +91,6 @@ function addonEditor(booking) {
     ${row('tidigIncheckning', 'Tidig incheckning', addons.tidigIncheckning)}
     ${row('senUtcheckning', 'Sen utcheckning', addons.senUtcheckning)}
   </div>`;
-}
-
-function paymentOptions(current) {
-  return Object.entries(PAYMENT_LABELS).map(([value, label]) =>
-    `<option value="${escapeHtml(value)}"${value === current ? ' selected' : ''}>${escapeHtml(label)}</option>`
-  ).join('');
 }
 
 function warningButton(label, attribute, warning, booking, variant = 'secondary') {
@@ -253,8 +254,91 @@ function statusActions(booking) {
     <p class="notice">E-postutskick är avstängt i detta steg. En bekräftelse skiljs från kvittensen på mottagen förfrågan.</p>`;
 }
 
+function paymentMethodOptions() {
+  return PAYMENT_METHOD_CODES.map((code) =>
+    `<option value="${escapeHtml(code)}">${escapeHtml(PAYMENT_METHODS[code])}</option>`
+  ).join('');
+}
+
+function paymentHistory(booking, isOwner, writesEnabled) {
+  const payments = sortPayments(booking.payments ?? []);
+  const corrected = new Set(payments
+    .filter((payment) => payment.type === 'CORRECTION')
+    .map((payment) => payment.correctsPaymentId));
+  const rows = [];
+  if (Number(booking.openingBalanceOre) > 0) {
+    rows.push(`<li class="payment-entry payment-opening">
+      <div class="payment-entry-top"><strong>${escapeHtml(formatOre(booking.openingBalanceOre))}</strong><span>Ingående saldo</span></div>
+      <p class="payment-entry-meta">Registrerat mottaget belopp från tidigare betalningsuppgift.</p>
+      <p class="payment-entry-actor">Ingen separat betalningspost finns. Beloppet räknas inte dubbelt.</p>
+    </li>`);
+  }
+  for (const payment of payments) {
+    const correction = payment.type === 'CORRECTION';
+    const canCorrect = isOwner && writesEnabled && !correction && !corrected.has(payment.id);
+    const reference = payment.reference
+      ? `<p class="payment-entry-meta">Referens: ${escapeHtml(payment.reference)}</p>`
+      : '';
+    const note = payment.note
+      ? `<p class="payment-entry-meta">${escapeHtml(payment.note)}</p>`
+      : '';
+    const reason = correction
+      ? `<p class="payment-correction"><strong>Motivering:</strong> ${escapeHtml(payment.reason || 'Motivering saknas')}</p>`
+      : '';
+    rows.push(`<li class="payment-entry${correction ? ' payment-correction-row' : ''}">
+      <div class="payment-entry-top">
+        <strong>${escapeHtml(formatOre(payment.amountOre))}</strong>
+        <span>${escapeHtml(formatDateKey(payment.paymentDate))}</span>
+      </div>
+      <p class="payment-entry-meta">${escapeHtml(payment.methodLabel)}</p>
+      ${reference}${note}${reason}
+      <p class="payment-entry-actor">Registrerad av ${escapeHtml(payment.createdBy || 'Okänd')} · ${escapeHtml(formatDateTime(payment.createdAt))}</p>
+      ${canCorrect ? `<button type="button" class="btn btn-ghost btn-small" data-payment-correct="${escapeHtml(payment.id)}" data-reference="${escapeHtml(booking.reference)}" data-etag="${escapeHtml(booking.etag || '')}">Rättelse</button>` : ''}
+    </li>`);
+  }
+  if (!rows.length) return '<p class="muted">Inga betalningar registrerade ännu.</p>';
+  return `<ul class="payment-history">${rows.join('')}</ul>`;
+}
+
+function paymentPanel(booking, isOwner, writesEnabled, today) {
+  const totalOre = Number(booking.totalOre ?? Math.round(Number(booking.total || 0) * 100));
+  const paidOre = Number(booking.amountPaidOre ?? Math.round(Number(booking.amountPaid || 0) * 100));
+  const remainingOre = Number(booking.remainingOre ?? (totalOre - paidOre));
+  const overpaidOre = Number(booking.overpaidOre ?? Math.max(0, -remainingOre));
+  const overpaid = overpaidOre > 0;
+  const form = isOwner && writesEnabled
+    ? `<details class="payment-register">
+        <summary class="btn btn-primary">Registrera betalning</summary>
+        <form data-admin-form="payment-record" data-reference="${escapeHtml(booking.reference)}" data-etag="${escapeHtml(booking.etag || '')}">
+          <label class="field"><span>Belopp i kronor</span><input type="number" name="amount" min="0.01" step="0.01" required placeholder="Till exempel 5000"></label>
+          <label class="field"><span>Betalningsdatum</span><input type="date" name="paymentDate" value="${escapeHtml(today || todayKey())}" required></label>
+          <label class="field"><span>Betalningssätt</span><select name="method" required>${paymentMethodOptions()}</select></label>
+          <label class="field"><span>Referens eller anteckning (valfritt)</span><input type="text" name="reference" maxlength="500" placeholder="Till exempel bankreferens"></label>
+          <div class="button-row"><button class="btn btn-primary" type="submit">Registrera betalning</button></div>
+          <p class="form-error" data-form-error hidden></p>
+          <p class="price-note">Betalningen läggs till i historiken och ändrar inte bokningens avtalade totalpris, status eller kalenderlåsning.</p>
+        </form>
+      </details>`
+    : `<p class="notice">${isOwner
+      ? 'Skrivfunktioner är inte aktiverade i denna miljö.'
+      : 'Endast Owner kan registrera eller rätta betalningar. Du kan läsa betalningshistoriken.'}</p>`;
+  return `<section class="panel">
+    <div class="panel-heading"><div><p class="eyebrow">Ekonomi</p><h2>Betalning</h2></div></div>
+    <div class="payment-summary">
+      <div class="price-row"><span>Totalpris</span><strong>${escapeHtml(formatOre(totalOre))}</strong></div>
+      <div class="price-row"><span>Totalt betalt</span><strong>${escapeHtml(formatOre(paidOre))}</strong></div>
+      <div class="price-row"><span>Återstår</span><strong>${escapeHtml(formatOre(Math.max(0, remainingOre)))}</strong></div>
+      ${overpaid ? `<div class="price-row payment-overpaid"><span>Överbetalning</span><strong>${escapeHtml(formatOre(overpaidOre))}</strong></div>` : ''}
+      <div class="price-row"><span>Betalstatus</span><strong>${escapeHtml(booking.paymentLabel || PAYMENT_LABELS[booking.paymentStatus] || 'Okänd')}</strong></div>
+    </div>
+    ${form}
+    <div class="panel-heading payment-history-heading"><div><p class="eyebrow">Historik</p><h3>Betalningshistorik</h3></div></div>
+    ${paymentHistory(booking, isOwner, writesEnabled)}
+  </section>`;
+}
+
 function renderBookingDetail(options) {
-  const { booking, principal, demo, csrfToken, writesEnabled, history = [] } = options;
+  const { booking, principal, demo, csrfToken, writesEnabled, history = [], today } = options;
   const isOwner = principal.roles?.includes('Owner');
   const content = `
     <div class="detail-header">
@@ -354,21 +438,7 @@ function renderBookingDetail(options) {
             : '<p class="notice">Endast Owner kan ändra status, pris, betalning och blockeringar i denna version.</p>'}
         </section>
 
-        ${booking.isBlock ? '' : `<section class="panel">
-          <div class="panel-heading"><div><p class="eyebrow">Ekonomi</p><h2>Betalning</h2></div></div>
-          <div class="payment-summary">
-            <div class="price-row"><span>Status</span><strong>${escapeHtml(booking.paymentLabel)}</strong></div>
-            <div class="price-row"><span>Totalt</span><strong>${escapeHtml(formatMoney(booking.total))}</strong></div>
-            <div class="price-row"><span>Betalt</span><strong>${escapeHtml(formatMoney(booking.amountPaid))}</strong></div>
-            <div class="price-row"><span>Kvar</span><strong>${escapeHtml(formatMoney(booking.balance))}</strong></div>
-          </div>
-          <form data-admin-form="payment" data-reference="${escapeHtml(booking.reference)}" data-etag="${escapeHtml(booking.etag)}">
-            <label class="field"><span>Betalstatus</span><select name="paymentStatus">${paymentOptions(booking.paymentStatus)}</select></label>
-            <label class="field"><span>Belopp mottaget (kr)</span><input type="number" name="amountPaid" min="0" step="1" value="${escapeHtml(String(booking.amountPaid))}"></label>
-            <label class="field"><span>Orsak / kommentar</span><input type="text" name="reason" maxlength="500"></label>
-            <div class="button-row"><button class="btn btn-secondary" type="submit">Registrera betalstatus</button></div>
-          </form>
-        </section>`}
+        ${booking.isBlock ? '' : paymentPanel(booking, isOwner, writesEnabled, today)}
 
         <section class="panel">
           <div class="panel-heading"><div><p class="eyebrow">Kommunikation</p><h2>Mejlstatus</h2></div></div>

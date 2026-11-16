@@ -61,6 +61,8 @@ function historyList(entries = []) {
     BLOCK_REMOVED: 'Datumblockering borttagen',
     NOTE_ADDED: 'Anteckning tillagd',
     PAYMENT_UPDATED: 'Betalstatus uppdaterad',
+    PAYMENT_RECORDED: 'Betalning registrerad',
+    PAYMENT_CORRECTED: 'Betalning rättad',
     ADDONS_UPDATED: 'Tillval uppdaterade',
     WARNING_ACKNOWLEDGED: 'Varning hanterad',
     WARNING_RECHECKED: 'Varning kontrollerad igen',

@@ -265,6 +265,34 @@
     });
   });
 
+  document.querySelectorAll('[data-payment-correct]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const reason = window.prompt('Obligatorisk motivering till rättelsen:');
+      if (reason === null) return;
+      if (!reason.trim()) {
+        showToast('En motivering krävs för att rätta betalningen.');
+        return;
+      }
+      if (!window.confirm('Rätta betalningen? En negativ rättelsepost läggs till i historiken. Originalposten raderas aldrig.')) {
+        return;
+      }
+      button.disabled = true;
+      try {
+        await api(`/api/admin/bookings/${encodeURIComponent(button.dataset.reference)}/payments/${encodeURIComponent(button.dataset.paymentCorrect)}/corrections`, {
+          headers: { 'Idempotency-Key': `correction-${button.dataset.paymentCorrect}` },
+          body: {
+            reason: reason.trim(),
+            expectedEtag: button.dataset.etag || undefined
+          }
+        });
+        window.location.reload();
+      } catch (error) {
+        showToast(errorText(error));
+        button.disabled = false;
+      }
+    });
+  });
+
   function formValue(form, name) {
     const element = form.elements[name];
     return element ? element.value : '';
@@ -279,6 +307,7 @@
     const type = form.dataset.adminForm;
     let manualIdempotencyKey = '';
     let blockIdempotencyKey = '';
+    let paymentIdempotencyKey = '';
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
       setBusy(form, true);
@@ -287,6 +316,21 @@
           await api(`/api/admin/bookings/${encodeURIComponent(form.dataset.reference)}/notes`, {
             body: {
               note: formValue(form, 'note'),
+              expectedEtag: form.dataset.etag || undefined
+            }
+          });
+          window.location.reload();
+          return;
+        }
+        if (type === 'payment-record') {
+          if (!paymentIdempotencyKey) paymentIdempotencyKey = crypto.randomUUID();
+          await api(`/api/admin/bookings/${encodeURIComponent(form.dataset.reference)}/payments`, {
+            headers: { 'Idempotency-Key': paymentIdempotencyKey },
+            body: {
+              amount: formValue(form, 'amount'),
+              paymentDate: formValue(form, 'paymentDate'),
+              method: formValue(form, 'method'),
+              reference: formValue(form, 'reference'),
               expectedEtag: form.dataset.etag || undefined
             }
           });

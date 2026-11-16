@@ -208,6 +208,8 @@ function toEntity(record, partition) {
     paymentStatus: record.paymentStatus ?? (Number(record.total) > 0 ? 'UNPAID' : 'UNKNOWN'),
     amountPaid: String(record.amountPaid ?? 0),
     balance: String(record.balance ?? (Number(record.total) - Number(record.amountPaid ?? 0))),
+    paymentOpeningBalanceOre: String(record.paymentOpeningBalanceOre ?? ''),
+    payments: JSON.stringify(record.payments ?? []),
     latestNote: record.latestNote ?? '',
     blockId: record.blockId ?? '',
     airbnbBlockedAt: record.airbnbBlockedAt ?? '',
@@ -272,6 +274,10 @@ function fromEntity(entity) {
     paymentStatus: entity.paymentStatus || (Number(entity.total) > 0 ? 'UNPAID' : 'UNKNOWN'),
     amountPaid: Number(entity.amountPaid ?? 0),
     balance: Number(entity.balance ?? (Number(entity.total) - Number(entity.amountPaid ?? 0))),
+    paymentOpeningBalanceOre: entity.paymentOpeningBalanceOre === '' || entity.paymentOpeningBalanceOre === undefined
+      ? null
+      : Number(entity.paymentOpeningBalanceOre),
+    payments: parse(entity.payments, []),
     latestNote: entity.latestNote ?? '',
     blockId: entity.blockId ?? '',
     airbnbBlockedAt: entity.airbnbBlockedAt ?? '',

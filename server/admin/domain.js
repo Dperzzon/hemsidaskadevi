@@ -5,6 +5,7 @@
 // mejlstatus för visning. Den räknar aldrig om priser och skriver aldrig.
 
 const { deriveWarnings, applyWarnings } = require('./warnings');
+const { computePaymentSummary } = require('./payments');
 
 const STATUS_META = {
   PENDING: {
@@ -260,6 +261,7 @@ function normalizeBooking(record = {}, options = {}) {
   const totalAddons = numberOr(record.totalAddons, addonLines.reduce((sum, line) => sum + line.amount, 0));
   const bookingSource = String(record.bookingSource ?? 'WEB').toUpperCase();
   const isBlock = statusCode === 'BLOCKED' || /^BLOCK-/.test(String(record.reference ?? ''));
+  const paymentSummary = computePaymentSummary(record);
   const booking = {
     idempotencyKey: record.idempotencyKey ?? record.RowKey ?? '',
     rowKey: record.rowKey ?? record.RowKey ?? record.idempotencyKey ?? '',
@@ -306,9 +308,17 @@ function normalizeBooking(record = {}, options = {}) {
     priceVersion: String(record.priceVersion ?? ''),
     addonLines,
     pricing,
-    paymentStatus: String(record.paymentStatus ?? (record.total > 0 ? 'UNPAID' : 'UNKNOWN')).toUpperCase(),
-    amountPaid: numberOr(record.amountPaid),
-    balance: numberOr(record.balance, numberOr(record.total) - numberOr(record.amountPaid)),
+    paymentStatus: paymentSummary.paymentStatus,
+    paymentLabel: paymentSummary.paymentLabel,
+    amountPaid: paymentSummary.amountPaid,
+    balance: paymentSummary.balance,
+    payments: paymentSummary.payments,
+    openingBalanceOre: paymentSummary.openingBalanceOre,
+    totalOre: paymentSummary.totalOre,
+    amountPaidOre: paymentSummary.paidOre,
+    remainingOre: paymentSummary.remainingOre,
+    overpaidOre: paymentSummary.overpaidOre,
+    overpaid: paymentSummary.overpaid,
     latestNote: String(record.latestNote ?? ''),
     airbnbBlockedAt: record.airbnbBlockedAt ?? '',
     airbnbOverride: record.airbnbOverride === true,
@@ -348,7 +358,6 @@ function normalizeBooking(record = {}, options = {}) {
     actionFlags: record.actionFlags && typeof record.actionFlags === 'object' ? record.actionFlags : {},
     isDemo: record.isDemo === true || String(record.reference ?? '').startsWith('DEMO-')
   };
-  booking.paymentLabel = PAYMENT_LABELS[booking.paymentStatus] ?? 'Okänd';
   booking.mailStatus = normalizeEmailStatus(record, options.outbox);
   applyWarnings(booking, { now });
   booking.searchText = [

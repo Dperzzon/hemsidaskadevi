@@ -16,7 +16,8 @@ const {
   STATUS_META,
   filterBookings,
   sortBookings,
-  formatDateKey
+  formatDateKey,
+  todayKey
 } = require('./domain');
 const { renderDashboard } = require('./views/dashboard');
 const { renderBookings } = require('./views/bookings');
@@ -29,6 +30,8 @@ const {
   changeStatus,
   addNote,
   updatePayment,
+  recordPayment,
+  correctPayment,
   updateAddons,
   removeBlock,
   calendarRange,
@@ -474,6 +477,47 @@ async function handleApi(req, res, url, context) {
     return;
   }
 
+  const paymentCorrectionMatch = /^\/api\/admin\/bookings\/([^/]+)\/payments\/([^/]+)\/corrections$/.exec(pathname);
+  if (paymentCorrectionMatch && req.method === 'POST') {
+    if (!guardWrite(req, res, context)) return;
+    const parsed = await readBodyOrError(req, res);
+    if (!parsed) return;
+    const result = await correctPayment(
+      repository,
+      principal,
+      decodeURIComponent(paymentCorrectionMatch[1]),
+      decodeURIComponent(paymentCorrectionMatch[2]),
+      parsed.body,
+      {
+        ...serviceOptions(context),
+        idempotencyKey: req.headers['idempotency-key'] ?? parsed.body.idempotencyKey
+      },
+      { warn: context.warn }
+    );
+    sendJson(req, res, result.status, result.jsonBody);
+    return;
+  }
+
+  const paymentsMatch = /^\/api\/admin\/bookings\/([^/]+)\/payments$/.exec(pathname);
+  if (paymentsMatch && req.method === 'POST') {
+    if (!guardWrite(req, res, context)) return;
+    const parsed = await readBodyOrError(req, res);
+    if (!parsed) return;
+    const result = await recordPayment(
+      repository,
+      principal,
+      decodeURIComponent(paymentsMatch[1]),
+      parsed.body,
+      {
+        ...serviceOptions(context),
+        idempotencyKey: req.headers['idempotency-key'] ?? parsed.body.idempotencyKey
+      },
+      { warn: context.warn }
+    );
+    sendJson(req, res, result.status, result.jsonBody);
+    return;
+  }
+
   const paymentMatch = /^\/api\/admin\/bookings\/([^/]+)\/payment$/.exec(pathname);
   if (paymentMatch && req.method === 'PATCH') {
     if (!guardWrite(req, res, context)) return;
@@ -724,7 +768,7 @@ let calendarParserReady = false;
         const history = await repository.listHistory(reference).catch(() => []);
         await enrichWarnings(repository, booking, now);
         sendHtml(req, res, 200, renderBookingDetail({
-          booking, principal, demo, csrfToken, writesEnabled, history
+          booking, principal, demo, csrfToken, writesEnabled, history, today: todayKey(now)
         }));
         return;
       }

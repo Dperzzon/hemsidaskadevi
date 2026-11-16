@@ -419,6 +419,24 @@ img { max-width: 100%; display: block; }
   .cal-day { min-height: 82px; }
 }
 
+.payment-history-heading { margin-top: 16px; }
+  .payment-history { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+  .payment-entry { border-left: 3px solid var(--gold); padding: 4px 0 4px 12px; }
+  .payment-entry-top { display: flex; justify-content: space-between; gap: 14px; font-size: 0.84rem; }
+  .payment-entry-top strong { font-variant-numeric: tabular-nums; }
+  .payment-entry-meta { color: var(--ink-soft); font-size: 0.76rem; margin-top: 3px; }
+  .payment-entry-actor { color: var(--muted); font-size: 0.72rem; margin-top: 4px; }
+  .payment-opening { border-left-color: var(--muted); }
+  .payment-correction-row { border-left-color: var(--red); }
+  .payment-correction-row .payment-entry-top strong { color: var(--red); }
+  .payment-correction { font-size: 0.78rem; color: var(--ink-soft); margin-top: 4px; }
+  .payment-overpaid strong { color: var(--amber); }
+  .payment-register { margin-top: 12px; }
+  .payment-register > summary { list-style: none; display: inline-block; cursor: pointer; }
+  .payment-register > summary::-webkit-details-marker { display: none; }
+  .payment-register form { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 12px; }
+  .form-error { font-size: 0.76rem; color: var(--red); background: var(--red-soft); border-radius: var(--radius-sm); padding: 9px 10px; margin-top: 10px; }
+
 @media (max-width: 640px) {
   body { font-size: 14px; }
   .demo-banner { padding: 9px 16px; font-size: 0.74rem; }

@@ -187,7 +187,7 @@ test('bokningsbekräftelse för CONFIRMED innehåller betalningar och återståe
     assert.match(extracted.text, /Bokningsnummer: DEMO-2026-F6/);
     assert.match(extracted.text, /Sara Ek/);
     assert.match(extracted.text, /BETALNINGAR/i);
-    assert.match(extracted.text, /REGISTRERAT BETALT/i);
+    assert.match(extracted.text, /TOTALT MOTTAGNA BETALNINGAR/i);
     assert.ok(extracted.text.includes(normalizeSpaces(formatMoney(booking.amountPaid))));
     assert.match(extracted.text, /ÅTERSTÅENDE BELOPP/i);
     assert.ok(extracted.text.includes(normalizeSpaces(formatMoney(booking.balance))));
@@ -285,7 +285,7 @@ test('betalningar visar registrerat belopp och återstående belopp utan negativ
     balance: 6000,
     paymentStatus: 'PARTIALLY_PAID'
   }));
-  assert.equal(normalizeSpaces(partial.rows.find((row) => row.label === 'Registrerat betalt').value), '4 000 kr');
+  assert.equal(normalizeSpaces(partial.rows.find((row) => row.label === 'Totalt mottagna betalningar').value), '4 000 kr');
   assert.equal(normalizeSpaces(partial.rows.find((row) => row.label === 'Återstående belopp').value), '6 000 kr');
   assert.equal(partial.statusLabel, 'Delbetalt');
 
