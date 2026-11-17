@@ -63,6 +63,11 @@ param enableCardCheckout = true
 
 param enableSwishCheckout = false
 
+// Direktbokning med kort är AVSTÄNGD. Airbnb iCal är inte en realtidskälla och
+// ger ingen atomisk låsning. Slå inte på detta utan ett dokumenterat och
+// uttryckligen godkänt beslut om kvarstående dubbelbokningsrisk.
+param enableDirectBooking = false
+
 param stripeMode = 'live'
 
 param allowStripeLive = true

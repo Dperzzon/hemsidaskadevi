@@ -2,13 +2,20 @@
 
 const {
   parseStripeEvent,
-  StripeSignatureError
+  StripeSignatureError,
+  createStripeClient
 } = require('./stripe');
 const {
   applyStripePayment,
   markPaymentRequestStatus,
   formatOre
 } = require('./payment-ledger');
+const {
+  RESERVATION_STATUS,
+  verifyReservation,
+  convertReservationToBooking,
+  releaseReservation
+} = require('./reservations');
 const { MAIL } = require('./mail');
 
 const API_HEADERS = {
@@ -229,6 +236,203 @@ async function markStatusWithRetry(store, reference, session, status, event, opt
   throw lastError;
 }
 
+function getStripeClient(options = {}) {
+  if (options.stripeClient) return options.stripeClient;
+  try {
+    return createStripeClient({
+      secretKey: options.stripeSecretKey,
+      allowLive: options.stripeAllowLive,
+      fetchImpl: options.stripeFetchImpl,
+      apiBase: options.stripeApiBase,
+      timeoutMs: options.stripeTimeoutMs
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function appendDirectHistory(store, record, session, event, options, context, action, changes = {}) {
+  try {
+    await store.appendHistory({
+      idempotencyKey: `direct-${session.id}-${action.toLowerCase()}`,
+      reference: record.reference,
+      action,
+      fromStatus: record.statusCode ?? '',
+      toStatus: record.statusCode ?? '',
+      changes: JSON.stringify({
+        provider: 'stripe',
+        sessionId: String(session.id ?? ''),
+        eventId: event.id,
+        amountOre: Number(session.amount_total) || 0,
+        ...changes
+      }),
+      reason: '',
+      actorId: 'stripe',
+      actorName: 'Stripe',
+      correlationId: event.id,
+      at: (options.now ?? new Date()).toISOString()
+    });
+  } catch (error) {
+    if (error?.status !== 409) {
+      context.warn?.(`Direktbokning: historik kunde inte sparas för ${record.reference}.`);
+    }
+  }
+}
+
+// Betalningen är genomförd men bokningen kan inte säkert bekräftas. Vi bevarar
+// Stripe-transaktionen och skapar ett tydligt avstämningsärende för Owner.
+async function markReconciliation(store, record, session, event, options, context, reason) {
+  const now = options.now ?? new Date();
+  const raw = await store.getByReference(record.reference).catch(() => null);
+  const current = raw?.record ?? record;
+  const updated = {
+    ...current,
+    statusCode: 'RECONCILIATION',
+    status: 'Avstämning krävs',
+    reconciliation: {
+      reason,
+      sessionId: String(session.id ?? ''),
+      paymentIntentId: String(session.payment_intent ?? ''),
+      amountOre: Number(session.amount_total) || 0,
+      currency: String(session.currency ?? ''),
+      eventId: event.id,
+      at: now.toISOString()
+    },
+    version: Number(current.version || 1) + 1,
+    updatedAt: now.toISOString(),
+    updatedBy: 'Stripe'
+  };
+  try {
+    const saved = await store.updateRequest(updated, { ifMatch: raw?.etag ?? '*' });
+    await appendDirectHistory(store, saved.record, session, event, options, context,
+      'DIRECT_BOOKING_RECONCILIATION', { reason });
+    return { ok: false, reconciliation: true, record: saved.record };
+  } catch (error) {
+    context.warn?.(`Direktbokning: avstämningsärende kunde inte sparas för ${record.reference}.`);
+    return { ok: false, reconciliation: true, retryable: true, error };
+  }
+}
+
+async function confirmDirectBooking(store, applied, session, event, options, context) {
+  const record = applied.record;
+  if (record.bookingSource !== 'DIRECT' && !record.reservation) {
+    return { ok: true, skipped: true };
+  }
+  if (record.statusCode === 'CONFIRMED') {
+    return { ok: true, alreadyConfirmed: true };
+  }
+  if (record.statusCode !== 'PENDING_PAYMENT' && record.statusCode !== 'RECONCILIATION') {
+    return markReconciliation(
+      store, record, session, event, options, context,
+      `Bokningen hade status ${record.statusCode ?? 'okänd'} när betalningen togs emot.`
+    );
+  }
+
+  const verification = await verifyReservation(store, record);
+  if (!verification.ok) {
+    return markReconciliation(
+      store, record, session, event, options, context,
+      'Reservationen saknar giltig nattlåsning. Kontrollera datumen och återbetala vid behov.'
+    );
+  }
+
+  try {
+    await convertReservationToBooking(store, record, options.now ?? new Date());
+  } catch {
+    return markReconciliation(
+      store, record, session, event, options, context,
+      'Nattlåsningen kunde inte omvandlas till en bekräftad bokning.'
+    );
+  }
+
+  const now = options.now ?? new Date();
+  const updated = {
+    ...record,
+    statusCode: 'CONFIRMED',
+    status: 'Bekräftad',
+    confirmedAt: now.toISOString(),
+    reservation: {
+      ...(record.reservation ?? {}),
+      status: RESERVATION_STATUS.CONFIRMED,
+      confirmedAt: now.toISOString()
+    },
+    version: Number(record.version || 1) + 1,
+    updatedAt: now.toISOString(),
+    updatedBy: 'Stripe'
+  };
+  try {
+    const saved = await store.updateRequest(updated, { ifMatch: applied.etag });
+    await appendDirectHistory(store, saved.record, session, event, options, context,
+      'DIRECT_BOOKING_CONFIRMED');
+    return { ok: true, record: saved.record };
+  } catch (error) {
+    if (error?.status === 409) {
+      const raw = await store.getByReference(record.reference).catch(() => null);
+      if (raw?.record?.statusCode === 'CONFIRMED') {
+        return { ok: true, alreadyConfirmed: true };
+      }
+    }
+    return markReconciliation(
+      store, record, session, event, options, context,
+      'Bokningen kunde inte uppdateras till bekräftad efter betalningen.'
+    );
+  }
+}
+
+async function releaseDirectReservation(store, reference, session, event, options, context) {
+  const raw = await store.getByReference(reference).catch(() => null);
+  if (!raw) return { ok: false, reason: 'unknown_reference' };
+  const record = raw.record;
+  if (record.bookingSource !== 'DIRECT' && !record.reservation) {
+    return { ok: true, skipped: true };
+  }
+  if (record.statusCode === 'CONFIRMED') {
+    return { ok: true, skipped: true };
+  }
+
+  // Verifiera hos Stripe att sessionen verkligen är avslutad och inte betald
+  // innan datumen frigörs. Utan verifiering lämnas reservationen orörd.
+  const stripe = getStripeClient(options);
+  if (stripe) {
+    try {
+      const current = await stripe.retrieveCheckoutSession(session.id);
+      if (current?.payment_status === 'paid') {
+        return { ok: false, reason: 'session_paid' };
+      }
+      if (current?.status !== 'expired' && current?.status !== 'complete') {
+        return { ok: false, reason: 'session_not_finished' };
+      }
+    } catch {
+      return { ok: false, reason: 'stripe_unavailable', retryable: true };
+    }
+  }
+
+  const now = options.now ?? new Date();
+  await releaseReservation(store, reference, now);
+  const updated = {
+    ...record,
+    statusCode: 'EXPIRED',
+    status: 'Reservationen har gått ut',
+    reservation: {
+      ...(record.reservation ?? {}),
+      status: RESERVATION_STATUS.EXPIRED,
+      releasedAt: now.toISOString()
+    },
+    version: Number(record.version || 1) + 1,
+    updatedAt: now.toISOString(),
+    updatedBy: 'Stripe'
+  };
+  try {
+    const saved = await store.updateRequest(updated, { ifMatch: raw.etag });
+    await appendDirectHistory(store, saved.record, session, event, options, context,
+      'DIRECT_BOOKING_RESERVATION_RELEASED');
+    return { ok: true, released: true, record: saved.record };
+  } catch (error) {
+    context.warn?.(`Direktbokning: reservationen kunde inte frigöras för ${reference}.`);
+    return { ok: false, retryable: true, error };
+  }
+}
+
 async function handleStripeWebhook(request, context = {}, options = {}) {
   const warn = context.warn ?? (() => {});
   const enabled = options.enabled ?? process.env.STRIPE_WEBHOOK_ENABLED === '1';
@@ -294,13 +498,17 @@ async function handleStripeWebhook(request, context = {}, options = {}) {
       ? 'STRIPE_PAYMENT_REQUEST_EXPIRED'
       : 'STRIPE_PAYMENT_FAILED';
     const marked = await markStatusWithRetry(store, reference, session, status, event, eventOptions, { warn });
+    const released = await releaseDirectReservation(store, reference, session, event, eventOptions, { warn });
+    if (released.retryable) {
+      return result(503, { error: 'Reservationen kunde inte frigöras just nu.' });
+    }
     if (!marked.ok) {
       return result(200, { received: true, ignored: marked.reason ?? 'not_applicable' });
     }
     if (marked.changed) {
       await appendStatusHistory(store, marked.record, session, action, event, eventOptions, { warn });
     }
-    return result(200, { received: true });
+    return result(200, { received: true, released: released.released === true });
   }
 
   if (session.payment_status !== 'paid') {
@@ -326,6 +534,14 @@ async function handleStripeWebhook(request, context = {}, options = {}) {
     ...eventOptions,
     reviewRequired: applied.reviewRequired
   }, { warn });
+
+  const direct = await confirmDirectBooking(store, applied, session, event, eventOptions, { warn });
+  if (direct?.retryable) {
+    return result(503, { error: 'Betalningen kunde inte registreras just nu.' });
+  }
+  if (direct?.reconciliation) {
+    return result(200, { received: true, reconciliation: true });
+  }
 
   return result(200, {
     received: true,

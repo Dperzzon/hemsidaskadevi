@@ -51,6 +51,20 @@ const STATUS_META = {
     shortLabel: 'Blockerad',
     tone: 'blocked',
     legacy: ['Blockerad', 'Datumblockering']
+  },
+  RECONCILIATION: {
+    code: 'RECONCILIATION',
+    label: 'Avstämning krävs',
+    shortLabel: 'Avstämning',
+    tone: 'pending',
+    legacy: ['Avstämning krävs', 'Avstämning']
+  },
+  EXPIRED: {
+    code: 'EXPIRED',
+    label: 'Reservationen har gått ut',
+    shortLabel: 'Utgången',
+    tone: 'cancelled',
+    legacy: ['Reservationen har gått ut', 'Utgången']
   }
 };
 
@@ -60,7 +74,7 @@ const SOURCE_LABELS = {
   AIRBNB: 'Airbnb',
   PHONE: 'Telefon',
   EMAIL: 'E-post',
-  DIRECT: 'Direkt',
+  DIRECT: 'Direktbokning webb',
   OTHER: 'Annat'
 };
 
@@ -335,6 +349,40 @@ function normalizeBooking(record = {}, options = {}) {
     payments: paymentSummary.payments,
     paymentRequests,
     paymentRequest: latestPaymentRequest(paymentRequests),
+    reservation: record.reservation && typeof record.reservation === 'object'
+      ? {
+        status: String(record.reservation.status ?? ''),
+        reference: String(record.reservation.reference ?? ''),
+        owner: String(record.reservation.owner ?? ''),
+        sessionId: String(record.reservation.sessionId ?? ''),
+        createdAt: String(record.reservation.createdAt ?? ''),
+        activatedAt: String(record.reservation.activatedAt ?? ''),
+        expiresAt: String(record.reservation.expiresAt ?? ''),
+        confirmedAt: String(record.reservation.confirmedAt ?? ''),
+        releasedAt: String(record.reservation.releasedAt ?? '')
+      }
+      : null,
+    reconciliation: record.reconciliation && typeof record.reconciliation === 'object'
+      ? {
+        reason: String(record.reconciliation.reason ?? ''),
+        sessionId: String(record.reconciliation.sessionId ?? ''),
+        paymentIntentId: String(record.reconciliation.paymentIntentId ?? ''),
+        amountOre: numberOr(record.reconciliation.amountOre),
+        currency: String(record.reconciliation.currency ?? ''),
+        eventId: String(record.reconciliation.eventId ?? ''),
+        at: String(record.reconciliation.at ?? '')
+      }
+      : null,
+    stripeSessionId: String(
+      paymentSummary.payments.find((payment) => payment.stripeSessionId)?.stripeSessionId ??
+      latestPaymentRequest(paymentRequests)?.sessionId ??
+      ''
+    ),
+    stripePaymentIntentId: String(
+      paymentSummary.payments.find((payment) => payment.stripePaymentIntentId)?.stripePaymentIntentId ??
+      latestPaymentRequest(paymentRequests)?.paymentIntentId ??
+      ''
+    ),
     paymentLink: {
       status: paymentLinkStatus,
       statusLabel: paymentLinkLabels[paymentLinkStatus] ?? 'Okänd',

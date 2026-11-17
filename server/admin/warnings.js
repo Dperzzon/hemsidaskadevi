@@ -26,6 +26,7 @@ const WARNING = {
   OVERLAP: 'request.overlap',
   MAIL_REVIEW: 'mail.review',
   PAYMENT_MISSING: 'payment.missing',
+  RECONCILIATION: 'payment.reconciliation',
   REQUEST_STALE: 'request.stale'
 };
 
@@ -55,6 +56,7 @@ const POLICIES = {
   [WARNING.OVERLAP]: { type: 'INTERNAL_BOOKING', severity: SEVERITY.ACTION, dismissible: false, recheckable: false },
   [WARNING.MAIL_REVIEW]: { type: 'MAIL', severity: SEVERITY.VERIFY, dismissible: true, recheckable: false },
   [WARNING.PAYMENT_MISSING]: { type: 'PAYMENT', severity: SEVERITY.ACTION, dismissible: false, recheckable: false },
+  [WARNING.RECONCILIATION]: { type: 'PAYMENT', severity: SEVERITY.ACTION, dismissible: false, recheckable: false },
   [WARNING.REQUEST_STALE]: { type: 'REQUEST', severity: SEVERITY.ACTION, dismissible: false, recheckable: false }
 };
 
@@ -440,6 +442,17 @@ function operationalWarnings(booking, now) {
       why: 'API-acceptans är inte samma sak som leverans, och ett misslyckat utskick kan behöva hanteras manuellt.',
       recommendation: 'Kontrollera mejlstatus och skicka vid behov om. Markera som hanterad först när du har kontrollerat utfallet.',
       fingerprint: warningFingerprint(booking, WARNING.MAIL_REVIEW, parts.join(','))
+    }));
+  }
+
+  if (booking.statusCode === 'RECONCILIATION') {
+    warnings.push(createWarning(WARNING.RECONCILIATION, {
+      title: 'Betalning kräver avstämning',
+      what: booking.reconciliation?.reason || 'En betalning är mottagen men bokningen kunde inte bekräftas säkert.',
+      why: 'Stripe-transaktionen är genomförd. Bokningen får inte visas som bekräftad förrän betalning och datumlåsning har stämts av.',
+      recommendation: 'Kontrollera Stripe-transaktionen och kalendern. Bekräfta bokningen manuellt eller återbetala betalningen.',
+      fingerprint: warningFingerprint(booking, WARNING.RECONCILIATION,
+        `${booking.reconciliation?.sessionId ?? ''}|${booking.reconciliation?.at ?? ''}`)
     }));
   }
 

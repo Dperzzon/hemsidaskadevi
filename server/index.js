@@ -11,6 +11,11 @@ const { handleAvailability } = require('./calendar/availability');
 const { handleBookingRequest, createRateLimiter } = require('./booking/requests');
 const { handleStripeWebhook } = require('./booking/stripe-webhook');
 const { handlePaymentPage, handlePaymentAction } = require('./booking/payment-page');
+const {
+  handleDirectBooking,
+  handleDirectBookingConfirmation,
+  directBookingAvailable
+} = require('./booking/direct-booking');
 const { loadRules, publicRules } = require('./booking/rules');
 const { createStore, isConfigured } = require('./booking/store');
 
@@ -285,8 +290,6 @@ function createRequestListener(options = {}) {
       store: createStore(options),
       rateLimiter
     }));
-  const stripeWebhookHandler = options.stripeWebhookHandler ??
-    ((request, context) => handleStripeWebhook(request, context, { ...options, store: createStore(options) }));
   const paymentOptions = {
     stripeEnabled: options.stripeEnabled ?? process.env.STRIPE_ENABLED === '1',
     stripeSecretKey: options.stripeSecretKey ?? process.env.STRIPE_SECRET_KEY,
@@ -299,10 +302,37 @@ function createRequestListener(options = {}) {
     publicBaseUrl: options.publicBaseUrl,
     outboxEnabled: options.outboxEnabled ?? process.env.STRIPE_OUTBOX_ENABLED === '1'
   };
+  const stripeWebhookHandler = options.stripeWebhookHandler ??
+    ((request, context) => handleStripeWebhook(request, context, {
+      ...options,
+      ...paymentOptions,
+      store: createStore(options)
+    }));
   const paymentPageHandler = options.paymentPageHandler ??
     ((request, context) => handlePaymentPage(request, context, { ...paymentOptions, store: createStore(options) }));
   const paymentActionHandler = options.paymentActionHandler ??
     ((request, context) => handlePaymentAction(request, context, { ...paymentOptions, store: createStore(options) }));
+  const directBookingOptions = {
+    ...paymentOptions,
+    directBookingEnabled: options.directBookingEnabled ?? process.env.DIRECT_BOOKING_ENABLED === '1',
+    allowLiveDirectBooking: options.allowLiveDirectBooking,
+    stripeMode: options.stripeMode ?? process.env.STRIPE_MODE ?? 'test',
+    availability: options.availability,
+    availabilityHandler,
+    rules: options.rules,
+    rateLimiter,
+    requireDurableStore: options.requireDurableStore
+  };
+  const directBookingHandler = options.directBookingHandler ??
+    ((request, context) => handleDirectBooking(request, context, {
+      ...directBookingOptions,
+      store: createStore(options)
+    }));
+  const directBookingConfirmationHandler = options.directBookingConfirmationHandler ??
+    ((request, context) => handleDirectBookingConfirmation(request, context, {
+      ...directBookingOptions,
+      store: createStore(options)
+    }));
   const rulesHandler = options.rulesHandler ?? (async () => publicRules(await loadRules(options)));
   const warn = options.warn ?? ((message) => console.error(message));
   // Kanoniskt värdnamn: rotdomänen 301-omdirigeras till www. Endast exakt
@@ -353,6 +383,15 @@ function createRequestListener(options = {}) {
       return;
     }
 
+    if (url.pathname === '/api/booking-config' && (req.method === 'GET' || req.method === 'HEAD')) {
+      sendJson(res, 200, {
+        directBookingEnabled: directBookingAvailable(directBookingOptions),
+        cardEnabled: directBookingOptions.cardEnabled !== false,
+        manualRequestEnabled: options.bookingRequestsEnabled ?? process.env.BOOKING_REQUESTS_ENABLED === '1'
+      });
+      return;
+    }
+
     if (url.pathname === '/api/booking-requests' && req.method === 'POST') {
       let body;
       try {
@@ -371,6 +410,32 @@ function createRequestListener(options = {}) {
         sendJson(res, result.status, result.jsonBody, result.headers);
       } catch {
         sendJson(res, 503, { error: 'Förfrågningar kan tyvärr inte tas emot just nu. Vänligen kontakta oss direkt.' });
+      }
+      return;
+    }
+
+    if (url.pathname === '/api/direct-booking' && req.method === 'POST') {
+      if (!isSameOrigin(req)) {
+        sendJson(res, 403, { error: 'Förfrågan kommer från en otillåten origin.' });
+        return;
+      }
+      let body;
+      try {
+        body = JSON.parse(await readJsonBody(req));
+      } catch {
+        sendJson(res, 400, { error: 'Förfrågan kunde inte tolkas.' });
+        return;
+      }
+      const ip = clientIp(req);
+      try {
+        const result = await directBookingHandler(
+          { body, idempotencyKey: req.headers['idempotency-key'], ip },
+          { warn },
+          {}
+        );
+        sendJson(res, result.status, result.jsonBody, result.headers);
+      } catch {
+        sendJson(res, 503, { error: 'Direktbokningen är tillfälligt otillgänglig. Skicka gärna en bokningsförfrågan.' });
       }
       return;
     }
@@ -423,6 +488,20 @@ function createRequestListener(options = {}) {
         sendHtmlResult(res, result);
       } catch {
         sendJson(res, 503, { error: 'Betalningssidan är tillfälligt otillgänglig.' });
+      }
+      return;
+    }
+
+    if (url.pathname === '/bokning-klar' && (req.method === 'GET' || req.method === 'HEAD')) {
+      try {
+        const result = await directBookingConfirmationHandler(
+          { query: Object.fromEntries(url.searchParams) },
+          { warn },
+          {}
+        );
+        sendHtmlResult(res, result);
+      } catch {
+        await sendErrorPage(res, root, 503);
       }
       return;
     }

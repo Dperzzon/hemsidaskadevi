@@ -317,7 +317,7 @@ function applyStripePayment(record = {}, session = {}, options = {}) {
     method
   });
   const warnings = [];
-  if (record.statusCode !== 'CONFIRMED') {
+  if (record.statusCode !== 'CONFIRMED' && record.statusCode !== 'PENDING_PAYMENT') {
     warnings.push(
       `Bokningen hade status ${record.statusCode ?? 'okänd'} när betalningen togs emot. Kontrollera betalningen och återbetala vid behov.`
     );

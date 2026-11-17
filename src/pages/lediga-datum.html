@@ -139,6 +139,18 @@
             <p class="booking-discount-note" id="discount-note" hidden></p>
             <p class="booking-price-note">Priset är en beräknad offert för den valda perioden. En bokningsförfrågan är inte en bekräftad bokning — ni får besked från oss om tillgänglighet och pris innan bokningen blir giltig.</p>
           </div>
+          <fieldset class="booking-payment-method">
+            <legend>Betalning</legend>
+            <div class="booking-payment-option">
+              <input type="radio" id="payment-request" name="paymentMethod" value="request" checked>
+              <label for="payment-request">Skicka bokningsförfrågan / faktura <span>— vi återkommer med besked. Ingen betalning nu och bokningen kräver manuellt godkännande.</span></label>
+            </div>
+            <div class="booking-payment-option" id="payment-card-option" hidden>
+              <input type="radio" id="payment-card" name="paymentMethod" value="card">
+              <label for="payment-card">Betala direkt med kort <span>— bokningen bekräftas direkt om datumen är lediga och betalningen genomförs.</span></label>
+            </div>
+            <p class="booking-payment-note" id="payment-note">Faktura och bokningsförfrågan kräver manuellt godkännande. Direktbetalning med kort bekräftar bokningen automatiskt när tillgängligheten är verifierad.</p>
+          </fieldset>
           <div class="booking-field booking-consent">
             <input type="checkbox" id="consent-rules" name="consentRules" required>
             <label for="consent-rules">Jag har läst och godkänner Skadevi Herrgårds <button type="button" class="booking-rules-link" id="open-rules-label" aria-haspopup="dialog">bokningsregler</button>.</label>
@@ -154,9 +166,10 @@
             <p class="field-error" aria-live="polite"></p>
           </div>
           <p class="booking-submit-notice" id="submit-notice" hidden></p>
+          <p class="booking-form-error" id="manual-review" role="alert" hidden></p>
           <p class="booking-form-error" id="form-error" role="alert" hidden></p>
           <button type="submit" class="btn" id="booking-submit" disabled>Skicka bokningsförfrågan</button>
-          <p class="booking-submit-note">En bokningsförfrågan är inte en bekräftad bokning. Ni får besked från oss om tillgänglighet och pris innan bokningen blir giltig.</p>
+          <p class="booking-submit-note">En bokningsförfrågan är inte en bekräftad bokning. Vid direktbetalning med kort bekräftas bokningen först när Stripe har bekräftat betalningen och datumen är låsta.</p>
         </form>
         <div class="booking-confirmation" id="booking-confirmation" hidden tabindex="-1">
           <h3>Tack för din bokningsförfrågan!</h3>

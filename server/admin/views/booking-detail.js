@@ -252,6 +252,12 @@ function statusActions(booking) {
       prompt: 'Orsak till avbokning', requiresReason: true, requiresOwner: true
     }));
   }
+  if (booking.statusCode === 'RECONCILIATION') {
+    buttons.push(actionButton('Bekräfta bokning manuellt', 'confirm', booking, 'primary', { requiresOwner: true }));
+    buttons.push(actionButton('Avboka och frigör datum', 'cancel', booking, 'danger', {
+      prompt: 'Orsak till avbokning och frigöring av datum', requiresReason: true, requiresOwner: true
+    }));
+  }
   if (!buttons.length) return '<p class="muted">Ingen statusåtgärd tillgänglig för nuvarande status.</p>';
   return `<div class="button-stack">${buttons.join('')}</div>
     <label class="check-row muted"><input type="checkbox" id="send-confirmation-email" disabled> Skicka bekräftelsemejl till gästen</label>
@@ -401,6 +407,8 @@ function paymentPanel(booking, isOwner, writesEnabled, today, stripeEnabled, str
   const remainingOre = Number(booking.remainingOre ?? (totalOre - paidOre));
   const overpaidOre = Number(booking.overpaidOre ?? Math.max(0, -remainingOre));
   const overpaid = overpaidOre > 0;
+  const stripeReference = booking.stripeSessionId || booking.stripePaymentIntentId || '';
+  const reconciliation = booking.reconciliation;
   const form = isOwner && writesEnabled
     ? `<details class="payment-register">
         <summary class="btn btn-primary">Registrera betalning</summary>
@@ -426,6 +434,12 @@ function paymentPanel(booking, isOwner, writesEnabled, today, stripeEnabled, str
       ${overpaid ? `<div class="price-row payment-overpaid"><span>Överbetalning</span><strong>${escapeHtml(formatOre(overpaidOre))}</strong></div>` : ''}
       <div class="price-row"><span>Betalstatus</span><strong>${escapeHtml(booking.paymentLabel || PAYMENT_LABELS[booking.paymentStatus] || 'Okänd')}</strong></div>
     </div>
+    ${stripeReference ? `<p class="payment-entry-meta">Stripe-transaktion: ${escapeHtml(stripeReference)}</p>` : ''}
+    ${reconciliation ? `<div class="warning-banner warning-banner-action">
+      <div class="warning-banner-head"><strong>Avstämning krävs</strong><span>${escapeHtml(formatDateTime(reconciliation.at))}</span></div>
+      <p>${escapeHtml(reconciliation.reason || 'Betalningen är mottagen men bokningen kunde inte bekräftas säkert.')}</p>
+      <p class="payment-entry-meta">Stripe-session: ${escapeHtml(reconciliation.sessionId || '—')} · Belopp: ${escapeHtml(formatOre(reconciliation.amountOre))}</p>
+    </div>` : ''}
     ${form}
     ${stripePaymentSection(booking, isOwner, writesEnabled, stripeEnabled, stripeMode, swishEnabled)}
     <div class="panel-heading payment-history-heading"><div><p class="eyebrow">Historik</p><h3>Betalningshistorik</h3></div></div>

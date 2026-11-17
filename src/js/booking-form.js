@@ -215,18 +215,49 @@ function openRulesDialog(event) {
 
 // --- Inskick ---
 
-function setSending(sending) {
-  els.submit.disabled = sending;
-  els.submit.textContent = sending ? 'Skickar …' : 'Skicka bokningsförfrågan';
+function selectedPaymentMethod() {
+  return els.paymentCard?.checked ? 'card' : 'request';
 }
 
-async function submitBooking(event) {
-  event.preventDefault();
-  if (els.submit.disabled) return;
-  if (!validateForm()) return;
-  setSending(true);
-  els.formError.hidden = true;
-  const payload = {
+function updateSubmitLabel() {
+  if (!els.submit || els.submit.disabled) return;
+  els.submit.textContent = selectedPaymentMethod() === 'card'
+    ? 'Boka och betala'
+    : 'Skicka bokningsförfrågan';
+}
+
+function setSending(sending) {
+  els.submit.disabled = sending;
+  if (sending) {
+    els.submit.textContent = selectedPaymentMethod() === 'card' ? 'Startar betalning …' : 'Skickar …';
+  } else {
+    updateSubmitLabel();
+  }
+}
+
+async function loadBookingConfig() {
+  try {
+    const response = await fetch('/api/booking-config', { cache: 'no-store' });
+    if (!response.ok) return;
+    const config = await response.json();
+    els.directBookingEnabled = config.directBookingEnabled === true;
+    if (els.paymentCardOption) els.paymentCardOption.hidden = !els.directBookingEnabled;
+    if (!els.directBookingEnabled && els.paymentCard?.checked) {
+      els.paymentRequest.checked = true;
+    }
+    if (els.paymentNote) {
+      els.paymentNote.textContent = els.directBookingEnabled
+        ? 'Direktbetalning med kort bekräftar bokningen automatiskt när tillgängligheten är verifierad. Faktura och bokningsförfrågan kräver manuellt godkännande.'
+        : 'Faktura och bokningsförfrågan kräver manuellt godkännande. Direktbetalning med kort är inte tillgänglig just nu.';
+    }
+    updateSubmitLabel();
+  } catch {
+    // Utan konfiguration visas endast det säkra förfrågningsflödet.
+  }
+}
+
+function buildPayload() {
+  return {
     arrival: els.arrival.value,
     departure: els.departure.value,
     firstName: els.firstName.value.trim(),
@@ -243,6 +274,42 @@ async function submitBooking(event) {
     consentRules: els.consentRules.checked,
     consentContact: els.consentContact.checked
   };
+}
+
+function applyFieldErrors(fields) {
+  const fieldMap = {
+    arrival: els.arrival, departure: els.departure,
+    firstName: els.firstName, lastName: els.lastName,
+    email: els.email, phone: els.phone, guests: els.guests,
+    linenCount: els.linenCount, consentRules: els.consentRules
+  };
+  let first = null;
+  for (const [name, message] of Object.entries(fields)) {
+    const input = fieldMap[name];
+    if (input) {
+      setError(input, message);
+      if (!first) first = input;
+    }
+  }
+  if (first) first.focus();
+}
+
+async function submitBooking(event) {
+  event.preventDefault();
+  if (els.submit.disabled) return;
+  if (!validateForm()) return;
+  els.formError.hidden = true;
+  if (els.manualReview) els.manualReview.hidden = true;
+  const payload = buildPayload();
+  if (selectedPaymentMethod() === 'card') {
+    await submitDirectBooking(payload);
+  } else {
+    await submitRequest(payload);
+  }
+}
+
+async function submitRequest(payload) {
+  setSending(true);
   try {
     const response = await fetch('/api/booking-requests', {
       method: 'POST',
@@ -262,27 +329,55 @@ async function submitBooking(event) {
       return;
     }
     if (response.status === 400 && data.fields) {
-      const fieldMap = {
-        arrival: els.arrival, departure: els.departure,
-        firstName: els.firstName, lastName: els.lastName,
-        email: els.email, phone: els.phone, guests: els.guests,
-        linenCount: els.linenCount, consentRules: els.consentRules
-      };
-      let first = null;
-      for (const [name, message] of Object.entries(data.fields)) {
-        const input = fieldMap[name];
-        if (input) {
-          setError(input, message);
-          if (!first) first = input;
-        }
-      }
-      if (first) first.focus();
+      applyFieldErrors(data.fields);
       showFormError(data.error || 'Kontrollera uppgifterna i formuläret.');
       return;
     }
     showFormError(data.error || 'Förfrågan kunde inte skickas just nu. Vänligen försök igen om en stund eller kontakta oss direkt.');
   } catch {
     showFormError('Något gick fel när förfrågan skickades. Kontrollera din internetanslutning och försök igen.');
+  } finally {
+    setSending(false);
+  }
+}
+
+async function submitDirectBooking(payload) {
+  setSending(true);
+  try {
+    const response = await fetch('/api/direct-booking', {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey() },
+      body: JSON.stringify(payload)
+    });
+    const data = await response.json().catch(() => ({}));
+    if (response.ok && data.checkoutUrl) {
+      window.location.assign(data.checkoutUrl);
+      return;
+    }
+    if (data.manualReview) {
+      if (els.manualReview) {
+        els.manualReview.textContent = data.error ||
+          'Vi behöver kontrollera tillgängligheten manuellt. Skicka gärna en bokningsförfrågan.';
+        els.manualReview.hidden = false;
+        els.manualReview.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+      return;
+    }
+    if (response.status === 409) {
+      if (data.retryable) resetIdempotencyKey();
+      showFormError(data.error || 'Några av de valda nätterna är inte längre tillgängliga. Välj andra datum i kalendern.');
+      document.dispatchEvent(new CustomEvent('booking:invalidate'));
+      return;
+    }
+    if (response.status === 400 && data.fields) {
+      applyFieldErrors(data.fields);
+      showFormError(data.error || 'Kontrollera uppgifterna i formuläret.');
+      return;
+    }
+    showFormError(data.error || 'Betalningen kunde inte startas just nu. Försök igen eller skicka en bokningsförfrågan.');
+  } catch {
+    showFormError('Något gick fel när betalningen skulle startas. Kontrollera din internetanslutning och försök igen.');
   } finally {
     setSending(false);
   }
@@ -306,8 +401,14 @@ function handleSelection(detail) {
   const { arrival = null, departure = null, nights = 0 } = detail ?? {};
   const complete = Boolean(arrival && departure && nights > 0);
   const wasOpen = !els.section.hidden && !els.form.hidden;
+  const previousArrival = els.arrival.value;
+  const previousDeparture = els.departure.value;
   updateSummary({ arrival, departure, nights });
   els.formError.hidden = true;
+  if (els.manualReview) els.manualReview.hidden = true;
+  if (complete && (arrival !== previousArrival || departure !== previousDeparture)) {
+    resetIdempotencyKey();
+  }
 
   if (!complete) {
     // Ett påbörjat datumval får aldrig visa kvarvarande totalpris för den
@@ -333,6 +434,7 @@ function handleSelection(detail) {
 
 function changeDates() {
   els.section.hidden = true;
+  resetIdempotencyKey();
   document.dispatchEvent(new CustomEvent('booking:invalidate'));
   const calendar = document.querySelector('.calendar-section');
   calendar?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -371,6 +473,11 @@ function queryAll() {
     discountNote: q('discount-note'),
     consentRules: q('consent-rules'),
     consentContact: q('consent-contact'),
+    paymentRequest: q('payment-request'),
+    paymentCard: q('payment-card'),
+    paymentCardOption: q('payment-card-option'),
+    paymentNote: q('payment-note'),
+    manualReview: q('manual-review'),
     submit: q('booking-submit'),
     submitNotice: q('submit-notice'),
     formError: q('form-error'),
@@ -418,7 +525,16 @@ function init() {
   // Klick på "bokningsregler" i etiketttexten: hindra kryssrutans växling.
   q('open-rules-label')?.addEventListener('click', openRulesDialog, false);
   q('close-rules')?.addEventListener('click', () => els.rulesDialog.close());
+  for (const radio of [els.paymentRequest, els.paymentCard]) {
+    radio?.addEventListener('change', () => {
+      els.formError.hidden = true;
+      if (els.manualReview) els.manualReview.hidden = true;
+      resetIdempotencyKey();
+      updateSubmitLabel();
+    });
+  }
   loadRules();
+  loadBookingConfig();
 }
 
 function setSelectionPlaceholder() {

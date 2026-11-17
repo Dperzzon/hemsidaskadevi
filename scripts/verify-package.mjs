@@ -72,6 +72,8 @@ const required = [
   'server/booking/payment-access.js',
   'server/booking/invoice-requests.js',
   'server/booking/payment-page.js',
+  'server/booking/direct-booking.js',
+  'server/booking/reservations.js',
   'server/booking/stripe.js',
   'server/booking/stripe-webhook.js',
   'server/booking/mail.js',

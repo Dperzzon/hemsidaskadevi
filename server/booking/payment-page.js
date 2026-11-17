@@ -678,5 +678,6 @@ module.exports = {
   handlePaymentAction,
   renderPaymentPage,
   renderErrorPage,
-  loadPaymentContext
+  loadPaymentContext,
+  layout
 };

@@ -521,6 +521,7 @@ h6 { font-size: var(--text-lg); }
 .booking-form .booking-consent,
 .booking-form .booking-addons,
 .booking-form .booking-prices,
+.booking-form .booking-payment-method,
 .booking-form .booking-field:has(textarea) { grid-column: 1 / -1; }
 .hp-field { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
 .booking-form label { font-family: var(--font-subheading); font-size: 13px; font-weight: 500; }
@@ -563,6 +564,13 @@ h6 { font-size: var(--text-lg); }
 .field-error:empty { display: none; }
 .booking-addons { border: 1px solid var(--color-border); padding: 20px 24px; }
 .booking-addons legend { font-family: var(--font-heading); font-size: var(--text-base); padding: 0 8px; }
+.booking-payment-method { border: 1px solid var(--color-border); padding: 20px 24px; }
+.booking-payment-method legend { font-family: var(--font-heading); font-size: var(--text-base); padding: 0 8px; }
+.booking-payment-option { display: flex; align-items: flex-start; gap: 10px; margin: 10px 0; }
+.booking-payment-option input { margin-top: 4px; }
+.booking-payment-option label { font-weight: 500; }
+.booking-payment-option label span { display: block; margin-top: 2px; font-weight: 400; font-size: 13px; color: var(--color-text-light); }
+.booking-payment-note { margin: 12px 0 0; font-size: 12px; color: var(--color-text-light); }
 .booking-addons-note { margin-bottom: 14px; font-size: 12px; color: var(--color-text-light); }
 .booking-addon { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 4px 10px; padding: 10px 0; }
 .booking-addon + .booking-addon { border-top: 1px dashed var(--color-border); }

@@ -67,6 +67,9 @@ param enableCardCheckout bool = false
 @description('Aktiverar Swish-betalningar på gästens betalningssida. false = endast kort och faktura.')
 param enableSwishCheckout bool = false
 
+@description('Aktiverar direktbokning med kort på den publika webbplatsen. Standard false: endast bokningsförfrågan/faktura. Kräver ett separat godkänt beslut om Airbnb-risk innan den slås på.')
+param enableDirectBooking bool = false
+
 @description('Stripe-läge som visas i admin och används av den publika appen.')
 @allowed([
   'test'
@@ -141,6 +144,14 @@ var baseAppSettings = [
   }
   {
     name: 'STRIPE_OUTBOX_ENABLED'
+    value: '0'
+  }
+  {
+    name: 'DIRECT_BOOKING_ENABLED'
+    value: enableDirectBooking ? '1' : '0'
+  }
+  {
+    name: 'DIRECT_BOOKING_ALLOW_LIVE'
     value: '0'
   }
 ]

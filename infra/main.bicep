@@ -78,6 +78,9 @@ param enableCardCheckout bool = false
 @description('Aktiverar Swish-betalningar på gästens betalningssida. Standard false: endast kort och faktura.')
 param enableSwishCheckout bool = false
 
+@description('Aktiverar direktbokning med kort på den publika webbplatsen. Standard false. Kräver ett separat godkänt beslut om Airbnb-risk innan den slås på.')
+param enableDirectBooking bool = false
+
 @description('Stripe-läge som visas i admin och används av den publika appen.')
 @allowed([
   'test'
@@ -133,6 +136,7 @@ module webapp 'modules/webapp.bicep' = {
     enableStripeWebhook: enableStripeWebhook
     enableCardCheckout: enableCardCheckout
     enableSwishCheckout: enableSwishCheckout
+    enableDirectBooking: enableDirectBooking
     stripeMode: stripeMode
     allowStripeLive: allowStripeLive
     stripeSecretUri: stripeSecretUri

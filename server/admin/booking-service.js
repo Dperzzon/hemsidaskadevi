@@ -366,7 +366,12 @@ async function lockCalendar(repo, record, principal, now) {
   const created = [];
   const actor = actorOf(principal);
   const nights = nightKeys(record.arrival, record.departure);
+  // Nätter som redan ägs av samma referens (t.ex. en betalningsreservation
+  // som ska bekräftas manuellt) återanvänds i stället för att skapas om.
+  const existing = await repo.listCalendarByReference(record.reference).catch(() => []);
+  const owned = new Set((existing ?? []).map((row) => row.night ?? row.RowKey));
   for (const night of nights) {
+    if (owned.has(night)) continue;
     try {
       await repo.createCalendarNight(night, {
         type: record.statusCode === 'BLOCKED' ? 'MANUAL' : 'BOOKING',
@@ -851,7 +856,7 @@ async function changeStatus(repo, principal, reference, action, body = {}, optio
     if (!reason) return error(400, 'Ange en orsak till att förfrågan nekas.', { fields: { reason: 'Orsak krävs.' } });
     nextStatus = 'DECLINED';
   } else if (action === 'confirm') {
-    if (!['PENDING', 'PRELIMINARY'].includes(fromStatus)) return error(422, 'Endast väntande eller preliminär bokning kan bekräftas.');
+    if (!['PENDING', 'PRELIMINARY', 'RECONCILIATION'].includes(fromStatus)) return error(422, 'Endast väntande, preliminär eller avstämningskrävande bokning kan bekräftas.');
     const confirmable = await assertConfirmable(repo, record, options, context, now, body);
     if (confirmable.error) return confirmable.error;
     if (confirmable.overrideApplied) {
@@ -871,7 +876,7 @@ async function changeStatus(repo, principal, reference, action, body = {}, optio
     if (lockedNights?.status) return lockedNights;
     nextStatus = 'CONFIRMED';
   } else if (action === 'cancel') {
-    if (fromStatus !== 'CONFIRMED') return error(422, 'Endast en bekräftad bokning kan avbokas.');
+    if (!['CONFIRMED', 'RECONCILIATION'].includes(fromStatus)) return error(422, 'Endast en bekräftad eller avstämningskrävande bokning kan avbokas.');
     if (!reason) return error(400, 'Ange en orsak till avbokningen.', { fields: { reason: 'Orsak krävs.' } });
     nextStatus = 'CANCELLED';
   } else {
@@ -884,6 +889,13 @@ async function changeStatus(repo, principal, reference, action, body = {}, optio
   record.updatedAt = now.toISOString();
   record.updatedBy = actorOf(principal).name;
   if (nextStatus === 'CONFIRMED') record.confirmedAt = now.toISOString();
+  if (nextStatus === 'CONFIRMED') record.reconciliation = null;
+  if (nextStatus === 'CONFIRMED' && record.reservation) {
+    record.reservation = { ...record.reservation, status: 'CONFIRMED', confirmedAt: now.toISOString() };
+  }
+  if (nextStatus === 'CANCELLED' && record.reservation) {
+    record.reservation = { ...record.reservation, status: 'RELEASED', releasedAt: now.toISOString() };
+  }
   if (nextStatus === 'DECLINED') record.declinedAt = now.toISOString();
   if (nextStatus === 'CANCELLED') record.cancelledAt = now.toISOString();
   if (nextStatus === 'CONFIRMED') record.actionFlags = { ...(record.actionFlags ?? {}), airbnbBlocked: false };

@@ -214,6 +214,8 @@ function toEntity(record, partition) {
     paymentRequest: record.paymentRequest ? JSON.stringify(record.paymentRequest) : '',
     paymentTokenHash: String(record.paymentTokenHash ?? ''),
     paymentAccess: record.paymentAccess ? JSON.stringify(record.paymentAccess) : '',
+    reservation: record.reservation ? JSON.stringify(record.reservation) : '',
+    reconciliation: record.reconciliation ? JSON.stringify(record.reconciliation) : '',
     invoiceRequests: JSON.stringify(record.invoiceRequests ?? []),
     latestNote: record.latestNote ?? '',
     blockId: record.blockId ?? '',
@@ -287,6 +289,8 @@ function fromEntity(entity) {
     paymentRequest: parse(entity.paymentRequest, null),
     paymentTokenHash: entity.paymentTokenHash ?? '',
     paymentAccess: parse(entity.paymentAccess, null),
+    reservation: parse(entity.reservation, null),
+    reconciliation: parse(entity.reconciliation, null),
     invoiceRequests: parse(entity.invoiceRequests, []),
     latestNote: entity.latestNote ?? '',
     blockId: entity.blockId ?? '',
@@ -431,7 +435,8 @@ function createTableStore(options = {}) {
         source: row.source ?? '',
         note: row.note ?? '',
         createdBy: row.createdBy ?? '',
-        createdAt: row.createdAt ?? ''
+        createdAt: row.createdAt ?? '',
+        etag: row['odata.etag'] ?? row.etag ?? ''
       }));
     },
     async listCalendar(from, to) {
@@ -453,8 +458,111 @@ function createTableStore(options = {}) {
         source: row.source ?? '',
         note: row.note ?? '',
         createdBy: row.createdBy ?? '',
-        createdAt: row.createdAt ?? ''
+        createdAt: row.createdAt ?? '',
+        etag: row['odata.etag'] ?? row.etag ?? ''
       }));
+    },
+    // Atomisk nattlåsning: Table Storage Insert Entity är create-only. Samma
+    // PartitionKey + RowKey ger 409 EntityAlreadyExists, vilket gör att två
+    // samtidiga bokningsförsök aldrig kan äga samma natt.
+    async createCalendarNight(night, data) {
+      const result = await tableRequest({
+        accountName, method: 'POST', table,
+        body: {
+          PartitionKey: 'calendar',
+          RowKey: night,
+          type: data.type ?? '',
+          reference: data.reference ?? '',
+          blockId: data.blockId ?? '',
+          source: data.source ?? '',
+          note: data.note ?? '',
+          createdBy: data.createdBy ?? '',
+          createdAt: data.createdAt ?? new Date().toISOString()
+        },
+        fetchImpl: options.fetchImpl, auth
+      });
+      if (result.status === 409 || result.status === 412) {
+        const conflict = new Error('Natten är redan blockerad');
+        conflict.status = 409;
+        throw conflict;
+      }
+      if (result.status !== 201) {
+        throw new Error(`Kalenderraden kunde inte sparas (${result.status})`);
+      }
+    },
+    // Uppdaterar en befintlig nattlåsning på plats (t.ex. RESERVATION ->
+    // BOOKING) utan att radera raden. Därmed finns ingen tidslucka där en
+    // annan bokning kan ta datumen.
+    async updateCalendarNight(night, data, { ifMatch } = {}) {
+      const result = await tableRequest({
+        accountName, method: 'PUT', table,
+        target: rowTarget('calendar', night),
+        body: {
+          PartitionKey: 'calendar',
+          RowKey: night,
+          type: data.type ?? '',
+          reference: data.reference ?? '',
+          blockId: data.blockId ?? '',
+          source: data.source ?? '',
+          note: data.note ?? '',
+          createdBy: data.createdBy ?? '',
+          createdAt: data.createdAt ?? new Date().toISOString()
+        },
+        ifMatch: ifMatch ?? '*',
+        fetchImpl: options.fetchImpl, auth
+      });
+      if (result.status === 412 || result.status === 409) {
+        const conflict = new Error('Kalenderraden har ändrats av någon annan');
+        conflict.status = 409;
+        throw conflict;
+      }
+      if (![200, 204].includes(result.status)) {
+        throw new Error(`Kalenderraden kunde inte uppdateras (${result.status})`);
+      }
+    },
+    async deleteCalendarNight(night, reference) {
+      const single = await tableRequest({
+        accountName, method: 'GET', table,
+        target: rowTarget('calendar', night),
+        fetchImpl: options.fetchImpl, auth
+      });
+      if (single.status === 404) return;
+      if (single.status !== 200 || !single.json) {
+        throw new Error(`Kalenderraden kunde inte läsas (${single.status})`);
+      }
+      if (reference && single.json.reference !== reference) {
+        const conflict = new Error('Natten tillhör en annan bokning');
+        conflict.status = 409;
+        throw conflict;
+      }
+      const removed = await tableRequest({
+        accountName, method: 'DELETE', table,
+        target: rowTarget('calendar', night),
+        ifMatch: single.etag || '*',
+        fetchImpl: options.fetchImpl, auth
+      });
+      if (removed.status === 412 || removed.status === 409) {
+        const conflict = new Error('Kalenderraden har ändrats av någon annan');
+        conflict.status = 409;
+        throw conflict;
+      }
+      if (![200, 204, 404].includes(removed.status)) {
+        throw new Error(`Kalenderraden kunde inte tas bort (${removed.status})`);
+      }
+    },
+    // Intern överlappskontroll mot bekräftade bokningar och datumblockeringar.
+    // Kalenderpartitionen är den primära låsningen, men denna kontroll fångar
+    // även äldre poster som saknar kalenderrader.
+    async listBlockingBookings(arrival, departure) {
+      const safeArrival = String(arrival ?? '').replaceAll("'", "''");
+      const safeDeparture = String(departure ?? '').replaceAll("'", "''");
+      const result = await tableRequest({
+        accountName, method: 'GET', table,
+        query: [['$filter', `PartitionKey eq 'request' and (statusCode eq 'CONFIRMED' or statusCode eq 'BLOCKED') and arrival lt '${safeDeparture}' and departure gt '${safeArrival}'`]],
+        fetchImpl: options.fetchImpl, auth
+      });
+      if (result.status !== 200 || !Array.isArray(result.json?.value)) return null;
+      return result.json.value.map(fromEntity);
     },
     async updateRequest(record, { ifMatch } = {}) {
       const rowKey = record.rowKey ?? record.idempotencyKey;
@@ -545,6 +653,7 @@ function createLocalStore(options = {}) {
   const file = path.resolve(options.file ?? path.join(process.cwd(), 'data', 'booking-requests.jsonl'));
   const historyFile = path.resolve(options.historyFile ?? path.join(path.dirname(file), 'booking-history.jsonl'));
   const records = new Map();
+  const calendar = new Map();
   let loaded = false;
   function etagFor(record) {
     return `local-${record.version ?? 1}-${record.updatedAt ?? record.createdAt ?? ''}`;
@@ -596,11 +705,75 @@ function createLocalStore(options = {}) {
       const record = [...records.values()].find((item) => item.paymentTokenHash === tokenHash);
       return record ? { record, etag: etagFor(record) } : null;
     },
-    async listCalendarByReference() {
-      return [];
+    async listCalendarByReference(reference) {
+      return [...calendar.values()]
+        .filter((row) => row.reference === reference)
+        .map((row) => ({ ...row }));
     },
-    async listCalendar() {
-      return [];
+    async listCalendar(from, to) {
+      return [...calendar.values()]
+        .filter((row) => row.night >= from && row.night < to)
+        .map((row) => ({ ...row }));
+    },
+    async createCalendarNight(night, data) {
+      if (calendar.has(night)) {
+        const conflict = new Error('Natten är redan blockerad');
+        conflict.status = 409;
+        throw conflict;
+      }
+      calendar.set(night, {
+        night,
+        type: data.type ?? '',
+        reference: data.reference ?? '',
+        blockId: data.blockId ?? '',
+        source: data.source ?? '',
+        note: data.note ?? '',
+        createdBy: data.createdBy ?? '',
+        createdAt: data.createdAt ?? new Date().toISOString(),
+        etag: `cal-${night}-1`
+      });
+    },
+    async updateCalendarNight(night, data, { ifMatch } = {}) {
+      const current = calendar.get(night);
+      if (!current) {
+        const missing = new Error('Kalenderraden hittades inte');
+        missing.status = 404;
+        throw missing;
+      }
+      if (ifMatch && ifMatch !== '*' && ifMatch !== current.etag) {
+        const conflict = new Error('Kalenderraden har ändrats av någon annan');
+        conflict.status = 409;
+        throw conflict;
+      }
+      calendar.set(night, {
+        ...current,
+        type: data.type ?? '',
+        reference: data.reference ?? '',
+        blockId: data.blockId ?? '',
+        source: data.source ?? '',
+        note: data.note ?? '',
+        createdBy: data.createdBy ?? '',
+        createdAt: data.createdAt ?? current.createdAt,
+        etag: `cal-${night}-${Number(current.etag.split('-').at(-1)) + 1}`
+      });
+    },
+    async deleteCalendarNight(night, reference) {
+      const current = calendar.get(night);
+      if (!current) return;
+      if (reference && current.reference !== reference) {
+        const conflict = new Error('Natten tillhör en annan bokning');
+        conflict.status = 409;
+        throw conflict;
+      }
+      calendar.delete(night);
+    },
+    async listBlockingBookings(arrival, departure) {
+      await loadOnce();
+      return [...records.values()].filter((record) =>
+        record.partition !== 'outbox' &&
+        (record.statusCode === 'CONFIRMED' || record.statusCode === 'BLOCKED') &&
+        record.arrival < departure && record.departure > arrival
+      );
     },
     async updateRequest(record, { ifMatch } = {}) {
       await loadOnce();
