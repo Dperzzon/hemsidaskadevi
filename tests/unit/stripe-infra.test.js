@@ -11,15 +11,18 @@ function read(relative) {
   return fs.readFileSync(path.join(root, relative), 'utf8');
 }
 
-test('Stripe är inaktiverat som standard i produktionsparametrarna', () => {
+test('Stripe Live är aktiverat i produktionsparametrarna', () => {
   const main = read('infra/main.bicepparam');
   const admin = read('infra/admin-webapp.bicepparam');
-  assert.match(main, /param enableStripeWebhook = false/);
-  assert.match(main, /param enableCardCheckout = false/);
+  assert.match(main, /param enableStripeWebhook = true/);
+  assert.match(main, /param enableCardCheckout = true/);
   assert.match(main, /param enableSwishCheckout = false/);
-  assert.match(main, /param stripeSecretUri = ''/);
-  assert.match(main, /param stripeWebhookSecretUri = ''/);
-  assert.match(admin, /param enableStripePayments = false/);
+  assert.match(main, /param stripeMode = 'live'/);
+  assert.match(main, /param allowStripeLive = true/);
+  assert.match(main, /param stripeSecretUri = 'https:\/\/kv-skadevi-prod\.vault\.azure\.net\/secrets\/stripe-secret-key'/);
+  assert.match(main, /param stripeWebhookSecretUri = 'https:\/\/kv-skadevi-prod\.vault\.azure\.net\/secrets\/stripe-webhook-secret'/);
+  assert.match(admin, /param enableStripePayments = true/);
+  assert.match(admin, /param stripeMode = 'live'/);
   assert.match(admin, /param stripeSwishEnabled = false/);
   assert.match(admin, /param publicBaseUrl = 'https:\/\/www\.skadeviherrgard\.com'/);
 });
@@ -34,7 +37,8 @@ test('Stripe-inställningarna är fail-closed och live-nycklar är blockerade', 
   assert.match(webapp, /name: 'STRIPE_ENABLED'\s+value: \(enableCardCheckout \|\| enableSwishCheckout\) \? '1' : '0'/);
   assert.match(webapp, /name: 'STRIPE_CARD_ENABLED'\s+value: enableCardCheckout \? '1' : '0'/);
   assert.match(webapp, /name: 'STRIPE_SWISH_ENABLED'\s+value: enableSwishCheckout \? '1' : '0'/);
-  assert.match(webapp, /name: 'STRIPE_ALLOW_LIVE'\s+value: '0'/);
+  assert.match(webapp, /name: 'STRIPE_MODE'\s+value: stripeMode/);
+  assert.match(webapp, /name: 'STRIPE_ALLOW_LIVE'\s+value: allowStripeLive \? '1' : '0'/);
   assert.match(webapp, /enableStripeWebhook && !empty\(stripeWebhookSecretUri\)/);
   assert.match(webapp, /\(enableCardCheckout \|\| enableSwishCheckout\) && !empty\(stripeSecretUri\)/);
   assert.match(admin, /param enableStripePayments bool = false/);

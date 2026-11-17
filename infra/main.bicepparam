@@ -55,14 +55,18 @@ param secretAdminPrincipalId = '3e197323-a929-40b0-a164-c8cb5b33b521'
 // lagringen idempotent (Nochange). Kör alltid what-if först.
 param bookingStorageAccountName = 'stskadevibokningprod'
 
-// Stripe är inaktivt i produktion. Aktivera först efter godkännande och efter
-// att webhookhemligheten finns i Key Vault.
-param enableStripeWebhook = false
+// Stripe Live är aktiverat för kortbetalningar. Swish är fortsatt avstängt.
+// Hemligheterna ligger i Key Vault och refereras utan versionsnummer.
+param enableStripeWebhook = true
 
-param enableCardCheckout = false
+param enableCardCheckout = true
 
 param enableSwishCheckout = false
 
-param stripeSecretUri = ''
+param stripeMode = 'live'
 
-param stripeWebhookSecretUri = ''
+param allowStripeLive = true
+
+param stripeSecretUri = 'https://kv-skadevi-prod.vault.azure.net/secrets/stripe-secret-key'
+
+param stripeWebhookSecretUri = 'https://kv-skadevi-prod.vault.azure.net/secrets/stripe-webhook-secret'

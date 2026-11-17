@@ -67,6 +67,16 @@ param enableCardCheckout bool = false
 @description('Aktiverar Swish-betalningar på gästens betalningssida. false = endast kort och faktura.')
 param enableSwishCheckout bool = false
 
+@description('Stripe-läge som visas i admin och används av den publika appen.')
+@allowed([
+  'test'
+  'live'
+])
+param stripeMode string = 'test'
+
+@description('Tillåter live-nyckel. Standard false: live-nycklar blockeras.')
+param allowStripeLive bool = false
+
 @description('Fullständig SecretUri till Stripes hemliga nyckel, utan versionsnummer. Krävs för Swish. Tomt = fail-closed.')
 param stripeSecretUri string = ''
 
@@ -123,11 +133,11 @@ var baseAppSettings = [
   }
   {
     name: 'STRIPE_MODE'
-    value: 'test'
+    value: stripeMode
   }
   {
     name: 'STRIPE_ALLOW_LIVE'
-    value: '0'
+    value: allowStripeLive ? '1' : '0'
   }
   {
     name: 'STRIPE_OUTBOX_ENABLED'

@@ -78,6 +78,16 @@ param enableCardCheckout bool = false
 @description('Aktiverar Swish-betalningar på gästens betalningssida. Standard false: endast kort och faktura.')
 param enableSwishCheckout bool = false
 
+@description('Stripe-läge som visas i admin och används av den publika appen.')
+@allowed([
+  'test'
+  'live'
+])
+param stripeMode string = 'test'
+
+@description('Tillåter live-nyckel. Standard false: live-nycklar blockeras.')
+param allowStripeLive bool = false
+
 @description('SecretUri till Stripes hemliga nyckel i befintligt Key Vault. Ingen hemlighet anges i Git. Tomt = fail-closed.')
 param stripeSecretUri string = ''
 
@@ -123,6 +133,8 @@ module webapp 'modules/webapp.bicep' = {
     enableStripeWebhook: enableStripeWebhook
     enableCardCheckout: enableCardCheckout
     enableSwishCheckout: enableSwishCheckout
+    stripeMode: stripeMode
+    allowStripeLive: allowStripeLive
     stripeSecretUri: stripeSecretUri
     stripeWebhookSecretUri: stripeWebhookSecretUri
   }
