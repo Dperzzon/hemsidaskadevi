@@ -54,6 +54,7 @@ function layout(options) {
         ${navItem('/admin/bookings', 'Bokningar', active)}
         ${navItem('/admin/bookings/new', 'Ny bokning', active)}
         ${navItem('/admin/calendar', 'Kalender', active)}
+        ${navItem('/admin/direct-booking', 'Direktbokning', active)}
       </nav>
       <div class="sidebar-note">
         <span class="sidebar-note-title">Bokningsportal</span>

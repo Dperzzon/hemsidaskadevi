@@ -17,6 +17,13 @@ const STATUS_META = {
     tone: 'pending',
     legacy: ['Inväntar godkännande', 'Ny', 'Ny förfrågan']
   },
+  PENDING_PAYMENT: {
+    code: 'PENDING_PAYMENT',
+    label: 'Väntar på betalning',
+    shortLabel: 'Betalning',
+    tone: 'pending',
+    legacy: ['Väntar på betalning', 'PENDING_PAYMENT']
+  },
   PRELIMINARY: {
     code: 'PRELIMINARY',
     label: 'Preliminär',
@@ -323,6 +330,10 @@ function normalizeBooking(record = {}, options = {}) {
     message: String(record.message ?? ''),
     bookingSource,
     bookingSourceLabel: SOURCE_LABELS[bookingSource] ?? 'Annat',
+    directBookingApprovalId: String(record.directBookingApprovalId ?? ''),
+    directBookingApprovals: Array.isArray(record.directBookingApprovals)
+      ? record.directBookingApprovals.map(String)
+      : [],
     createdAt: String(record.createdAt ?? ''),
     updatedAt: String(record.updatedAt ?? record.createdAt ?? ''),
     updatedBy: String(record.updatedBy ?? ''),

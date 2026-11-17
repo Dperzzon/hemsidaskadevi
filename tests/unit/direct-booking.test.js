@@ -55,6 +55,7 @@ function request(overrides = {}) {
 function createMemoryStore() {
   const records = new Map();
   const calendar = new Map();
+  const directBooking = new Map();
   const history = [];
   let etagCounter = 0;
   const store = {
@@ -144,12 +145,60 @@ function createMemoryStore() {
           (record.statusCode === 'CONFIRMED' || record.statusCode === 'BLOCKED') &&
           record.arrival < departure && record.departure > arrival
         );
+    },
+    async getDirectBookingNight(night) {
+      return directBooking.get(night) ? clone(directBooking.get(night)) : null;
+    },
+    async listDirectBookingNights(from, to) {
+      return [...directBooking.values()]
+        .filter((row) => row.night >= from && row.night < to)
+        .map(clone);
+    },
+    async upsertDirectBookingNight(night, data) {
+      const existing = directBooking.get(night);
+      directBooking.set(night, {
+        ...clone(data),
+        night,
+        etag: existing ? `db-${night}-2` : `db-${night}-1`
+      });
+    },
+    async deleteDirectBookingNight(night) {
+      directBooking.delete(night);
+    },
+    async listDirectBookingNightsByApproval(approvalId) {
+      return [...directBooking.values()]
+        .filter((row) => row.approvalId === approvalId)
+        .map(clone);
+    },
+    async listDirectBookingApprovals() {
+      const groups = new Map();
+      for (const row of directBooking.values()) {
+        if (!groups.has(row.approvalId)) {
+          groups.set(row.approvalId, {
+            approvalId: row.approvalId,
+            from: row.from,
+            to: row.to,
+            nights: [],
+            approvedBy: row.approvedBy,
+            approvedAt: row.approvedAt,
+            note: row.note,
+            status: row.status,
+            closedBy: row.closedBy,
+            closedAt: row.closedAt
+          });
+        }
+        const group = groups.get(row.approvalId);
+        group.nights.push(row.night);
+        if (row.status === 'OPEN') group.status = 'OPEN';
+      }
+      return [...groups.values()].map((group) => ({ ...group, nights: group.nights.sort() }));
     }
   };
   return {
     store,
     records,
     calendar,
+    directBooking,
     history
   };
 }
@@ -193,8 +242,36 @@ function createFakeStripe(overrides = {}) {
   };
 }
 
+const OPEN_NIGHTS = ['2026-11-20', '2026-11-21', '2026-11-22'];
+
+function seedOpenDates(memory, nights = OPEN_NIGHTS, overrides = {}) {
+  const from = nights[0];
+  const to = '2026-11-23';
+  for (const night of nights) {
+    memory.directBooking.set(night, {
+      night,
+      status: 'OPEN',
+      approvalId: 'DB-TEST',
+      from,
+      to,
+      approvedBy: 'Owner Test',
+      approvedById: 'owner-1',
+      approvedAt: NOW.toISOString(),
+      note: 'Testgodkännande',
+      airbnbBlockedNights: JSON.stringify(nights),
+      airbnbCheckedAt: NOW.toISOString(),
+      createdAt: NOW.toISOString(),
+      updatedAt: NOW.toISOString(),
+      updatedBy: 'Owner Test',
+      etag: `db-${night}-1`,
+      ...overrides
+    });
+  }
+}
+
 function setup(overrides = {}) {
   const memory = createMemoryStore();
+  seedOpenDates(memory);
   const stripe = createFakeStripe();
   const options = {
     rules: RULES,
@@ -204,7 +281,7 @@ function setup(overrides = {}) {
     stripeEnabled: true,
     cardEnabled: true,
     stripeClient: stripe,
-    availabilityHandler: async () => ({ status: 200, jsonBody: { blocked: [] } }),
+    availabilityHandler: async () => ({ status: 200, jsonBody: { blocked: OPEN_NIGHTS } }),
     now: NOW,
     publicBaseUrl: 'https://www.skadeviherrgard.com',
     requireDurableStore: false,
@@ -252,14 +329,14 @@ test('Airbnb som inte kan hämtas stoppar direktbetalning och hänvisar till man
   assert.match(result.jsonBody.error, /manuellt/);
 });
 
-test('Airbnb-blockerade nätter stoppar direktbetalning', async () => {
+test('Airbnb-blockerade nätter som inte matchar Owners underlag stoppar direktbetalning', async () => {
   const { options, context } = setup({
     availabilityHandler: async () => ({ status: 200, jsonBody: { blocked: ['2026-11-21'] } })
   });
   const result = await handleDirectBooking(request(), context, options);
   assert.equal(result.status, 409);
-  assert.equal(result.jsonBody.code, 'AIRBNB_CONFLICT');
-  assert.deepEqual(result.jsonBody.blockedNights, ['2026-11-21']);
+  assert.equal(result.jsonBody.code, 'AIRBNB_BLOCK_MISSING');
+  assert.deepEqual(result.jsonBody.nights, ['2026-11-20', '2026-11-22']);
 });
 
 test('intern kalenderkonflikt stoppar direktbetalning', async () => {

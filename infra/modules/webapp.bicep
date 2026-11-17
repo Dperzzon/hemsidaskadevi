@@ -152,7 +152,7 @@ var baseAppSettings = [
   }
   {
     name: 'DIRECT_BOOKING_ALLOW_LIVE'
-    value: '0'
+    value: enableDirectBooking ? '1' : '0'
   }
 ]
 

@@ -477,6 +477,31 @@
           window.location.reload();
           return;
         }
+        if (type === 'direct-booking-open') {
+          await api('/api/admin/direct-booking/open', {
+            body: {
+              from: formValue(form, 'from'),
+              to: formValue(form, 'to'),
+              note: formValue(form, 'note'),
+              confirmAirbnbBlocked: checked(form, 'confirmAirbnbBlocked'),
+              confirmNoAirbnbGuest: checked(form, 'confirmNoAirbnbGuest'),
+              confirmNoExternal: checked(form, 'confirmNoExternal'),
+              confirmMayOffer: checked(form, 'confirmMayOffer')
+            }
+          });
+          window.location.reload();
+          return;
+        }
+        if (type === 'direct-booking-close') {
+          await api('/api/admin/direct-booking/close', {
+            body: {
+              approvalId: form.dataset.approvalId,
+              note: formValue(form, 'note')
+            }
+          });
+          window.location.reload();
+          return;
+        }
         if (type === 'block') {
           if (!blockIdempotencyKey) blockIdempotencyKey = crypto.randomUUID();
           await api('/api/admin/calendar/blocks', {

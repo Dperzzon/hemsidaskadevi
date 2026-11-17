@@ -26,6 +26,7 @@ function createDemoRepository(options = {}) {
   const initialNow = options.now ?? new Date();
   const requests = new Map();
   const calendar = new Map();
+  const directBooking = new Map();
   const history = [];
   const outbox = [];
 
@@ -155,6 +156,48 @@ function createDemoRepository(options = {}) {
     },
     async listCalendarByReference(reference) {
       return [...calendar.values()].filter((row) => row.reference === reference).map(clone);
+    },
+    async getDirectBookingNight(night) {
+      return directBooking.get(night) ? clone(directBooking.get(night)) : null;
+    },
+    async listDirectBookingNights(from, to) {
+      return [...directBooking.values()]
+        .filter((row) => row.night >= from && row.night < to)
+        .map(clone);
+    },
+    async upsertDirectBookingNight(night, data) {
+      directBooking.set(night, { ...clone(data), night });
+    },
+    async deleteDirectBookingNight(night) {
+      directBooking.delete(night);
+    },
+    async listDirectBookingNightsByApproval(approvalId) {
+      return [...directBooking.values()]
+        .filter((row) => row.approvalId === approvalId)
+        .map(clone);
+    },
+    async listDirectBookingApprovals() {
+      const groups = new Map();
+      for (const row of directBooking.values()) {
+        if (!groups.has(row.approvalId)) {
+          groups.set(row.approvalId, {
+            approvalId: row.approvalId,
+            from: row.from,
+            to: row.to,
+            nights: [],
+            approvedBy: row.approvedBy,
+            approvedAt: row.approvedAt,
+            note: row.note,
+            status: row.status,
+            closedBy: row.closedBy,
+            closedAt: row.closedAt
+          });
+        }
+        const group = groups.get(row.approvalId);
+        group.nights.push(row.night);
+        if (row.status === 'OPEN') group.status = 'OPEN';
+      }
+      return [...groups.values()].map((group) => ({ ...group, nights: group.nights.sort() }));
     },
     async createCalendarNight(night, data) {
       createCalendarNight(night, data);

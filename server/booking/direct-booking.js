@@ -105,28 +105,125 @@ function createStripe(options) {
   });
 }
 
-async function checkAirbnb(record, context, options) {
+// Kontrollerar att samtliga nätter är uttryckligen öppnade av Owner och att
+// Airbnb-underlaget är förenligt med Owners godkännande. En Airbnb-blockering
+// är förväntad för öppnade nätter, men bara om samma blockerade nätter fanns
+// när Owner godkände intervallet. Nya eller borttagna blockeringar gör att
+// underlaget inte längre kan anses säkert.
+async function checkAirbnbOpened(nights, byNight, from, to, options) {
   const handler = options.availabilityHandler ?? handleAvailability;
   let availability;
   try {
-    const query = new URLSearchParams({ start: record.arrival, end: record.departure });
-    availability = await handler({ query }, context, options.availability ?? {});
+    const query = new URLSearchParams({ start: from, end: to });
+    availability = await handler({ query }, {}, options.availability ?? {});
   } catch {
     return { ok: false, code: 'AIRBNB_UNAVAILABLE' };
   }
   if (availability.status !== 200 || !Array.isArray(availability.jsonBody?.blocked)) {
     return { ok: false, code: 'AIRBNB_UNAVAILABLE' };
   }
-  const blocked = nightKeys(record.arrival, record.departure)
-    .filter((night) => availability.jsonBody.blocked.includes(night));
-  if (blocked.length) return { ok: false, code: 'AIRBNB_CONFLICT', blockedNights: blocked };
+  const blocked = new Set(availability.jsonBody.blocked);
+  const unblocked = nights.filter((night) => !blocked.has(night));
+  if (unblocked.length) {
+    return { ok: false, code: 'AIRBNB_BLOCK_MISSING', nights: unblocked };
+  }
+
+  const snapshot = new Set();
+  for (const night of nights) {
+    const row = byNight.get(night);
+    let stored = [];
+    try {
+      stored = JSON.parse(row.airbnbBlockedNights || '[]');
+    } catch {
+      stored = [];
+    }
+    if (!Array.isArray(stored) || !stored.includes(night)) {
+      return { ok: false, code: 'AIRBNB_SNAPSHOT_MISSING', nights: [night] };
+    }
+    for (const value of stored) {
+      if (value >= from && value < to) snapshot.add(value);
+    }
+  }
+  const current = new Set([...blocked].filter((night) => night >= from && night < to));
+  if (snapshot.size !== current.size) {
+    return { ok: false, code: 'AIRBNB_CALENDAR_CHANGED' };
+  }
+  for (const night of current) {
+    if (!snapshot.has(night)) return { ok: false, code: 'AIRBNB_CALENDAR_CHANGED' };
+  }
   return { ok: true };
+}
+
+async function checkDirectBookingAvailability(store, from, to, now, options = {}) {
+  if (!directBookingAvailable(options)) {
+    return { directBooking: false, code: 'DIRECT_BOOKING_DISABLED', reason: 'disabled' };
+  }
+  const nights = nightKeys(from, to);
+  if (!nights.length) {
+    return { directBooking: false, code: 'INVALID_RANGE', reason: 'invalid' };
+  }
+  if (!store || typeof store.listDirectBookingNights !== 'function') {
+    return { directBooking: false, code: 'DIRECT_BOOKING_UNAVAILABLE', reason: 'unavailable' };
+  }
+  let rows;
+  try {
+    rows = await store.listDirectBookingNights(from, to);
+  } catch {
+    rows = null;
+  }
+  if (!Array.isArray(rows)) {
+    return { directBooking: false, code: 'DIRECT_BOOKING_UNAVAILABLE', reason: 'unavailable' };
+  }
+  const byNight = new Map(rows.map((row) => [row.night, row]));
+  const notOpen = nights.filter((night) => byNight.get(night)?.status !== 'OPEN');
+  if (notOpen.length) {
+    return {
+      directBooking: false,
+      code: 'DIRECT_BOOKING_NOT_OPEN',
+      reason: 'not_open',
+      nights: notOpen
+    };
+  }
+
+  const internal = await checkInternal(
+    store,
+    { arrival: from, departure: to, reference: '' },
+    now,
+    {},
+    { ...options, skipExpiredCleanup: options.cleanupExpired !== true }
+  );
+  if (!internal.ok) {
+    return {
+      directBooking: false,
+      code: internal.code,
+      reason: 'internal_conflict',
+      conflicts: internal.conflicts
+    };
+  }
+
+  const airbnb = await checkAirbnbOpened(nights, byNight, from, to, options);
+  if (!airbnb.ok) {
+    return {
+      directBooking: false,
+      code: airbnb.code,
+      reason: 'airbnb',
+      nights: airbnb.nights
+    };
+  }
+
+  return {
+    directBooking: true,
+    nights,
+    approvals: [...new Set(nights.map((night) => byNight.get(night).approvalId))]
+  };
 }
 
 async function checkInternal(store, record, now, context, options) {
   // Frigör endast reservationer som Stripe uttryckligen har bekräftat som
   // utgångna. Om Stripe inte kan nås lämnas reservationen orörd (fail-closed).
-  await releaseExpiredReservations(store, record.arrival, record.departure, now, context, options);
+  if (!options.skipExpiredCleanup) {
+    await releaseExpiredReservations(store, record.arrival, record.departure, now, context, options);
+  }
 
   let calendarRows;
   try {
@@ -357,29 +454,42 @@ async function handleDirectBooking(request, context = {}, options = {}) {
     });
   }
 
-  const internal = await checkInternal(store, validated.record, now, context, options);
-  if (!internal.ok) {
-    if (internal.code === 'INTERNAL_UNAVAILABLE') {
+  const availability = await checkDirectBookingAvailability(
+    store,
+    validated.record.arrival,
+    validated.record.departure,
+    now,
+    { ...options, cleanupExpired: true }
+  );
+  if (!availability.directBooking) {
+    if (availability.code === 'INTERNAL_UNAVAILABLE' || availability.code === 'DIRECT_BOOKING_UNAVAILABLE') {
       return result(503, {
         error: 'Tillgängligheten kunde inte kontrolleras just nu. Skicka gärna en bokningsförfrågan.',
-        code: 'INTERNAL_UNAVAILABLE',
+        code: availability.code,
         manualReview: true
       });
     }
-    return result(409, {
-      error: 'Några av de valda nätterna är inte längre tillgängliga. Välj andra datum i kalendern.',
-      code: 'INTERNAL_CONFLICT',
-      conflicts: internal.conflicts
-    });
-  }
-
-  const airbnb = await checkAirbnb(validated.record, context, options);
-  if (!airbnb.ok) {
-    if (airbnb.code === 'AIRBNB_CONFLICT') {
+    if (availability.code === 'INTERNAL_CONFLICT') {
       return result(409, {
-        error: 'Några av de valda nätterna är inte tillgängliga i Airbnb-kalendern. Välj andra datum.',
-        code: 'AIRBNB_CONFLICT',
-        blockedNights: airbnb.blockedNights
+        error: 'Några av de valda nätterna är inte längre tillgängliga. Välj andra datum i kalendern.',
+        code: 'INTERNAL_CONFLICT',
+        conflicts: availability.conflicts
+      });
+    }
+    if (availability.code === 'DIRECT_BOOKING_NOT_OPEN') {
+      return result(409, {
+        error: 'Datumen är inte öppna för direktbokning. Skicka gärna en bokningsförfrågan.',
+        code: 'DIRECT_BOOKING_NOT_OPEN',
+        manualReview: true,
+        nights: availability.nights
+      });
+    }
+    if (availability.code === 'AIRBNB_BLOCK_MISSING') {
+      return result(409, {
+        error: 'Airbnb-kalendern visar inte längre de valda nätterna som blockerade. Skicka gärna en bokningsförfrågan.',
+        code: 'AIRBNB_BLOCK_MISSING',
+        manualReview: true,
+        nights: availability.nights
       });
     }
     return manualReviewResult();
@@ -405,6 +515,8 @@ async function handleDirectBooking(request, context = {}, options = {}) {
     statusCode: 'PENDING_PAYMENT',
     status: 'Väntar på betalning',
     bookingSource: 'DIRECT',
+    directBookingApprovalId: availability.approvals?.[0] ?? '',
+    directBookingApprovals: availability.approvals ?? [],
     version: 1,
     paymentStatus: 'UNPAID',
     amountPaid: 0,
@@ -740,6 +852,7 @@ module.exports = {
   handleDirectBooking,
   handleDirectBookingConfirmation,
   directBookingAvailable,
+  checkDirectBookingAvailability,
   releaseExpiredReservations,
   expireAndVerify,
   CHECKOUT_TTL_SECONDS

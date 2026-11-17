@@ -184,6 +184,8 @@ function toEntity(record, partition) {
     company: record.company ?? '',
     message: record.message ?? '',
     bookingSource: record.bookingSource ?? 'WEB',
+    directBookingApprovalId: String(record.directBookingApprovalId ?? ''),
+    directBookingApprovals: JSON.stringify(record.directBookingApprovals ?? []),
     addons: JSON.stringify(record.addons),
     totalAddons: String(record.totalAddons),
     discount: record.discount ? JSON.stringify(record.discount) : '',
@@ -264,6 +266,8 @@ function fromEntity(entity) {
     company: entity.company || '',
     message: entity.message || '',
     bookingSource: entity.bookingSource || 'WEB',
+    directBookingApprovalId: entity.directBookingApprovalId ?? '',
+    directBookingApprovals: parse(entity.directBookingApprovals, []),
     addons: parse(entity.addons, {}),
     totalAddons: Number(entity.totalAddons),
     discount: parse(entity.discount, null),
@@ -317,6 +321,91 @@ function fromEntity(entity) {
 
 function rowTarget(partition, rowKey) {
   return `(PartitionKey='${partition}',RowKey='${encodeURIComponent(rowKey)}')`;
+}
+
+function escapeOData(value) {
+  return String(value ?? '').replaceAll("'", "''");
+}
+
+function fromDirectBookingEntity(entity) {
+  return {
+    night: entity.RowKey,
+    status: entity.status ?? 'CLOSED',
+    approvalId: entity.approvalId ?? '',
+    from: entity.from ?? '',
+    to: entity.to ?? '',
+    approvedBy: entity.approvedBy ?? '',
+    approvedById: entity.approvedById ?? '',
+    approvedAt: entity.approvedAt ?? '',
+    note: entity.note ?? '',
+    airbnbBlockedNights: entity.airbnbBlockedNights ?? '[]',
+    airbnbCheckedAt: entity.airbnbCheckedAt ?? '',
+    closedBy: entity.closedBy ?? '',
+    closedById: entity.closedById ?? '',
+    closedAt: entity.closedAt ?? '',
+    createdAt: entity.createdAt ?? '',
+    updatedAt: entity.updatedAt ?? '',
+    updatedBy: entity.updatedBy ?? '',
+    etag: entity['odata.etag'] ?? entity.etag ?? ''
+  };
+}
+
+function directBookingEntity(night, data) {
+  return {
+    PartitionKey: 'directbooking',
+    RowKey: night,
+    status: data.status ?? 'CLOSED',
+    approvalId: data.approvalId ?? '',
+    from: data.from ?? '',
+    to: data.to ?? '',
+    approvedBy: data.approvedBy ?? '',
+    approvedById: data.approvedById ?? '',
+    approvedAt: data.approvedAt ?? '',
+    note: data.note ?? '',
+    airbnbBlockedNights: data.airbnbBlockedNights ?? '[]',
+    airbnbCheckedAt: data.airbnbCheckedAt ?? '',
+    closedBy: data.closedBy ?? '',
+    closedById: data.closedById ?? '',
+    closedAt: data.closedAt ?? '',
+    createdAt: data.createdAt ?? new Date().toISOString(),
+    updatedAt: data.updatedAt ?? new Date().toISOString(),
+    updatedBy: data.updatedBy ?? ''
+  };
+}
+
+function groupDirectBookingApprovals(rows) {
+  const groups = new Map();
+  for (const row of rows) {
+    if (!row.approvalId) continue;
+    if (!groups.has(row.approvalId)) {
+      groups.set(row.approvalId, {
+        approvalId: row.approvalId,
+        from: row.from,
+        to: row.to,
+        nights: [],
+        approvedBy: row.approvedBy,
+        approvedById: row.approvedById,
+        approvedAt: row.approvedAt,
+        note: row.note,
+        airbnbCheckedAt: row.airbnbCheckedAt,
+        status: row.status,
+        closedBy: row.closedBy,
+        closedById: row.closedById,
+        closedAt: row.closedAt
+      });
+    }
+    const group = groups.get(row.approvalId);
+    group.nights.push(row.night);
+    if (row.status === 'OPEN') group.status = 'OPEN';
+    if (row.closedAt && !group.closedAt) {
+      group.closedBy = row.closedBy;
+      group.closedById = row.closedById;
+      group.closedAt = row.closedAt;
+    }
+  }
+  return [...groups.values()]
+    .map((group) => ({ ...group, nights: group.nights.sort() }))
+    .sort((a, b) => String(b.approvedAt).localeCompare(String(a.approvedAt)));
 }
 
 function createTableStore(options = {}) {
@@ -564,6 +653,88 @@ function createTableStore(options = {}) {
       if (result.status !== 200 || !Array.isArray(result.json?.value)) return null;
       return result.json.value.map(fromEntity);
     },
+    async getDirectBookingNight(night) {
+      const result = await tableRequest({
+        accountName, method: 'GET', table,
+        target: rowTarget('directbooking', night),
+        fetchImpl: options.fetchImpl, auth
+      });
+      if (result.status === 404) return null;
+      if (result.status !== 200 || !result.json) {
+        throw new Error(`Direktbokningsraden kunde inte läsas (${result.status})`);
+      }
+      return fromDirectBookingEntity(result.json);
+    },
+    async listDirectBookingNights(from, to) {
+      const result = await tableRequest({
+        accountName, method: 'GET', table,
+        query: [['$filter', `PartitionKey eq 'directbooking' and RowKey ge '${escapeOData(from)}' and RowKey lt '${escapeOData(to)}'`]],
+        fetchImpl: options.fetchImpl, auth
+      });
+      if (result.status !== 200 || !Array.isArray(result.json?.value)) return null;
+      return result.json.value.map(fromDirectBookingEntity);
+    },
+    async upsertDirectBookingNight(night, data) {
+      const existing = await this.getDirectBookingNight(night);
+      const body = directBookingEntity(night, data);
+      if (existing) {
+        const result = await tableRequest({
+          accountName, method: 'PUT', table,
+          target: rowTarget('directbooking', night),
+          body,
+          ifMatch: existing.etag || '*',
+          fetchImpl: options.fetchImpl, auth
+        });
+        if (result.status === 412 || result.status === 409) {
+          const conflict = new Error('Direktbokningsraden har ändrats av någon annan');
+          conflict.status = 409;
+          throw conflict;
+        }
+        if (![200, 204].includes(result.status)) {
+          throw new Error(`Direktbokningsraden kunde inte uppdateras (${result.status})`);
+        }
+        return;
+      }
+      const result = await tableRequest({
+        accountName, method: 'POST', table,
+        body,
+        fetchImpl: options.fetchImpl, auth
+      });
+      if (result.status !== 201) {
+        throw new Error(`Direktbokningsraden kunde inte sparas (${result.status})`);
+      }
+    },
+    async deleteDirectBookingNight(night) {
+      const existing = await this.getDirectBookingNight(night);
+      if (!existing) return;
+      const result = await tableRequest({
+        accountName, method: 'DELETE', table,
+        target: rowTarget('directbooking', night),
+        ifMatch: existing.etag || '*',
+        fetchImpl: options.fetchImpl, auth
+      });
+      if (![200, 204, 404].includes(result.status)) {
+        throw new Error(`Direktbokningsraden kunde inte tas bort (${result.status})`);
+      }
+    },
+    async listDirectBookingNightsByApproval(approvalId) {
+      const result = await tableRequest({
+        accountName, method: 'GET', table,
+        query: [['$filter', `PartitionKey eq 'directbooking' and approvalId eq '${escapeOData(approvalId)}'`]],
+        fetchImpl: options.fetchImpl, auth
+      });
+      if (result.status !== 200 || !Array.isArray(result.json?.value)) return null;
+      return result.json.value.map(fromDirectBookingEntity);
+    },
+    async listDirectBookingApprovals() {
+      const result = await tableRequest({
+        accountName, method: 'GET', table,
+        query: [['$filter', "PartitionKey eq 'directbooking'"]],
+        fetchImpl: options.fetchImpl, auth
+      });
+      if (result.status !== 200 || !Array.isArray(result.json?.value)) return null;
+      return groupDirectBookingApprovals(result.json.value.map(fromDirectBookingEntity));
+    },
     async updateRequest(record, { ifMatch } = {}) {
       const rowKey = record.rowKey ?? record.idempotencyKey;
       const result = await tableRequest({
@@ -654,6 +825,7 @@ function createLocalStore(options = {}) {
   const historyFile = path.resolve(options.historyFile ?? path.join(path.dirname(file), 'booking-history.jsonl'));
   const records = new Map();
   const calendar = new Map();
+  const directBooking = new Map();
   let loaded = false;
   function etagFor(record) {
     return `local-${record.version ?? 1}-${record.updatedAt ?? record.createdAt ?? ''}`;
@@ -775,6 +947,33 @@ function createLocalStore(options = {}) {
         record.arrival < departure && record.departure > arrival
       );
     },
+    async getDirectBookingNight(night) {
+      return directBooking.get(night) ? { ...directBooking.get(night) } : null;
+    },
+    async listDirectBookingNights(from, to) {
+      return [...directBooking.values()]
+        .filter((row) => row.night >= from && row.night < to)
+        .map((row) => ({ ...row }));
+    },
+    async upsertDirectBookingNight(night, data) {
+      const existing = directBooking.get(night);
+      directBooking.set(night, {
+        ...directBookingEntity(night, data),
+        night,
+        etag: existing ? `db-${night}-${Number(existing.etag.split('-').at(-1)) + 1}` : `db-${night}-1`
+      });
+    },
+    async deleteDirectBookingNight(night) {
+      directBooking.delete(night);
+    },
+    async listDirectBookingNightsByApproval(approvalId) {
+      return [...directBooking.values()]
+        .filter((row) => row.approvalId === approvalId)
+        .map((row) => ({ ...row }));
+    },
+    async listDirectBookingApprovals() {
+      return groupDirectBookingApprovals([...directBooking.values()]);
+    },
     async updateRequest(record, { ifMatch } = {}) {
       await loadOnce();
       const current = records.get(record.idempotencyKey) ??
@@ -889,6 +1088,7 @@ function isConfigured(options = {}) {
 module.exports = {
   createStore, createTableStore, createLocalStore, isConfigured, sharedKeySignature,
   toEntity, fromEntity, toOutboxEntity, fromOutboxEntity,
+  fromDirectBookingEntity, directBookingEntity, groupDirectBookingApprovals,
   createManagedIdentityTokenProvider, createTokenCache, hasManagedIdentity,
   tableRequest, tableUrl, rowTarget,
   MANAGED_IDENTITY_SCOPE_SUFFIX

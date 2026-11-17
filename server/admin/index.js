@@ -24,6 +24,7 @@ const { renderBookings } = require('./views/bookings');
 const { renderBookingDetail } = require('./views/booking-detail');
 const { renderNewBooking } = require('./views/booking-new');
 const { renderCalendar } = require('./views/calendar');
+const { renderDirectBooking } = require('./views/direct-booking');
 const { renderErrorPage } = require('./views/error');
 const {
   createManualBooking,
@@ -49,6 +50,11 @@ const {
   revokePaymentLink,
   changeInvoiceRequestStatus
 } = require('./stripe-payment-service');
+const {
+  openDirectBooking,
+  closeDirectBooking,
+  directBookingOverview
+} = require('./direct-booking-service');
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
@@ -224,6 +230,7 @@ function pageTitleFor(pathname) {
   if (pathname === '/admin/bookings') return 'Bokningar';
   if (pathname === '/admin/bookings/new') return 'Ny bokning';
   if (pathname === '/admin/calendar') return 'Kalender';
+  if (pathname === '/admin/direct-booking') return 'Direktbokning';
   if (pathname.startsWith('/admin/bookings/')) return 'Bokningsdetaljer';
   return 'Bokningsportal';
 }
@@ -390,6 +397,42 @@ async function handleApi(req, res, url, context) {
       repository,
       principal,
       decodeURIComponent(unblockMatch[1]),
+      parsed.body,
+      serviceOptions(context),
+      { warn: context.warn }
+    );
+    sendJson(req, res, result.status, result.jsonBody);
+    return;
+  }
+
+  if (pathname === '/api/admin/direct-booking' && req.method === 'GET') {
+    const data = await directBookingOverview(repository, now);
+    sendJson(req, res, 200, data);
+    return;
+  }
+
+  if (pathname === '/api/admin/direct-booking/open' && req.method === 'POST') {
+    if (!guardWrite(req, res, context)) return;
+    const parsed = await readBodyOrError(req, res);
+    if (!parsed) return;
+    const result = await openDirectBooking(
+      repository,
+      principal,
+      parsed.body,
+      serviceOptions(context),
+      { warn: context.warn }
+    );
+    sendJson(req, res, result.status, result.jsonBody);
+    return;
+  }
+
+  if (pathname === '/api/admin/direct-booking/close' && req.method === 'POST') {
+    if (!guardWrite(req, res, context)) return;
+    const parsed = await readBodyOrError(req, res);
+    if (!parsed) return;
+    const result = await closeDirectBooking(
+      repository,
+      principal,
       parsed.body,
       serviceOptions(context),
       { warn: context.warn }
@@ -839,6 +882,14 @@ let calendarParserReady = false;
         const data = await calendarRange(repository, range.from, range.to, now);
         sendHtml(req, res, 200, renderCalendar({
           data, from: range.from, principal, demo, csrfToken, writesEnabled
+        }));
+        return;
+      }
+
+      if (url.pathname === '/admin/direct-booking' || url.pathname === '/admin/direct-booking/') {
+        const data = await directBookingOverview(repository, now);
+        sendHtml(req, res, 200, renderDirectBooking({
+          data, principal, demo, csrfToken, writesEnabled
         }));
         return;
       }

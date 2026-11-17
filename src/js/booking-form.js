@@ -185,7 +185,7 @@ async function loadRules() {
       els.rules = rules;
       els.rulesDialogBody.textContent = rules.text;
       els.rulesNotice.hidden = true;
-      els.submit.disabled = false;
+      updateSubmitState();
       els.submitNotice.hidden = true;
     } else {
       disableSubmission('Bokningsreglerna publiceras inom kort. Bokningsförfrågningar kan ännu inte skickas via formuläret — kontakta oss gärna direkt.');
@@ -199,7 +199,7 @@ function disableSubmission(message) {
   els.rules = null;
   els.rulesDialogBody.textContent = '';
   els.rulesNotice.hidden = false;
-  els.submit.disabled = true;
+  updateSubmitState();
   els.submitNotice.textContent = message;
   els.submitNotice.hidden = false;
 }
@@ -220,10 +220,78 @@ function selectedPaymentMethod() {
 }
 
 function updateSubmitLabel() {
-  if (!els.submit || els.submit.disabled) return;
+  if (!els.submit) return;
   els.submit.textContent = selectedPaymentMethod() === 'card'
-    ? 'Boka och betala'
+    ? 'Boka och betala med kort'
     : 'Skicka bokningsförfrågan';
+}
+
+function updateSubmitState() {
+  if (!els.submit) return;
+  if (els.availabilityChecking) {
+    els.submit.disabled = true;
+    els.submit.textContent = 'Kontrollerar tillgänglighet …';
+    return;
+  }
+  if (!els.rules) {
+    els.submit.disabled = true;
+    return;
+  }
+  els.submit.disabled = false;
+  updateSubmitLabel();
+}
+
+function updatePaymentOptions() {
+  const available = els.directBookingEnabled === true && els.directBookingAvailable === true;
+  if (els.paymentCardOption) els.paymentCardOption.hidden = !available;
+  if (!available && els.paymentCard?.checked) {
+    els.paymentRequest.checked = true;
+  }
+  if (available && !els.paymentCard?.checked && !els.paymentRequest?.checked) {
+    els.paymentCard.checked = true;
+  }
+  if (els.paymentNote) {
+    if (!els.directBookingEnabled) {
+      els.paymentNote.textContent = 'Faktura och bokningsförfrågan kräver manuellt godkännande. Direktbetalning med kort är inte tillgänglig just nu.';
+    } else if (available) {
+      els.paymentNote.textContent = 'Datumen är godkända för direktbokning. Betala med kort för att bekräfta bokningen direkt, eller skicka en bokningsförfrågan.';
+    } else {
+      els.paymentNote.textContent = 'Datumen kräver manuell kontroll. Skicka en bokningsförfrågan så återkommer vi med besked.';
+    }
+  }
+  updateSubmitLabel();
+}
+
+let availabilityRequestId = 0;
+
+async function checkDirectBookingAvailability(arrival, departure) {
+  const requestId = ++availabilityRequestId;
+  if (!els.directBookingEnabled) {
+    els.directBookingAvailable = false;
+    updatePaymentOptions();
+    return;
+  }
+  els.directBookingAvailable = false;
+  updatePaymentOptions();
+  els.availabilityChecking = true;
+  updateSubmitState();
+  try {
+    const params = new URLSearchParams({ start: arrival, end: departure });
+    const response = await fetch(`/api/direct-booking/availability?${params}`, { cache: 'no-store' });
+    const data = await response.json().catch(() => ({}));
+    if (requestId !== availabilityRequestId) return;
+    els.directBookingAvailable = response.ok && data.directBooking === true;
+    els.directBookingReason = data.code || '';
+  } catch {
+    if (requestId !== availabilityRequestId) return;
+    els.directBookingAvailable = false;
+    els.directBookingReason = 'UNAVAILABLE';
+  } finally {
+    if (requestId !== availabilityRequestId) return;
+    els.availabilityChecking = false;
+    updatePaymentOptions();
+    updateSubmitState();
+  }
 }
 
 function setSending(sending) {
@@ -231,7 +299,7 @@ function setSending(sending) {
   if (sending) {
     els.submit.textContent = selectedPaymentMethod() === 'card' ? 'Startar betalning …' : 'Skickar …';
   } else {
-    updateSubmitLabel();
+    updateSubmitState();
   }
 }
 
@@ -241,18 +309,16 @@ async function loadBookingConfig() {
     if (!response.ok) return;
     const config = await response.json();
     els.directBookingEnabled = config.directBookingEnabled === true;
-    if (els.paymentCardOption) els.paymentCardOption.hidden = !els.directBookingEnabled;
-    if (!els.directBookingEnabled && els.paymentCard?.checked) {
-      els.paymentRequest.checked = true;
+    els.directBookingAvailable = false;
+    updatePaymentOptions();
+    if (els.arrival.value && els.departure.value) {
+      checkDirectBookingAvailability(els.arrival.value, els.departure.value);
     }
-    if (els.paymentNote) {
-      els.paymentNote.textContent = els.directBookingEnabled
-        ? 'Direktbetalning med kort bekräftar bokningen automatiskt när tillgängligheten är verifierad. Faktura och bokningsförfrågan kräver manuellt godkännande.'
-        : 'Faktura och bokningsförfrågan kräver manuellt godkännande. Direktbetalning med kort är inte tillgänglig just nu.';
-    }
-    updateSubmitLabel();
   } catch {
     // Utan konfiguration visas endast det säkra förfrågningsflödet.
+    els.directBookingEnabled = false;
+    els.directBookingAvailable = false;
+    updatePaymentOptions();
   }
 }
 
@@ -414,6 +480,8 @@ function handleSelection(detail) {
     // Ett påbörjat datumval får aldrig visa kvarvarande totalpris för den
     // tidigare perioden. Formuläret (och alla ifyllda uppgifter) ligger kvar
     // öppet om det redan var öppet — bara datum och pris nollställs.
+    els.directBookingAvailable = false;
+    updatePaymentOptions();
     if (!wasOpen) return;
     updatePrices();
     return;
@@ -424,6 +492,7 @@ function handleSelection(detail) {
   els.form.hidden = false;
   els.summary.hidden = false;
   updatePrices();
+  checkDirectBookingAvailability(arrival, departure);
 
   if (!wasOpen) {
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -434,6 +503,8 @@ function handleSelection(detail) {
 
 function changeDates() {
   els.section.hidden = true;
+  els.directBookingAvailable = false;
+  updatePaymentOptions();
   resetIdempotencyKey();
   document.dispatchEvent(new CustomEvent('booking:invalidate'));
   const calendar = document.querySelector('.calendar-section');

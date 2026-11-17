@@ -15,7 +15,10 @@ const {
   rowTarget,
   toEntity,
   fromEntity,
-  toOutboxEntity
+  toOutboxEntity,
+  fromDirectBookingEntity,
+  directBookingEntity,
+  groupDirectBookingApprovals
 } = require('../../booking/store');
 const {
   normalizeBooking,
@@ -236,6 +239,69 @@ function createTableAdminRepository(options = {}) {
         createdBy: row.createdBy ?? '',
         createdAt: row.createdAt ?? ''
       }));
+    },
+    async getDirectBookingNight(night) {
+      const result = await request({
+        method: 'GET',
+        target: rowTarget('directbooking', night)
+      });
+      if (result.status === 404) return null;
+      if (result.status !== 200 || !result.json) {
+        throw new Error(`Direktbokningsraden kunde inte läsas (${result.status})`);
+      }
+      return fromDirectBookingEntity(result.json);
+    },
+    async listDirectBookingNights(from, to) {
+      const rows = await query(
+        `PartitionKey eq 'directbooking' and RowKey ge '${escapeOData(from)}' and RowKey lt '${escapeOData(to)}'`
+      );
+      return rows.map(fromDirectBookingEntity);
+    },
+    async upsertDirectBookingNight(night, data) {
+      const existing = await this.getDirectBookingNight(night);
+      const body = directBookingEntity(night, data);
+      if (existing) {
+        const result = await request({
+          method: 'PUT',
+          target: rowTarget('directbooking', night),
+          body,
+          ifMatch: existing.etag || '*'
+        });
+        if (result.status === 412 || result.status === 409) throw conflict('Direktbokningsraden har ändrats av någon annan');
+        if (![200, 204].includes(result.status)) {
+          throw new Error(`Direktbokningsraden kunde inte uppdateras (${result.status})`);
+        }
+        return;
+      }
+      const result = await request({
+        method: 'POST',
+        body
+      });
+      if (result.status !== 201) {
+        throw new Error(`Direktbokningsraden kunde inte sparas (${result.status})`);
+      }
+    },
+    async deleteDirectBookingNight(night) {
+      const existing = await this.getDirectBookingNight(night);
+      if (!existing) return;
+      const result = await request({
+        method: 'DELETE',
+        target: rowTarget('directbooking', night),
+        ifMatch: existing.etag || '*'
+      });
+      if (![200, 204, 404].includes(result.status)) {
+        throw new Error(`Direktbokningsraden kunde inte tas bort (${result.status})`);
+      }
+    },
+    async listDirectBookingNightsByApproval(approvalId) {
+      const rows = await query(
+        `PartitionKey eq 'directbooking' and approvalId eq '${escapeOData(approvalId)}'`
+      );
+      return rows.map(fromDirectBookingEntity);
+    },
+    async listDirectBookingApprovals() {
+      const rows = await query("PartitionKey eq 'directbooking'");
+      return groupDirectBookingApprovals(rows.map(fromDirectBookingEntity));
     },
     async createCalendarNight(night, data) {
       // Table Storage POST/Insert Entity är create-only: samma PartitionKey +

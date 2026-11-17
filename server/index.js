@@ -14,8 +14,10 @@ const { handlePaymentPage, handlePaymentAction } = require('./booking/payment-pa
 const {
   handleDirectBooking,
   handleDirectBookingConfirmation,
-  directBookingAvailable
+  directBookingAvailable,
+  checkDirectBookingAvailability
 } = require('./booking/direct-booking');
+const { validateRange } = require('./calendar/availability');
 const { loadRules, publicRules } = require('./booking/rules');
 const { createStore, isConfigured } = require('./booking/store');
 
@@ -410,6 +412,33 @@ function createRequestListener(options = {}) {
         sendJson(res, result.status, result.jsonBody, result.headers);
       } catch {
         sendJson(res, 503, { error: 'Förfrågningar kan tyvärr inte tas emot just nu. Vänligen kontakta oss direkt.' });
+      }
+      return;
+    }
+
+    if (url.pathname === '/api/direct-booking/availability' && (req.method === 'GET' || req.method === 'HEAD')) {
+      if (!validateRange(url.searchParams)) {
+        sendJson(res, 400, { error: 'Ogiltigt datumintervall.' });
+        return;
+      }
+      const from = url.searchParams.get('start');
+      const to = url.searchParams.get('end');
+      try {
+        const store = createStore(options);
+        const availability = await checkDirectBookingAvailability(
+          store,
+          from,
+          to,
+          new Date(),
+          directBookingOptions
+        );
+        sendJson(res, 200, availability);
+      } catch {
+        sendJson(res, 200, {
+          directBooking: false,
+          code: 'DIRECT_BOOKING_UNAVAILABLE',
+          reason: 'unavailable'
+        });
       }
       return;
     }
