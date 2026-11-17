@@ -16,7 +16,6 @@ const PAGES = [
   { path: '/mat-dryck', title: 'Mat & Dryck — Catering & självhushåll | Skadevi Gård' },
   { path: '/om-oss', title: 'Om oss — Historia & ägare | Skadevi Gård' },
   { path: '/vanliga-fragor', title: 'Vanliga frågor — FAQ | Skadevi Gård' },
-  { path: '/kontakt', title: 'Bilder — Skadevi Gård' },
   { path: '/digital-visning', title: 'Digital visning — Upptäck Skadevi Herrgård i 3D | Skadevi Gård' },
   { path: '/boka', title: 'Boka — Skadevi Gård' }
 ];
@@ -52,7 +51,11 @@ test('gamla .html-URL:er omdirigerar till rena URL:er', async ({ request }) => {
     ['/pages/priser.html', '/priser'],
     ['/priser.html', '/priser'],
     ['/index.html', '/'],
-    ['/pages/lediga-datum.html', '/boka']
+    ['/pages/lediga-datum.html', '/boka'],
+    ['/kontakt', '/boka'],
+    ['/kontakt/', '/boka'],
+    ['/kontakt.html', '/boka'],
+    ['/pages/kontakt.html', '/boka']
   ]) {
     const response = await request.get(from, { maxRedirects: 0 });
     expect(response.status(), from).toBe(301);
@@ -66,13 +69,21 @@ test('/lediga-datum omdirigeras permanent till /boka och bevarar datumparametrar
   expect(response.headers().location).toBe('/boka?start=2026-12-01&end=2026-12-03');
 });
 
+test('/kontakt omdirigeras permanent till /boka och bevarar datumparametrar', async ({ request }) => {
+  const response = await request.get('/kontakt?start=2026-12-01&end=2026-12-03', { maxRedirects: 0 });
+  expect(response.status()).toBe(301);
+  expect(response.headers().location).toBe('/boka?start=2026-12-01&end=2026-12-03');
+});
+
 test('robots.txt och sitemap.xml serveras', async ({ request }) => {
   const robots = await request.get('/robots.txt');
   expect(robots.status()).toBe(200);
   expect(await robots.text()).toContain('Sitemap:');
   const sitemap = await request.get('/sitemap.xml');
   expect(sitemap.status()).toBe(200);
-  expect(await sitemap.text()).toContain('<loc>');
+  const sitemapText = await sitemap.text();
+  expect(sitemapText).toContain('<loc>');
+  expect(sitemapText).not.toContain('/kontakt');
 });
 
 test('hashad css- och js-resurs laddas med cachelagringsrubriker', async ({ page, request }) => {

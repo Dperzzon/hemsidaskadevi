@@ -15,7 +15,6 @@ export const PAGES = [
   { name: 'mat-dryck', path: '/mat-dryck' },
   { name: 'om-oss', path: '/om-oss' },
   { name: 'vanliga-fragor', path: '/vanliga-fragor' },
-  { name: 'kontakt', path: '/kontakt' },
   { name: 'digital-visning', path: '/digital-visning' },
   { name: 'boka', path: '/boka' },
   { name: '404', path: '/denna-sida-finns-inte' }

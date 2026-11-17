@@ -101,6 +101,12 @@ function cleanUrlsAndApi() {
         return;
       }
       const clean = url.pathname.replace(/\/+$/, '');
+      // Den gamla kontaktsidan är ersatt av /boka (samma regler som i produktion).
+      if (['/kontakt', '/kontakt.html', '/pages/kontakt', '/pages/kontakt.html'].includes(clean)) {
+        res.writeHead(301, { Location: `/boka${url.search}`, 'Cache-Control': 'no-cache' });
+        res.end();
+        return;
+      }
       if (PAGE_ROUTES.includes(clean.slice(1))) {
         req.url = `/pages${clean}.html${url.search}`;
       }

@@ -118,6 +118,16 @@ function resolveStatic(root, pathname) {
   if (relative === 'lediga-datum' || relative === 'pages/lediga-datum.html') {
     return { redirect: '/boka', file: null };
   }
+  // Den gamla kontaktsidan är ersatt av /boka. Alla äldre varianter
+  // omdirigeras direkt (ingen kedja via /kontakt.html -> /kontakt).
+  if (
+    relative === 'kontakt' ||
+    relative === 'kontakt.html' ||
+    relative === 'pages/kontakt' ||
+    relative === 'pages/kontakt.html'
+  ) {
+    return { redirect: '/boka', file: null };
+  }
   const htmlMatch = /^(pages\/)?([a-z-]+)\.html$/.exec(relative);
   if (htmlMatch && (htmlMatch[2] === 'index' || PAGE_ROUTES.has(htmlMatch[2]))) {
     return { redirect: htmlMatch[2] === 'index' ? '/' : `/${htmlMatch[2]}`, file: null };

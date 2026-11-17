@@ -82,7 +82,7 @@ const HEADER = `<header class="header" role="banner">
     <a href="/digital-visning" class="header-link">Digital visning</a>
     <a href="/boende" class="header-link">Boendet</a>
     <a href="/aktiviteter" class="header-link">Aktiviteter</a>
-    <a href="/kontakt" class="header-link">Bilder</a>
+    <a href="/boka" class="header-link">Bilder</a>
   </div>
   <nav class="header-nav" role="navigation" aria-label="Meny">
     <a href="/foretag">Företag</a>
@@ -92,7 +92,7 @@ const HEADER = `<header class="header" role="banner">
     <a href="/digital-visning">Digital visning</a>
     <a href="/boende">Boendet</a>
     <a href="/aktiviteter">Aktiviteter</a>
-    <a href="/kontakt">Bilder</a>
+    <a href="/boka">Bilder</a>
     <a href="/boka">Boka</a>
     <a href="/vanliga-fragor">Vanliga frågor</a>
   </nav>
@@ -234,7 +234,7 @@ function renderSuccess(record, session) {
     ${detailsBlock(record, Number(session.amount_total))}
     <div class="payment-actions">
       ${actionLink('/', 'Tillbaka till hemsidan')}
-      ${actionLink('/kontakt', 'Kontakta Skadevi Herrgård', 'secondary')}
+      ${actionLink('/boka', 'Kontakta Skadevi Herrgård', 'secondary')}
     </div>
     ${contactBlock()}`;
   return pageResponse(layout({
@@ -268,7 +268,7 @@ function renderSuccessProcessing(record, paid) {
     ${details}
     <div class="payment-actions">
       ${actionLink('/', 'Tillbaka till hemsidan')}
-      ${actionLink('/kontakt', 'Kontakta Skadevi Herrgård', 'secondary')}
+      ${actionLink('/boka', 'Kontakta Skadevi Herrgård', 'secondary')}
     </div>
     ${contactBlock()}`;
   return pageResponse(layout({
@@ -290,7 +290,7 @@ function renderSuccessUnknown() {
     <p>En återkomst från betalningen betyder inte automatiskt att betalningen har genomförts. Vi verifierar alltid statusen hos betalningsleverantören innan en betalning visas som genomförd.</p>
     <div class="payment-actions">
       ${actionLink('/', 'Tillbaka till hemsidan')}
-      ${actionLink('/kontakt', 'Kontakta Skadevi Herrgård', 'secondary')}
+      ${actionLink('/boka', 'Kontakta Skadevi Herrgård', 'secondary')}
     </div>
     ${contactBlock()}`;
   return pageResponse(layout({

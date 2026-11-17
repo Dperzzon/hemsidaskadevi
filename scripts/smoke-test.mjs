@@ -39,7 +39,7 @@ try {
     ['/', 200],
     ['/foretag', 200], ['/fest', 200], ['/brollop', 200], ['/semester', 200],
     ['/boende', 200], ['/aktiviteter', 200], ['/priser', 200], ['/mat-dryck', 200],
-    ['/om-oss', 200], ['/vanliga-fragor', 200], ['/kontakt', 200],
+    ['/om-oss', 200], ['/vanliga-fragor', 200], ['/kontakt', 301],
     ['/digital-visning', 200], ['/boka', 200], ['/lediga-datum', 301],
     ['/betalning-klar', 200], ['/betalning-avbruten', 200],
     [`/betala/${'x'.repeat(43)}`, 404],
@@ -59,12 +59,28 @@ try {
     await response.body?.cancel();
   }
 
-  for (const [from, to] of [['/pages/priser.html', '/priser'], ['/priser.html', '/priser'], ['/index.html', '/'], ['/lediga-datum', '/boka']]) {
+  for (const [from, to] of [
+    ['/pages/priser.html', '/priser'],
+    ['/priser.html', '/priser'],
+    ['/index.html', '/'],
+    ['/lediga-datum', '/boka'],
+    ['/kontakt', '/boka'],
+    ['/kontakt/', '/boka'],
+    ['/kontakt.html', '/boka'],
+    ['/pages/kontakt.html', '/boka']
+  ]) {
     const response = await fetch(`${base}${from}`, { redirect: 'manual' });
     if (response.status !== 301) fail(`${from} gav ${response.status}, förväntat 301`);
     if (response.headers.get('location') !== to) fail(`${from} omdirigerar till ${response.headers.get('location')}, förväntat ${to}`);
     await response.body?.cancel();
   }
+
+  const kontaktQuery = await fetch(`${base}/kontakt?start=2026-12-01&end=2026-12-03`, { redirect: 'manual' });
+  if (kontaktQuery.status !== 301) fail(`/kontakt med query gav ${kontaktQuery.status}, förväntat 301`);
+  if (kontaktQuery.headers.get('location') !== '/boka?start=2026-12-01&end=2026-12-03') {
+    fail(`/kontakt med query omdirigerar till ${kontaktQuery.headers.get('location')}`);
+  }
+  await kontaktQuery.body?.cancel();
 
   const bad = await fetch(`${base}/api/availability?start=2026-01-01`);
   if (bad.status !== 400) fail(`API utan slutdatum gav ${bad.status}, förväntat 400`);

@@ -127,6 +127,17 @@ function createRequestListener(options = {}) {
       return;
     }
 
+    const contactPaths = new Set(['/kontakt', '/kontakt/', '/kontakt.html', '/pages/kontakt', '/pages/kontakt.html']);
+    if (contactPaths.has(url.pathname)) {
+      res.writeHead(301, {
+        ...SECURITY_HEADERS,
+        Location: `/boka${url.search}`,
+        'Cache-Control': 'no-cache'
+      });
+      res.end();
+      return;
+    }
+
     const filePath = resolveStatic(root, url.pathname);
     if (filePath === null) {
       await sendErrorPage(res, root, 404);
