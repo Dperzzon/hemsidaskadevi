@@ -735,6 +735,61 @@ function createTableStore(options = {}) {
       if (result.status !== 200 || !Array.isArray(result.json?.value)) return null;
       return groupDirectBookingApprovals(result.json.value.map(fromDirectBookingEntity));
     },
+    async getDirectBookingSetting() {
+      const result = await tableRequest({
+        accountName, method: 'GET', table,
+        target: rowTarget('directbooking', '__setting__'),
+        fetchImpl: options.fetchImpl, auth
+      });
+      if (result.status === 404) return null;
+      if (result.status !== 200 || !result.json) {
+        throw new Error(`Direktbokningsinställningen kunde inte läsas (${result.status})`);
+      }
+      return {
+        enabled: result.json.enabled === '1' || result.json.enabled === true,
+        updatedBy: result.json.updatedBy ?? '',
+        updatedAt: result.json.updatedAt ?? '',
+        note: result.json.note ?? '',
+        etag: result.json['odata.etag'] ?? ''
+      };
+    },
+    async setDirectBookingSetting(data) {
+      const existing = await this.getDirectBookingSetting();
+      const body = {
+        PartitionKey: 'directbooking',
+        RowKey: '__setting__',
+        enabled: data.enabled ? '1' : '0',
+        updatedBy: data.updatedBy ?? '',
+        updatedAt: data.updatedAt ?? new Date().toISOString(),
+        note: data.note ?? ''
+      };
+      if (existing) {
+        const result = await tableRequest({
+          accountName, method: 'PUT', table,
+          target: rowTarget('directbooking', '__setting__'),
+          body,
+          ifMatch: existing.etag || '*',
+          fetchImpl: options.fetchImpl, auth
+        });
+        if (result.status === 412 || result.status === 409) {
+          const conflict = new Error('Direktbokningsinställningen har ändrats av någon annan');
+          conflict.status = 409;
+          throw conflict;
+        }
+        if (![200, 204].includes(result.status)) {
+          throw new Error(`Direktbokningsinställningen kunde inte uppdateras (${result.status})`);
+        }
+        return;
+      }
+      const result = await tableRequest({
+        accountName, method: 'POST', table,
+        body,
+        fetchImpl: options.fetchImpl, auth
+      });
+      if (result.status !== 201) {
+        throw new Error(`Direktbokningsinställningen kunde inte sparas (${result.status})`);
+      }
+    },
     async updateRequest(record, { ifMatch } = {}) {
       const rowKey = record.rowKey ?? record.idempotencyKey;
       const result = await tableRequest({
@@ -973,6 +1028,28 @@ function createLocalStore(options = {}) {
     },
     async listDirectBookingApprovals() {
       return groupDirectBookingApprovals([...directBooking.values()]);
+    },
+    async getDirectBookingSetting() {
+      const row = directBooking.get('__setting__');
+      if (!row) return null;
+      return {
+        enabled: row.enabled === '1' || row.enabled === true,
+        updatedBy: row.updatedBy ?? '',
+        updatedAt: row.updatedAt ?? '',
+        note: row.note ?? '',
+        etag: row.etag ?? ''
+      };
+    },
+    async setDirectBookingSetting(data) {
+      const existing = directBooking.get('__setting__');
+      directBooking.set('__setting__', {
+        night: '__setting__',
+        enabled: data.enabled ? '1' : '0',
+        updatedBy: data.updatedBy ?? '',
+        updatedAt: data.updatedAt ?? new Date().toISOString(),
+        note: data.note ?? '',
+        etag: existing ? `db-setting-2` : 'db-setting-1'
+      });
     },
     async updateRequest(record, { ifMatch } = {}) {
       await loadOnce();

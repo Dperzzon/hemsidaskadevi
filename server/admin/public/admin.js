@@ -477,6 +477,16 @@
           window.location.reload();
           return;
         }
+        if (type === 'direct-booking-toggle') {
+          await api('/api/admin/direct-booking/toggle', {
+            body: {
+              enabled: formValue(form, 'enabled') === '1',
+              note: formValue(form, 'note')
+            }
+          });
+          window.location.reload();
+          return;
+        }
         if (type === 'direct-booking-open') {
           await api('/api/admin/direct-booking/open', {
             body: {

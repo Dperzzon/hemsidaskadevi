@@ -145,7 +145,7 @@ az role assignment create `
 
 2. RBAC kan ta några minuter att propagera; första hämtningen kan ge
    "okänd tillgänglighet" en kort stund.
-3. Verifiera att `/lediga-datum` visar rätt tillgänglighet.
+3. Verifiera att `/boka` visar rätt tillgänglighet.
 
 **Obs:** Bicep-appinställningarna ersätter ALLA befintliga appinställningar
 vid varje infra-deploy. Lägg därför aldrig till inställningar manuellt i

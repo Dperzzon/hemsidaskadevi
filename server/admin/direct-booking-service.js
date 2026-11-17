@@ -234,13 +234,46 @@ async function closeDirectBooking(repository, principal, body, options = {}, _co
   return { status: 200, jsonBody: { approvalId, closed } };
 }
 
+async function setAutomaticDirectBooking(repository, principal, body, options = {}, _context = {}) {
+  if (!principal?.roles?.includes('Owner')) {
+    return error(403, 'Endast Owner kan slå av eller på automatisk direktbokning.', 'FORBIDDEN');
+  }
+  const enabled = body?.enabled === true;
+  const note = String(body?.note ?? '').trim().slice(0, 1000);
+  const now = options.now ?? new Date();
+  const actor = actorOf(principal);
+  await repository.setDirectBookingSetting({
+    enabled,
+    updatedBy: actor.name,
+    updatedAt: now.toISOString(),
+    note
+  });
+  await repository.appendHistory({
+    idempotencyKey: `direct-auto-${enabled ? 'on' : 'off'}-${now.getTime()}`,
+    reference: 'DIRECT-AUTOMATIC',
+    action: enabled ? 'DIRECT_BOOKING_AUTOMATIC_ENABLED' : 'DIRECT_BOOKING_AUTOMATIC_DISABLED',
+    fromStatus: enabled ? 'OFF' : 'ON',
+    toStatus: enabled ? 'ON' : 'OFF',
+    changes: JSON.stringify({ enabled, note }),
+    reason: note,
+    actorId: actor.id,
+    actorName: actor.name,
+    correlationId: crypto.randomUUID(),
+    at: now.toISOString()
+  });
+  return { status: 200, jsonBody: { enabled } };
+}
+
 async function directBookingOverview(repository, now = new Date()) {
-  const [all, approvals] = await Promise.all([
+  const [all, approvals, setting] = await Promise.all([
     repository.allBookings(now),
-    repository.listDirectBookingApprovals()
+    repository.listDirectBookingApprovals(),
+    repository.getDirectBookingSetting()
   ]);
   const direct = all.filter((booking) => booking.bookingSource === 'DIRECT');
   return {
+    automaticEnabled: setting ? setting.enabled === true : true,
+    setting: setting ?? null,
     approvals: approvals ?? [],
     reservations: direct.filter((booking) => booking.statusCode === 'PENDING_PAYMENT'),
     confirmed: direct.filter((booking) => booking.statusCode === 'CONFIRMED'),
@@ -251,6 +284,7 @@ async function directBookingOverview(repository, now = new Date()) {
 module.exports = {
   openDirectBooking,
   closeDirectBooking,
+  setAutomaticDirectBooking,
   directBookingOverview,
   validateRange,
   CONFIRMATIONS,

@@ -179,6 +179,7 @@ function createDemoRepository(options = {}) {
     async listDirectBookingApprovals() {
       const groups = new Map();
       for (const row of directBooking.values()) {
+        if (!row.approvalId) continue;
         if (!groups.has(row.approvalId)) {
           groups.set(row.approvalId, {
             approvalId: row.approvalId,
@@ -198,6 +199,28 @@ function createDemoRepository(options = {}) {
         if (row.status === 'OPEN') group.status = 'OPEN';
       }
       return [...groups.values()].map((group) => ({ ...group, nights: group.nights.sort() }));
+    },
+    async getDirectBookingSetting() {
+      const row = directBooking.get('__setting__');
+      if (!row) return null;
+      return {
+        enabled: row.enabled === '1' || row.enabled === true,
+        updatedBy: row.updatedBy ?? '',
+        updatedAt: row.updatedAt ?? '',
+        note: row.note ?? '',
+        etag: row.etag ?? ''
+      };
+    },
+    async setDirectBookingSetting(data) {
+      const existing = directBooking.get('__setting__');
+      directBooking.set('__setting__', {
+        night: '__setting__',
+        enabled: data.enabled ? '1' : '0',
+        updatedBy: data.updatedBy ?? '',
+        updatedAt: data.updatedAt ?? new Date().toISOString(),
+        note: data.note ?? '',
+        etag: existing ? 'demo-setting-2' : 'demo-setting-1'
+      });
     },
     async createCalendarNight(night, data) {
       createCalendarNight(night, data);

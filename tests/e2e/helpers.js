@@ -18,7 +18,6 @@ export const PAGES = [
   { name: 'kontakt', path: '/kontakt' },
   { name: 'digital-visning', path: '/digital-visning' },
   { name: 'boka', path: '/boka' },
-  { name: 'lediga-datum', path: '/lediga-datum' },
   { name: '404', path: '/denna-sida-finns-inte' }
 ];
 

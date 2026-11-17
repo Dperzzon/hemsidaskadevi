@@ -18,8 +18,7 @@ const PAGES = [
   { path: '/vanliga-fragor', title: 'Vanliga frågor — FAQ | Skadevi Gård' },
   { path: '/kontakt', title: 'Bilder — Skadevi Gård' },
   { path: '/digital-visning', title: 'Digital visning — 3D-tur av Skadevi Gård | Skadevi Gård' },
-  { path: '/boka', title: 'Boka — Skadevi Gård' },
-  { path: '/lediga-datum', title: 'Lediga datum — Skadevi Gård' }
+  { path: '/boka', title: 'Boka — Skadevi Gård' }
 ];
 
 test.beforeEach(async ({ page }) => {
@@ -53,12 +52,18 @@ test('gamla .html-URL:er omdirigerar till rena URL:er', async ({ request }) => {
     ['/pages/priser.html', '/priser'],
     ['/priser.html', '/priser'],
     ['/index.html', '/'],
-    ['/pages/lediga-datum.html', '/lediga-datum']
+    ['/pages/lediga-datum.html', '/boka']
   ]) {
     const response = await request.get(from, { maxRedirects: 0 });
     expect(response.status(), from).toBe(301);
     expect(response.headers().location, from).toBe(to);
   }
+});
+
+test('/lediga-datum omdirigeras permanent till /boka och bevarar datumparametrar', async ({ request }) => {
+  const response = await request.get('/lediga-datum?start=2026-12-01&end=2026-12-03', { maxRedirects: 0 });
+  expect(response.status()).toBe(301);
+  expect(response.headers().location).toBe('/boka?start=2026-12-01&end=2026-12-03');
 });
 
 test('robots.txt och sitemap.xml serveras', async ({ request }) => {
@@ -132,7 +137,7 @@ test('vanliga frågor: stäng question uppdaterar aria-expanded', async ({ page 
 });
 
 test('kalendern visar två månader och bläddrar', async ({ page }) => {
-  await page.goto('/lediga-datum', { waitUntil: 'load' });
+  await page.goto('/boka', { waitUntil: 'load' });
   await expect(page.locator('.cal-month h3').first()).toHaveText('November 2026');
   await expect(page.locator('.cal-month')).toHaveCount(2);
   await expect(page.locator('#calendar-description')).toBeVisible();
@@ -143,7 +148,7 @@ test('kalendern visar två månader och bläddrar', async ({ page }) => {
 test('kalendern visar felmeddelande när API:et svarar 503', async ({ page }) => {
   await page.route('**/api/availability?*', (route) =>
     route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"x"}' }));
-  await page.goto('/lediga-datum', { waitUntil: 'load' });
+  await page.goto('/boka', { waitUntil: 'load' });
   await expect(page.locator('.cal-notice')).toContainText('Tillgängligheten är okänd');
   await expect(page.locator('.cal-month')).toHaveCount(0);
 });

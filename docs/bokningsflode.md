@@ -1,7 +1,7 @@
 # Bokningsflödet för Skadevi Herrgård
 
 Bokningsflödet gör det möjligt för gästen att välja datum direkt i kalendern
-på `/lediga-datum`, fylla i en bokningsförfrågan, välja tillval, godkänna
+på `/boka`, fylla i en bokningsförfrågan, välja tillval, godkänna
 bokningsreglerna och skicka en förfrågan — utan att lämna sidan.
 
 En bokningsförfrågan är **aldrig** en bekräftad bokning: den sparas alltid med

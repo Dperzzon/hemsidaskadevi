@@ -15,29 +15,18 @@ const {
   formatDateTime
 } = require('../domain');
 
-function approvalRows(approvals, canWrite) {
+function approvalRows(approvals) {
   if (!approvals.length) {
-    return `<tr><td colspan="6">${emptyState('Inga datum öppna', 'Alla datum är stängda för direktbokning.')}</td></tr>`;
+    return `<tr><td colspan="5">${emptyState('Ingen historik', 'Inga tidigare manuella direktbokningsgodkännanden finns.')}</td></tr>`;
   }
-  return approvals.map((approval) => {
-    const open = approval.status === 'OPEN';
-    const closeForm = canWrite && open
-      ? `<form class="inline-form" data-admin-form="direct-booking-close" data-approval-id="${escapeHtml(approval.approvalId)}">
-          <input type="text" name="note" maxlength="200" placeholder="Orsak (frivillig)">
-          <button type="submit" class="btn btn-small btn-danger">Stäng</button>
-          <p class="form-error" data-form-error hidden></p>
-        </form>`
-      : '';
-    return `<tr>
-      <td><strong>${escapeHtml(formatDateKey(approval.from))} – ${escapeHtml(formatDateKey(approval.to))}</strong>
-        <div class="muted">${approval.nights.length} nätter</div></td>
-      <td>${escapeHtml(approval.approvedBy || '—')}<div class="muted">${escapeHtml(formatDateTime(approval.approvedAt))}</div></td>
-      <td>${escapeHtml(approval.note || '—')}</td>
-      <td><span class="badge ${open ? 'badge-confirmed' : 'badge-cancelled'}">${open ? 'Öppen' : 'Stängd'}</span></td>
-      <td>${open ? '—' : `${escapeHtml(approval.closedBy || '—')}<div class="muted">${escapeHtml(formatDateTime(approval.closedAt))}</div>`}</td>
-      <td>${closeForm}</td>
-    </tr>`;
-  }).join('');
+  return approvals.map((approval) => `<tr>
+    <td><strong>${escapeHtml(formatDateKey(approval.from))} – ${escapeHtml(formatDateKey(approval.to))}</strong>
+      <div class="muted">${approval.nights.length} nätter</div></td>
+    <td>${escapeHtml(approval.approvedBy || '—')}<div class="muted">${escapeHtml(formatDateTime(approval.approvedAt))}</div></td>
+    <td>${escapeHtml(approval.note || '—')}</td>
+    <td><span class="badge ${approval.status === 'OPEN' ? 'badge-confirmed' : 'badge-cancelled'}">${approval.status === 'OPEN' ? 'Öppen' : 'Stängd'}</span></td>
+    <td>${approval.closedAt ? `${escapeHtml(approval.closedBy || '—')}<div class="muted">${escapeHtml(formatDateTime(approval.closedAt))}</div>` : '—'}</td>
+  </tr>`).join('');
 }
 
 function bookingRows(bookings, emptyTitle, emptyText, extra = () => '', extra2 = null) {
@@ -58,67 +47,55 @@ function bookingRows(bookings, emptyTitle, emptyText, extra = () => '', extra2 =
 function renderDirectBooking({ data, principal, demo, csrfToken, writesEnabled }) {
   const isOwner = principal.roles?.includes('Owner');
   const canWrite = isOwner && writesEnabled;
+  const automaticEnabled = data.automaticEnabled === true;
   const approvals = data.approvals ?? [];
-  const openApprovals = approvals.filter((approval) => approval.status === 'OPEN');
-  const closedApprovals = approvals.filter((approval) => approval.status !== 'OPEN');
   const reservations = data.reservations ?? [];
   const confirmed = data.confirmed ?? [];
   const reconciliation = data.reconciliation ?? [];
 
-  const openForm = canWrite
-    ? `<form class="panel" data-admin-form="direct-booking-open">
-        <h2>Öppna datum för direktbokning</h2>
-        <p class="muted">Alla datum är stängda som standard. Ett intervall får bara öppnas när du har blockerat
-        datumen i Airbnb för att reserveras åt hemsidan och bekräftar att det inte finns någon Airbnb-gästbokning
-        eller annan extern bokning. Systemet kontrollerar att Airbnb iCal visar samtliga nätter som blockerade.</p>
-        <div class="form-grid">
-          <label>Från<input type="date" name="from" required></label>
-          <label>Till<input type="date" name="to" required></label>
-        </div>
-        <label>Anteckning / underlag<textarea name="note" maxlength="1000" rows="3"
-          placeholder="T.ex. Airbnb-blockering skapad 2026-11-17, ingen extern bokning."></textarea></label>
-        <fieldset class="check-list">
-          <legend>Bekräftelser</legend>
-          <label><input type="checkbox" name="confirmAirbnbBlocked" required>
-            Datumen är blockerade i Airbnb för att reserveras åt hemsidan.</label>
-          <label><input type="checkbox" name="confirmNoAirbnbGuest" required>
-            Det finns ingen Airbnb-gästbokning för dessa datum.</label>
-          <label><input type="checkbox" name="confirmNoExternal" required>
-            Det finns ingen annan extern bokning för dessa datum.</label>
-          <label><input type="checkbox" name="confirmMayOffer" required>
-            Datumen får erbjudas för direktbetalning på hemsidan.</label>
-        </fieldset>
+  const toggleForm = canWrite
+    ? `<form class="inline-form" data-admin-form="direct-booking-toggle">
+        <input type="hidden" name="enabled" value="${automaticEnabled ? '0' : '1'}">
+        <input type="text" name="note" maxlength="500" placeholder="Orsak (frivillig)">
+        <button type="submit" class="btn ${automaticEnabled ? 'btn-danger' : 'btn-primary'}">
+          ${automaticEnabled ? 'Stäng av automatisk direktbokning' : 'Slå på automatisk direktbokning'}
+        </button>
         <p class="form-error" data-form-error hidden></p>
-        <button type="submit" class="btn btn-primary">Öppna för direktbokning</button>
       </form>`
-    : `<div class="panel"><h2>Öppna datum för direktbokning</h2>
-        <p class="muted">${isOwner
-          ? 'Skrivfunktioner är inte aktiverade i denna miljö.'
-          : 'Endast Owner kan öppna eller stänga datum för direktbokning. Du har läsbehörighet.'}</p></div>`;
+    : `<p class="muted">${isOwner
+      ? 'Skrivfunktioner är inte aktiverade i denna miljö.'
+      : 'Endast Owner kan slå av eller på automatisk direktbokning. Du har läsbehörighet.'}</p>`;
 
   const content = `
-    ${pageHeader('Direktbokning', 'Owner-styrda datum för kortbetalning på hemsidan')}
+    ${pageHeader('Direktbokning', 'Automatisk kortbetalning för lediga datum')}
     <div class="metric-grid">
-      <article class="metric"><p class="metric-label">Öppna datum</p><p class="metric-value">${openApprovals.length}</p><p class="metric-detail">godkända intervall</p></article>
+      <article class="metric"><p class="metric-label">Automatisk direktbokning</p><p class="metric-value">${automaticEnabled ? 'På' : 'Av'}</p><p class="metric-detail">${automaticEnabled ? 'lediga datum kan bokas med kort' : 'endast bokningsförfrågan'}</p></article>
       <article class="metric"><p class="metric-label">Aktiva reservationer</p><p class="metric-value">${reservations.length}</p><p class="metric-detail">väntar på betalning</p></article>
       <article class="metric"><p class="metric-label">Bekräftade direktbokningar</p><p class="metric-value">${confirmed.length}</p><p class="metric-detail">betalda via Stripe</p></article>
       <article class="metric"><p class="metric-label">Avstämning</p><p class="metric-value">${reconciliation.length}</p><p class="metric-detail">kräver Owner-åtgärd</p></article>
     </div>
-    ${openForm}
+
     <section class="panel">
-      <h2>Öppna godkännanden</h2>
-      <div class="table-wrap"><table class="data-table">
-        <thead><tr><th>Datum</th><th>Godkänd av</th><th>Underlag</th><th>Status</th><th>Stängd av</th><th>Åtgärd</th></tr></thead>
-        <tbody>${approvalRows(openApprovals, canWrite)}</tbody>
-      </table></div>
+      <h2>Automatisk direktbokning</h2>
+      <p>Alla datum som är lediga i den interna kalendern och i senast hämtade Airbnb-kalender kan erbjudas
+      för direktbetalning. Owner behöver inte längre blockera och öppna datum manuellt.</p>
+      <p><strong>Status:</strong> ${automaticEnabled ? 'På' : 'Av'}${data.setting?.updatedAt
+        ? ` · senast ändrad av ${escapeHtml(data.setting.updatedBy || '—')} ${escapeHtml(formatDateTime(data.setting.updatedAt))}`
+        : ''}</p>
+      ${data.setting?.note ? `<p class="muted">Anteckning: ${escapeHtml(data.setting.note)}</p>` : ''}
+      ${toggleForm}
     </section>
+
     <section class="panel">
-      <h2>Stängda godkännanden</h2>
-      <div class="table-wrap"><table class="data-table">
-        <thead><tr><th>Datum</th><th>Godkänd av</th><th>Underlag</th><th>Status</th><th>Stängd av</th><th>Åtgärd</th></tr></thead>
-        <tbody>${approvalRows(closedApprovals, canWrite)}</tbody>
-      </table></div>
+      <h2>Airbnb-synkroniseringens begränsning</h2>
+      <p>Airbnb iCal är inte en realtidskälla och kan vara fördröjd. Ett färskt iCal-svar garanterar
+      inte Airbnbs tillgänglighet i realtid. Systemet hämtar iCal inför varje Checkout-försök och stoppar
+      direktbetalning om kalendern inte kan läsas, om en natt är upptagen eller om tillgängligheten är osäker.</p>
+      <p>Den kvarstående risken är att en extern Airbnb-bokning kan ske på en natt som iCal ännu inte har
+      uppdaterat. Om kalenderintegrationen visar problem kan du stänga av automatisk direktbokning ovan.</p>
+      <p><a class="btn btn-outline" href="/admin/calendar">Till kalendern för manuella datumblockeringar</a></p>
     </section>
+
     <section class="panel">
       <h2>Aktiva betalningsreservationer</h2>
       <div class="table-wrap"><table class="data-table">
@@ -127,6 +104,7 @@ function renderDirectBooking({ data, principal, demo, csrfToken, writesEnabled }
           escapeHtml(booking.reservation?.expiresAt ? `Giltig till ${formatDateTime(booking.reservation.expiresAt)}` : '—'))}</tbody>
       </table></div>
     </section>
+
     <section class="panel">
       <h2>Bekräftade direktbokningar</h2>
       <div class="table-wrap"><table class="data-table">
@@ -136,6 +114,7 @@ function renderDirectBooking({ data, principal, demo, csrfToken, writesEnabled }
           escapeHtml(booking.directBookingApprovalId || '—'))}</tbody>
       </table></div>
     </section>
+
     <section class="panel">
       <h2>Avstämningsärenden</h2>
       <div class="table-wrap"><table class="data-table">
@@ -144,8 +123,16 @@ function renderDirectBooking({ data, principal, demo, csrfToken, writesEnabled }
           escapeHtml(booking.reconciliation?.reason || '—'))}</tbody>
       </table></div>
     </section>
-    <p class="muted">Direktbokning ändrar aldrig Airbnb automatiskt. En Airbnb-blockering i iCal är ett underlag,
-    inte ett kvitto på att bokningen är gjord i Airbnb. Owners godkännande och auditloggen bevaras.</p>
+
+    <section class="panel">
+      <h2>Historik: tidigare manuella godkännanden</h2>
+      <p class="muted">Dessa godkännanden krävs inte längre för direktbokning. Historiken bevaras för spårbarhet
+      och påverkar inte automatisk direktbokning.</p>
+      <div class="table-wrap"><table class="data-table">
+        <thead><tr><th>Datum</th><th>Godkänd av</th><th>Underlag</th><th>Status</th><th>Stängd av</th></tr></thead>
+        <tbody>${approvalRows(approvals)}</tbody>
+      </table></div>
+    </section>
   `;
 
   return layout({

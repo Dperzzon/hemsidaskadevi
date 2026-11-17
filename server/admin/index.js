@@ -53,6 +53,7 @@ const {
 const {
   openDirectBooking,
   closeDirectBooking,
+  setAutomaticDirectBooking,
   directBookingOverview
 } = require('./direct-booking-service');
 
@@ -408,6 +409,21 @@ async function handleApi(req, res, url, context) {
   if (pathname === '/api/admin/direct-booking' && req.method === 'GET') {
     const data = await directBookingOverview(repository, now);
     sendJson(req, res, 200, data);
+    return;
+  }
+
+  if (pathname === '/api/admin/direct-booking/toggle' && req.method === 'POST') {
+    if (!guardWrite(req, res, context)) return;
+    const parsed = await readBodyOrError(req, res);
+    if (!parsed) return;
+    const result = await setAutomaticDirectBooking(
+      repository,
+      principal,
+      parsed.body,
+      serviceOptions(context),
+      { warn: context.warn }
+    );
+    sendJson(req, res, result.status, result.jsonBody);
     return;
   }
 

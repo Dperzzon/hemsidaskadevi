@@ -18,7 +18,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 async function goto(page) {
-  await page.goto('/lediga-datum', { waitUntil: 'load' });
+  await page.goto('/boka', { waitUntil: 'load' });
   await expect(page.locator('.cal-month h3').first()).toHaveText('November 2026');
 }
 
@@ -163,7 +163,7 @@ test('månadsrabatt visas för vistelser på 28 nätter eller fler', async ({ pa
     route.fulfill({ status: 200, contentType: 'application/json', body: '{"blocked":[]}' }));
   await page.route('**/api/booking-rules', (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(RULES_MOCK) }));
-  await page.goto('/lediga-datum', { waitUntil: 'load' });
+  await page.goto('/boka', { waitUntil: 'load' });
   await expect(page.locator('.cal-month h3').first()).toHaveText('November 2026');
   // 29 november → 27 december: exakt 28 nätter (avresedagen är ingen natt).
   await clickDay(page, '2026-11-29');
@@ -439,7 +439,7 @@ test('okänd tillgänglighet (kalender-API fel) visar aldrig lediga datum', asyn
     route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"x"}' }));
   await page.route('**/api/booking-rules', (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(RULES_MOCK) }));
-  await page.goto('/lediga-datum', { waitUntil: 'load' });
+  await page.goto('/boka', { waitUntil: 'load' });
   await expect(page.locator('.cal-month')).toHaveCount(0);
   await expect(page.locator('#booking-section')).toBeHidden();
   await expect(page.locator('.cal-notice')).toContainText('Tillgängligheten är okänd');

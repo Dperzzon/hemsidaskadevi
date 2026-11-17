@@ -112,6 +112,11 @@ function resolveStatic(root, pathname) {
 
   // 301 från gamla fil-URL:er till rena URL:er (befintliga länkar/bokmärken).
   if (relative === 'index.html') return { redirect: '/', file: null };
+  // Den gamla bokningssidan är sammanslagen med /boka. Behåll query-parametrar
+  // (t.ex. datumval) via anroparens url.search.
+  if (relative === 'lediga-datum' || relative === 'pages/lediga-datum.html') {
+    return { redirect: '/boka', file: null };
+  }
   const htmlMatch = /^(pages\/)?([a-z-]+)\.html$/.exec(relative);
   if (htmlMatch && (htmlMatch[2] === 'index' || PAGE_ROUTES.has(htmlMatch[2]))) {
     return { redirect: htmlMatch[2] === 'index' ? '/' : `/${htmlMatch[2]}`, file: null };

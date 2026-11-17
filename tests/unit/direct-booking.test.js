@@ -9,7 +9,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   handleDirectBooking,
-  handleDirectBookingConfirmation
+  handleDirectBookingConfirmation,
+  checkDirectBookingAvailability
 } = require('../../server/booking/direct-booking');
 const { handleStripeWebhook } = require('../../server/booking/stripe-webhook');
 const { signStripePayload } = require('../../server/booking/stripe');
@@ -173,6 +174,7 @@ function createMemoryStore() {
     async listDirectBookingApprovals() {
       const groups = new Map();
       for (const row of directBooking.values()) {
+        if (!row.approvalId) continue;
         if (!groups.has(row.approvalId)) {
           groups.set(row.approvalId, {
             approvalId: row.approvalId,
@@ -192,6 +194,28 @@ function createMemoryStore() {
         if (row.status === 'OPEN') group.status = 'OPEN';
       }
       return [...groups.values()].map((group) => ({ ...group, nights: group.nights.sort() }));
+    },
+    async getDirectBookingSetting() {
+      const row = directBooking.get('__setting__');
+      if (!row) return null;
+      return {
+        enabled: row.enabled === '1' || row.enabled === true,
+        updatedBy: row.updatedBy ?? '',
+        updatedAt: row.updatedAt ?? '',
+        note: row.note ?? '',
+        etag: row.etag ?? ''
+      };
+    },
+    async setDirectBookingSetting(data) {
+      const existing = directBooking.get('__setting__');
+      directBooking.set('__setting__', {
+        night: '__setting__',
+        enabled: data.enabled ? '1' : '0',
+        updatedBy: data.updatedBy ?? '',
+        updatedAt: data.updatedAt ?? new Date().toISOString(),
+        note: data.note ?? '',
+        etag: existing ? 'db-setting-2' : 'db-setting-1'
+      });
     }
   };
   return {
@@ -242,36 +266,8 @@ function createFakeStripe(overrides = {}) {
   };
 }
 
-const OPEN_NIGHTS = ['2026-11-20', '2026-11-21', '2026-11-22'];
-
-function seedOpenDates(memory, nights = OPEN_NIGHTS, overrides = {}) {
-  const from = nights[0];
-  const to = '2026-11-23';
-  for (const night of nights) {
-    memory.directBooking.set(night, {
-      night,
-      status: 'OPEN',
-      approvalId: 'DB-TEST',
-      from,
-      to,
-      approvedBy: 'Owner Test',
-      approvedById: 'owner-1',
-      approvedAt: NOW.toISOString(),
-      note: 'Testgodkännande',
-      airbnbBlockedNights: JSON.stringify(nights),
-      airbnbCheckedAt: NOW.toISOString(),
-      createdAt: NOW.toISOString(),
-      updatedAt: NOW.toISOString(),
-      updatedBy: 'Owner Test',
-      etag: `db-${night}-1`,
-      ...overrides
-    });
-  }
-}
-
 function setup(overrides = {}) {
   const memory = createMemoryStore();
-  seedOpenDates(memory);
   const stripe = createFakeStripe();
   const options = {
     rules: RULES,
@@ -281,7 +277,7 @@ function setup(overrides = {}) {
     stripeEnabled: true,
     cardEnabled: true,
     stripeClient: stripe,
-    availabilityHandler: async () => ({ status: 200, jsonBody: { blocked: OPEN_NIGHTS } }),
+    availabilityHandler: async () => ({ status: 200, jsonBody: { blocked: [] } }),
     now: NOW,
     publicBaseUrl: 'https://www.skadeviherrgard.com',
     requireDurableStore: false,
@@ -324,19 +320,19 @@ test('Airbnb som inte kan hämtas stoppar direktbetalning och hänvisar till man
     availabilityHandler: async () => ({ status: 503, jsonBody: { error: 'nere' } })
   });
   const result = await handleDirectBooking(request(), context, options);
-  assert.equal(result.status, 409);
+  assert.equal(result.status, 503);
   assert.equal(result.jsonBody.manualReview, true);
-  assert.match(result.jsonBody.error, /manuellt/);
+  assert.match(result.jsonBody.error, /tillgängligheten/);
 });
 
-test('Airbnb-blockerade nätter som inte matchar Owners underlag stoppar direktbetalning', async () => {
+test('Airbnb-upptagna nätter stoppar direktbetalning', async () => {
   const { options, context } = setup({
     availabilityHandler: async () => ({ status: 200, jsonBody: { blocked: ['2026-11-21'] } })
   });
   const result = await handleDirectBooking(request(), context, options);
   assert.equal(result.status, 409);
-  assert.equal(result.jsonBody.code, 'AIRBNB_BLOCK_MISSING');
-  assert.deepEqual(result.jsonBody.nights, ['2026-11-20', '2026-11-22']);
+  assert.equal(result.jsonBody.code, 'AIRBNB_CONFLICT');
+  assert.deepEqual(result.jsonBody.nights, ['2026-11-21']);
 });
 
 test('intern kalenderkonflikt stoppar direktbetalning', async () => {
@@ -349,6 +345,58 @@ test('intern kalenderkonflikt stoppar direktbetalning', async () => {
   const result = await handleDirectBooking(request(), context, options);
   assert.equal(result.status, 409);
   assert.equal(result.jsonBody.code, 'INTERNAL_CONFLICT');
+});
+
+test('intern datumblockering stoppar direktbetalning', async () => {
+  const { options, context, memory } = setup();
+  await memory.store.createCalendarNight('2026-11-21', {
+    type: 'BLOCK',
+    reference: 'BLOCK-1',
+    source: 'MANUAL'
+  });
+  const result = await handleDirectBooking(request(), context, options);
+  assert.equal(result.status, 409);
+  assert.equal(result.jsonBody.code, 'INTERNAL_CONFLICT');
+});
+
+test('Owner kan stänga av automatisk direktbokning', async () => {
+  const { options, context, memory } = setup();
+  await memory.store.setDirectBookingSetting({
+    enabled: false,
+    updatedBy: 'Owner Test',
+    updatedAt: NOW.toISOString()
+  });
+  const result = await handleDirectBooking(request(), context, options);
+  assert.equal(result.status, 409);
+  assert.equal(result.jsonBody.code, 'AUTO_DIRECT_BOOKING_DISABLED');
+});
+
+test('tillgänglighetskontrollen ger directBooking true för lediga datum', async () => {
+  const { options, memory } = setup();
+  const availability = await checkDirectBookingAvailability(
+    memory.store,
+    '2026-11-20',
+    '2026-11-23',
+    NOW,
+    options
+  );
+  assert.equal(availability.directBooking, true);
+  assert.deepEqual(availability.nights, ['2026-11-20', '2026-11-21', '2026-11-22']);
+});
+
+test('tillgänglighetskontrollen nekar när iCal saknas', async () => {
+  const { options, memory } = setup({
+    availabilityHandler: async () => ({ status: 503, jsonBody: { error: 'nere' } })
+  });
+  const availability = await checkDirectBookingAvailability(
+    memory.store,
+    '2026-11-20',
+    '2026-11-23',
+    NOW,
+    options
+  );
+  assert.equal(availability.directBooking, false);
+  assert.equal(availability.code, 'AIRBNB_UNAVAILABLE');
 });
 
 test('lyckad direktbokning skapar atomisk reservation och Stripe Checkout', async () => {

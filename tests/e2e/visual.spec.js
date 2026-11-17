@@ -1,6 +1,6 @@
-ï»¿// Visuell regressionssvit. Referensbilderna i tests/e2e/__screenshots__/
-// togs frÃ¥n den ursprungliga main-versionen (fÃ¶re Vite-migreringen) och fÃ¥r
-// INTE uppdateras fÃ¶r att fÃ¥ testerna grÃ¶na. Se docs/regressionstester.md.
+// Visuell regressionssvit. Referensbilderna i tests/e2e/__screenshots__/
+// togs från den ursprungliga main-versionen (före Vite-migreringen) och får
+// INTE uppdateras för att få testerna gröna. Se docs/regressionstester.md.
 import { test, expect } from '@playwright/test';
 import { PAGES, prepare, settle } from './helpers.js';
 
@@ -22,7 +22,7 @@ test('@visual startsida: header efter scroll', async ({ page }) => {
   await expect(page).toHaveScreenshot('startsida-scrolled.png');
 });
 
-test('@visual startsida: Ã¶ppen meny', async ({ page }) => {
+test('@visual startsida: öppen meny', async ({ page }) => {
   await prepare(page);
   await page.goto('/', { waitUntil: 'load' });
   await settle(page);
@@ -31,7 +31,7 @@ test('@visual startsida: Ã¶ppen meny', async ({ page }) => {
   await expect(page).toHaveScreenshot('startsida-meny.png');
 });
 
-test('@visual startsida: galleri efter nÃ¤sta-klick', async ({ page }) => {
+test('@visual startsida: galleri efter nästa-klick', async ({ page }) => {
   await prepare(page);
   await page.goto('/', { waitUntil: 'load' });
   await settle(page);
@@ -41,7 +41,7 @@ test('@visual startsida: galleri efter nÃ¤sta-klick', async ({ page }) => {
   await expect(page.locator('.gallery-carousel')).toHaveScreenshot('startsida-galleri.png');
 });
 
-test('@visual vanliga frÃ¥gor: Ã¶ppen frÃ¥ga', async ({ page }) => {
+test('@visual vanliga frågor: öppen fråga', async ({ page }) => {
   await prepare(page);
   await page.goto('/vanliga-fragor', { waitUntil: 'load' });
   await settle(page);
@@ -50,18 +50,18 @@ test('@visual vanliga frÃ¥gor: Ã¶ppen frÃ¥ga', async ({ page }) => {
   await expect(page.locator('.faq-layout')).toHaveScreenshot('faq-oppen.png');
 });
 
-test('@visual lediga datum: nÃ¤sta mÃ¥nader', async ({ page }) => {
+test('@visual lediga datum: nästa månader', async ({ page }) => {
   await prepare(page);
-  await page.goto('/lediga-datum', { waitUntil: 'load' });
+  await page.goto('/boka', { waitUntil: 'load' });
   await settle(page);
   await page.locator('#cal-next').click();
   await expect(page.locator('.cal-month h3').first()).toHaveText('December 2026');
   await expect(page.locator('.calendar-card')).toHaveScreenshot('kalender-nasta.png');
 });
 
-test('@visual lediga datum: fellÃ¤ge', async ({ page }) => {
+test('@visual lediga datum: felläge', async ({ page }) => {
   await prepare(page, { calendar: 'error' });
-  await page.goto('/lediga-datum', { waitUntil: 'load' });
+  await page.goto('/boka', { waitUntil: 'load' });
   await settle(page);
   await expect(page.locator('.calendar-card')).toHaveScreenshot('kalender-fel.png');
 });

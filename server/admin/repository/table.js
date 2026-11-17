@@ -303,6 +303,51 @@ function createTableAdminRepository(options = {}) {
       const rows = await query("PartitionKey eq 'directbooking'");
       return groupDirectBookingApprovals(rows.map(fromDirectBookingEntity));
     },
+    async getDirectBookingSetting() {
+      const result = await request({
+        method: 'GET',
+        target: rowTarget('directbooking', '__setting__')
+      });
+      if (result.status === 404) return null;
+      if (result.status !== 200 || !result.json) {
+        throw new Error(`Direktbokningsinställningen kunde inte läsas (${result.status})`);
+      }
+      return {
+        enabled: result.json.enabled === '1' || result.json.enabled === true,
+        updatedBy: result.json.updatedBy ?? '',
+        updatedAt: result.json.updatedAt ?? '',
+        note: result.json.note ?? '',
+        etag: result.json['odata.etag'] ?? ''
+      };
+    },
+    async setDirectBookingSetting(data) {
+      const existing = await this.getDirectBookingSetting();
+      const body = {
+        PartitionKey: 'directbooking',
+        RowKey: '__setting__',
+        enabled: data.enabled ? '1' : '0',
+        updatedBy: data.updatedBy ?? '',
+        updatedAt: data.updatedAt ?? new Date().toISOString(),
+        note: data.note ?? ''
+      };
+      if (existing) {
+        const result = await request({
+          method: 'PUT',
+          target: rowTarget('directbooking', '__setting__'),
+          body,
+          ifMatch: existing.etag || '*'
+        });
+        if (result.status === 412 || result.status === 409) throw conflict('Direktbokningsinställningen har ändrats av någon annan');
+        if (![200, 204].includes(result.status)) {
+          throw new Error(`Direktbokningsinställningen kunde inte uppdateras (${result.status})`);
+        }
+        return;
+      }
+      const result = await request({ method: 'POST', body });
+      if (result.status !== 201) {
+        throw new Error(`Direktbokningsinställningen kunde inte sparas (${result.status})`);
+      }
+    },
     async createCalendarNight(night, data) {
       // Table Storage POST/Insert Entity är create-only: samma PartitionKey +
       // RowKey ger 409 EntityAlreadyExists. If-None-Match får inte skickas på

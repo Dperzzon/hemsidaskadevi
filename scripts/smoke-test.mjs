@@ -40,7 +40,7 @@ try {
     ['/foretag', 200], ['/fest', 200], ['/brollop', 200], ['/semester', 200],
     ['/boende', 200], ['/aktiviteter', 200], ['/priser', 200], ['/mat-dryck', 200],
     ['/om-oss', 200], ['/vanliga-fragor', 200], ['/kontakt', 200],
-    ['/digital-visning', 200], ['/boka', 200], ['/lediga-datum', 200],
+    ['/digital-visning', 200], ['/boka', 200], ['/lediga-datum', 301],
     ['/betalning-klar', 200], ['/betalning-avbruten', 200],
     [`/betala/${'x'.repeat(43)}`, 404],
     ['/robots.txt', 200],
@@ -59,7 +59,7 @@ try {
     await response.body?.cancel();
   }
 
-  for (const [from, to] of [['/pages/priser.html', '/priser'], ['/priser.html', '/priser'], ['/index.html', '/']]) {
+  for (const [from, to] of [['/pages/priser.html', '/priser'], ['/priser.html', '/priser'], ['/index.html', '/'], ['/lediga-datum', '/boka']]) {
     const response = await fetch(`${base}${from}`, { redirect: 'manual' });
     if (response.status !== 301) fail(`${from} gav ${response.status}, förväntat 301`);
     if (response.headers.get('location') !== to) fail(`${from} omdirigerar till ${response.headers.get('location')}, förväntat ${to}`);

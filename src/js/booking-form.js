@@ -222,7 +222,7 @@ function selectedPaymentMethod() {
 function updateSubmitLabel() {
   if (!els.submit) return;
   els.submit.textContent = selectedPaymentMethod() === 'card'
-    ? 'Boka och betala med kort'
+    ? 'Betala med kort och bekräfta bokningen'
     : 'Skicka bokningsförfrågan';
 }
 
@@ -241,6 +241,29 @@ function updateSubmitState() {
   updateSubmitLabel();
 }
 
+function availabilityMessage() {
+  if (els.availabilityChecking) {
+    return 'Kontrollerar tillgänglighet …';
+  }
+  if (!els.directBookingEnabled) {
+    return 'Direktbetalning är inte tillgänglig just nu. Skicka gärna en bokningsförfrågan.';
+  }
+  if (els.directBookingAvailable) {
+    return 'Datumen är tillgängliga enligt senaste kalenderkontrollen. Betala med kort för att bekräfta bokningen direkt.';
+  }
+  const reason = els.directBookingReason;
+  if ([
+    'AIRBNB_UNAVAILABLE',
+    'DIRECT_BOOKING_UNAVAILABLE',
+    'INTERNAL_UNAVAILABLE',
+    'AUTO_DIRECT_BOOKING_DISABLED',
+    'DIRECT_BOOKING_DISABLED'
+  ].includes(reason)) {
+    return 'Vi kan inte bekräfta tillgängligheten just nu. Skicka gärna en bokningsförfrågan.';
+  }
+  return 'Datumen är inte tillgängliga. Välj andra datum.';
+}
+
 function updatePaymentOptions() {
   const available = els.directBookingEnabled === true && els.directBookingAvailable === true;
   if (els.paymentCardOption) els.paymentCardOption.hidden = !available;
@@ -251,13 +274,7 @@ function updatePaymentOptions() {
     els.paymentCard.checked = true;
   }
   if (els.paymentNote) {
-    if (!els.directBookingEnabled) {
-      els.paymentNote.textContent = 'Faktura och bokningsförfrågan kräver manuellt godkännande. Direktbetalning med kort är inte tillgänglig just nu.';
-    } else if (available) {
-      els.paymentNote.textContent = 'Datumen är godkända för direktbokning. Betala med kort för att bekräfta bokningen direkt, eller skicka en bokningsförfrågan.';
-    } else {
-      els.paymentNote.textContent = 'Datumen kräver manuell kontroll. Skicka en bokningsförfrågan så återkommer vi med besked.';
-    }
+    els.paymentNote.textContent = availabilityMessage();
   }
   updateSubmitLabel();
 }
@@ -267,13 +284,15 @@ let availabilityRequestId = 0;
 async function checkDirectBookingAvailability(arrival, departure) {
   const requestId = ++availabilityRequestId;
   if (!els.directBookingEnabled) {
+    els.availabilityChecking = false;
     els.directBookingAvailable = false;
+    els.directBookingReason = 'DIRECT_BOOKING_DISABLED';
     updatePaymentOptions();
     return;
   }
+  els.availabilityChecking = true;
   els.directBookingAvailable = false;
   updatePaymentOptions();
-  els.availabilityChecking = true;
   updateSubmitState();
   try {
     const params = new URLSearchParams({ start: arrival, end: departure });
