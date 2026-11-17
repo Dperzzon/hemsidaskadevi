@@ -2,7 +2,7 @@
 // (/priser, /lediga-datum ...) och serverar kalender-API:et /api/availability
 // via exakt samma kod som produktionsservern (server/calendar/).
 import { defineConfig } from 'vite';
-import { readdir } from 'node:fs/promises';
+import { readdir, mkdir, copyFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -118,11 +118,27 @@ async function pageInputs() {
   ];
 }
 
+// Server-renderade sidor (t.ex. betalningsresultat) kan inte använda Vites
+// hashade resursnamn. Kopiera därför bas-CSS och meny-JS till stabila URL:er
+// som /css/style.css och /js/main.js. Filerna komprimeras av scripts/compress.mjs.
+function copyRuntimeAssets() {
+  return {
+    name: 'skadevi-runtime-assets',
+    async closeBundle() {
+      await mkdir(path.join(root, 'dist', 'css'), { recursive: true });
+      await mkdir(path.join(root, 'dist', 'js'), { recursive: true });
+      await copyFile(path.join(root, 'src', 'css', 'style.css'), path.join(root, 'dist', 'css', 'style.css'));
+      await copyFile(path.join(root, 'src', 'css', 'fonts.css'), path.join(root, 'dist', 'css', 'fonts.css'));
+      await copyFile(path.join(root, 'src', 'js', 'main.js'), path.join(root, 'dist', 'js', 'main.js'));
+    }
+  };
+}
+
 export default defineConfig(async () => ({
   root: path.join(root, 'src'),
   publicDir: path.join(root, 'public'),
   appType: 'mpa',
-  plugins: [cleanUrlsAndApi()],
+  plugins: [cleanUrlsAndApi(), copyRuntimeAssets()],
   build: {
     outDir: path.join(root, 'dist'),
     emptyOutDir: true,

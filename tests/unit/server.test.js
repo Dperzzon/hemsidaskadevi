@@ -345,3 +345,37 @@ test('hastighetsbegränsningen delas mellan förfrågningar i samma serverinstan
     assert.equal(third.status, 429);
   } finally { close(server); }
 });
+
+test('betalningsresultat serveras av den verifierande hanteraren med no-store', async () => {
+  const root = withTempRoot();
+  const seen = [];
+  const server = await listen(createRequestListener({
+    root,
+    paymentResultHandler: async (request) => {
+      seen.push(request);
+      return {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'no-store',
+          'X-Robots-Tag': 'noindex, nofollow'
+        },
+        html: '<html>BETALNINGSRESULTAT</html>'
+      };
+    }
+  }));
+  try {
+    const port = server.address().port;
+    const cancel = await request(port, '/betalning-avbruten?ref=SK-2026-ABC234');
+    assert.equal(cancel.status, 200);
+    assert.match(cancel.body, /BETALNINGSRESULTAT/);
+    assert.equal(cancel.headers['cache-control'], 'no-store');
+    assert.equal(cancel.headers['x-robots-tag'], 'noindex, nofollow');
+    const success = await request(port, '/betalning-klar?ref=SK-2026-ABC234');
+    assert.equal(success.status, 200);
+    assert.equal(seen.length, 2);
+    assert.equal(seen[0].page, 'cancel');
+    assert.equal(seen[0].query.ref, 'SK-2026-ABC234');
+    assert.equal(seen[1].page, 'success');
+  } finally { close(server); }
+});

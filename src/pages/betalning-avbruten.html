@@ -5,50 +5,100 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="Betalningen avbröts hos Skadevi Herrgård.">
   <meta name="robots" content="noindex, nofollow">
-  <title>Betalning avbruten — Skadevi Gård</title>
+  <meta name="referrer" content="no-referrer">
+  <title>Betalningen avbröts — Skadevi Gård</title>
   <link rel="icon" type="image/png" href="/images/logo.png">
-  <link rel="stylesheet" href="/css/style.css">
   <link rel="preload" as="font" type="font/woff2" href="/fonts/v20-UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7.woff2" crossorigin>
   <link rel="preload" as="font" type="font/woff2" href="/fonts/v24-kmKUZrc3Hgbbcjq75U4uslyuy4kn0olVQ-LglH6T17uj8Q4iDgNP.woff2" crossorigin>
+  <link rel="stylesheet" href="/css/style.css">
   <link rel="stylesheet" href="/css/fonts.css">
 </head>
-<body>
-
+<body class="payment-result-page payment-result-page--cancel">
 <header class="header" role="banner">
-  <div class="header-inner">
-    <a href="/" class="header-logo" aria-label="Skadevi Gård — Hem">Skadevi Gård</a>
-    <button class="mobile-toggle" aria-label="Öppna meny" aria-expanded="false">&#9776;</button>
-    <nav class="header-nav" role="navigation" aria-label="Huvudmeny">
-      <a href="/">Hem</a><a href="/foretag">Företag</a><a href="/brollop">Bröllop</a><a href="/semester">Semester</a><a href="/fest">Fest</a><a href="/boende">Boende</a><a href="/aktiviteter">Aktiviteter</a><a href="/priser">Priser</a><a href="/kontakt">Bilder</a><a href="/boka" class="header-cta">Boka</a>
-    </nav>
+  <div class="header-side">
+    <button class="mobile-toggle" aria-label="Meny" aria-expanded="false">&#9776;</button>
+    <a href="/foretag" class="header-link">Företag</a>
+    <a href="/fest" class="header-link">Fest</a>
+    <a href="/brollop" class="header-link">Bröllop</a>
+    <a href="/semester" class="header-link">Semester</a>
   </div>
+  <a href="/" class="header-logo"><img width="512" height="512" src="/images/logo.png" alt="Skadevi Gård"></a>
+  <div class="header-side">
+    <a href="/digital-visning" class="header-link">Digital visning</a>
+    <a href="/boende" class="header-link">Boendet</a>
+    <a href="/aktiviteter" class="header-link">Aktiviteter</a>
+    <a href="/kontakt" class="header-link">Bilder</a>
+  </div>
+  <nav class="header-nav" role="navigation" aria-label="Meny">
+    <a href="/foretag">Företag</a>
+    <a href="/fest">Fest</a>
+    <a href="/brollop">Bröllop</a>
+    <a href="/semester">Semester</a>
+    <a href="/digital-visning">Digital visning</a>
+    <a href="/boende">Boendet</a>
+    <a href="/aktiviteter">Aktiviteter</a>
+    <a href="/kontakt">Bilder</a>
+    <a href="/boka">Boka</a>
+    <a href="/vanliga-fragor">Vanliga frågor</a>
+  </nav>
 </header>
 
-<main>
-  <section class="page-hero" style="min-height: 25vh;">
-    <div class="page-hero-bg" style="background: var(--color-primary-dark);"></div>
-    <div class="page-hero-content">
-      <h1>Betalningen avbröts</h1>
-      <p>Inget belopp har dragits</p>
+<main id="main">
+  <section class="payment-hero payment-hero--cancel" aria-labelledby="result-title">
+    <div class="payment-hero-bg" aria-hidden="true">
+      <img src="/images/hero-startsida.webp" alt="" width="1600" height="900">
+    </div>
+    <div class="payment-hero-inner">
+      <span class="payment-hero-icon payment-hero-icon--cancel" aria-hidden="true">
+        <svg viewBox="0 0 64 64" role="img" aria-hidden="true" focusable="false">
+          <circle cx="32" cy="32" r="25" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M32 19v16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <circle cx="32" cy="43" r="1.8" fill="currentColor"/>
+        </svg>
+      </span>
+      <span class="payment-hero-kicker">Skadevi Herrgård</span>
+      <h1 id="result-title">Betalningen avbröts</h1>
+      <p class="payment-hero-sub">Status kunde inte bekräftas</p>
     </div>
   </section>
-
-  <section class="section fade-in">
-    <div class="container">
-      <p class="lead">Betalningen slutfördes inte. Inget belopp har dragits från ditt kort.</p>
-      <p>Du kan använda betalningslänken igen om den fortfarande är giltig. Om länken har gått ut kan du kontakta oss så skickar vi en ny.</p>
-      <p><a class="btn btn-primary" href="/boka">Tillbaka till bokningen</a></p>
-      <p>Telefon: <a href="tel:+46702730422">+46 70 273 04 22</a><br>E-post: <a href="mailto:skadevigard@gmail.com">skadevigard@gmail.com</a></p>
+  <section class="payment-result-section" aria-label="Betalningsinformation">
+    <div class="payment-result-card">
+      <span class="payment-card-eyebrow">Betalningsstatus</span>
+      <h2>Status kunde inte bekräftas</h2>
+      <p>Vi kunde inte bekräfta betalningens status. Kontrollera din bokning eller kontakta oss innan du försöker betala igen.</p>
+      <p>Detta skyddar dig mot dubbla betalningsförsök. Om du redan har genomfört en betalning ber vi dig vänta innan du försöker igen.</p>
+      <div class="payment-actions">
+        <a class="payment-btn payment-btn--primary" href="/boka">Tillbaka till bokningen</a>
+      </div>
+      <div class="payment-contact">
+        <p><span>Telefon</span><a href="tel:+46702730422">+46 70 273 04 22</a></p>
+        <p><span>E-post</span><a href="mailto:skadevigard@gmail.com">skadevigard@gmail.com</a></p>
+      </div>
     </div>
   </section>
 </main>
 
 <footer class="footer" role="contentinfo">
-  <div class="container">
-    <div class="footer-bottom"><p>&copy; <span data-year>2025</span> Skadevi Gård</p></div>
+  <div class="footer-grid">
+    <div class="footer-col footer-col-contact">
+      <h3>Kontakta oss</h3>
+      <p><a href="tel:+46702730422">+46 70 273 04 22</a></p>
+      <p><a href="mailto:skadevigard@gmail.com">skadevigard@gmail.com</a></p>
+      <p>Skoklostervägen 16<br>746 94 Häggeby</p>
+      <p><a href="https://maps.google.com/?q=Skoklosterv%C3%A4gen+16+746+94+H%C3%A4ggeby" target="_blank" rel="noopener" class="maps-link">Visa på karta</a></p>
+    </div>
+    <div class="footer-col footer-col-image">
+      <img width="750" height="500" src="/images/gallery/huset-logga.webp" alt="Skadevi Gård" loading="lazy">
+    </div>
+    <div class="footer-col footer-col-social">
+      <h3>Följ oss</h3>
+      <div class="social-links">
+        <a href="https://www.instagram.com/skadevigard/" target="_blank" rel="noopener"><img loading="lazy" width="750" height="500" src="/images/sociala-symboler.webp" alt="Följ oss på sociala medier" class="social-symbol-img"></a>
+      </div>
+    </div>
   </div>
+  <div class="footer-bottom"><p>&copy; <span data-year>2025</span> Skadevi Gård</p></div>
 </footer>
-
 <script type="module" src="/js/main.js"></script>
 </body>
 </html>

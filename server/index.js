@@ -11,6 +11,7 @@ const { handleAvailability } = require('./calendar/availability');
 const { handleBookingRequest, createRateLimiter } = require('./booking/requests');
 const { handleStripeWebhook } = require('./booking/stripe-webhook');
 const { handlePaymentPage, handlePaymentAction } = require('./booking/payment-page');
+const { handlePaymentResult } = require('./booking/payment-result');
 const {
   handleDirectBooking,
   handleDirectBookingConfirmation,
@@ -319,6 +320,8 @@ function createRequestListener(options = {}) {
     ((request, context) => handlePaymentPage(request, context, { ...paymentOptions, store: createStore(options) }));
   const paymentActionHandler = options.paymentActionHandler ??
     ((request, context) => handlePaymentAction(request, context, { ...paymentOptions, store: createStore(options) }));
+  const paymentResultHandler = options.paymentResultHandler ??
+    ((request, context) => handlePaymentResult(request, context, { ...paymentOptions, store: createStore(options) }));
   const directBookingOptions = {
     ...paymentOptions,
     directBookingEnabled: options.directBookingEnabled ?? process.env.DIRECT_BOOKING_ENABLED === '1',
@@ -530,6 +533,24 @@ function createRequestListener(options = {}) {
       try {
         const result = await directBookingConfirmationHandler(
           { query: Object.fromEntries(url.searchParams) },
+          { warn },
+          {}
+        );
+        sendHtmlResult(res, result);
+      } catch {
+        await sendErrorPage(res, root, 503);
+      }
+      return;
+    }
+
+    if ((url.pathname === '/betalning-klar' || url.pathname === '/betalning-avbruten') &&
+      (req.method === 'GET' || req.method === 'HEAD')) {
+      try {
+        const result = await paymentResultHandler(
+          {
+            page: url.pathname === '/betalning-avbruten' ? 'cancel' : 'success',
+            query: Object.fromEntries(url.searchParams)
+          },
           { warn },
           {}
         );
