@@ -8,7 +8,7 @@ const http = require('node:http');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { handleAvailability } = require('./calendar/availability');
-const { handleBookingRequest } = require('./booking/requests');
+const { handleBookingRequest, createRateLimiter } = require('./booking/requests');
 const { handleStripeWebhook } = require('./booking/stripe-webhook');
 const { handlePaymentPage, handlePaymentAction } = require('./booking/payment-page');
 const { loadRules, publicRules } = require('./booking/rules');
@@ -263,11 +263,28 @@ function sendHtmlResult(res, result) {
   res.end(result.html || '');
 }
 
+function clientIp(req) {
+  // App Service lägger till klientens IP sist i X-Forwarded-For. Ta sista
+  // posten så att en klient inte kan kringgå hastighetsbegränsningen genom
+  // att skicka en egen, påhittad X-Forwarded-For.
+  const forwarded = req.headers['x-forwarded-for'];
+  if (typeof forwarded === 'string') {
+    const parts = forwarded.split(',').map((part) => part.trim()).filter(Boolean);
+    if (parts.length) return parts[parts.length - 1];
+  }
+  return req.socket.remoteAddress || 'okänd';
+}
+
 function createRequestListener(options = {}) {
   const root = path.resolve(options.root ?? path.join(__dirname, '..', 'dist'));
   const availabilityHandler = options.availabilityHandler ?? handleAvailability;
+  const rateLimiter = options.rateLimiter ?? createRateLimiter(options.rateLimit);
   const bookingHandler = options.bookingHandler ??
-    ((request, context) => handleBookingRequest(request, context, { ...options, store: createStore(options) }));
+    ((request, context) => handleBookingRequest(request, context, {
+      ...options,
+      store: createStore(options),
+      rateLimiter
+    }));
   const stripeWebhookHandler = options.stripeWebhookHandler ??
     ((request, context) => handleStripeWebhook(request, context, { ...options, store: createStore(options) }));
   const paymentOptions = {
@@ -344,9 +361,7 @@ function createRequestListener(options = {}) {
         sendJson(res, 400, { error: 'Förfrågan kunde inte tolkas.' });
         return;
       }
-      const forwarded = req.headers['x-forwarded-for'];
-      const ip = (typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : '') ||
-        req.socket.remoteAddress || 'okänd';
+      const ip = clientIp(req);
       try {
         const result = await bookingHandler(
           { body, idempotencyKey: req.headers['idempotency-key'], ip },

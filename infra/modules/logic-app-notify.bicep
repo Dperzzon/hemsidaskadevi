@@ -66,6 +66,9 @@ param mailReplyTo string = 'skadevigard@gmail.com'
 @description('Mottagare för bokningsnotiser till värden.')
 param hostRecipient string = 'skadevigard@gmail.com'
 
+@description('Säker startgräns: endast utkorgsposter skapade vid/efter denna ISO-tid får skickas. Framtida värde = ingen automatisk sändning.')
+param outboxActivationSince string = '9999-12-31T23:59:59Z'
+
 @description('Rolldefinitions-ID för Storage Table Data Contributor i SKADEVIS tenant (verifierat 2026-11-11 — avviker från välkänd global GUID).')
 param tableDataContributorRoleId string = '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3'
 
@@ -134,6 +137,9 @@ resource workflow 'Microsoft.Logic/workflows@2019-05-01' = {
       }
       hostRecipient: {
         value: hostRecipient
+      }
+      outboxActivationSince: {
+        value: outboxActivationSince
       }
       keyVaultSecretUri: {
         value: '${keyVault.properties.vaultUri}secrets/${keyVaultSecretName}?api-version=7.4'

@@ -162,7 +162,7 @@ test('sista återförsöket utan resultat flaggas för manuell kontroll i ställ
 test('leverantörens meddelande-ID och leveransstatus hanteras separat från API-acceptans', () => {
   const markSent = byName('Markera_som_skickad').inputs.body;
   assert.ok('resendId' in markSent, 'Resend-meddelande-ID ska sparas');
-  assert.equal(markSent.deliveryStatus, 'Inväntar leveranskontroll');
+  assert.equal(markSent.deliveryStatus, 'Accepterad av Resend – leverans ej verifierad');
   assert.ok(markSent.sentAt.includes('utcNow()'));
   // API-acceptans ≠ levererat: status Skickad betyder endast att Resend tog emot anropet.
   assert.equal(markSent.status, 'Skickad');
@@ -207,6 +207,11 @@ test('utkorgsfiltern: endast återförsöksbara statusar hämtas — manuell kon
   const uri = decodeURIComponent(fetchAction.inputs.uri);
   // Vitlistning: bara Utkorg/Skickar/Misslyckad får plockas.
   assert.ok(uri.includes("PartitionKey eq 'outbox'"));
+  assert.ok(uri.includes("dispatchEligible eq 'true'"), 'endast uttryckligen aktiverade utkorgsposter får hämtas');
+  assert.ok(uri.includes("outboxVersion eq '1'"), 'utkorgsformatet måste vara godkänt');
+  assert.ok(uri.includes("createdAt ge '"), 'säker startgräns saknas');
+  assert.ok(uri.includes("parameters('outboxActivationSince')"), 'startgränsen måste vara parametriserad');
+  assert.equal(workflow.parameters.outboxActivationSince.defaultValue, '9999-12-31T23:59:59Z');
   assert.ok(uri.includes("status eq 'Utkorg'"));
   assert.ok(uri.includes("status eq 'Skickar'"));
   assert.ok(uri.includes("status eq 'Misslyckad'"));
@@ -221,6 +226,28 @@ test('utkorgsfiltern: endast återförsöksbara statusar hämtas — manuell kon
   assert.equal(workflow.parameters.maxAttempts.defaultValue, 5);
   assert.equal(workflow.triggers.Recurrence.recurrence.interval, 5);
   assert.equal(workflow.triggers.Recurrence.runtimeConfiguration.concurrency.runs, 1);
+});
+
+test('säker startgräns: gamla poster utan sändningstillstånd eller före gränsen kan aldrig skickas', () => {
+  const uri = decodeURIComponent(byName('Haemta_utkorg').inputs.uri);
+  const boundary = '2026-12-01T00:00:00Z';
+  const eligible = (row) => row.dispatchEligible === 'true'
+    && row.outboxVersion === '1'
+    && row.createdAt >= boundary;
+  const rows = [
+    { dispatchEligible: 'true', outboxVersion: '1', createdAt: '2026-12-02T00:00:00Z', ok: true },
+    { dispatchEligible: 'true', outboxVersion: '1', createdAt: '2026-11-30T23:59:59Z', ok: false },
+    { dispatchEligible: '', outboxVersion: '1', createdAt: '2026-12-02T00:00:00Z', ok: false },
+    { dispatchEligible: 'true', outboxVersion: '', createdAt: '2026-12-02T00:00:00Z', ok: false },
+    { dispatchEligible: undefined, outboxVersion: undefined, createdAt: '2026-12-02T00:00:00Z', ok: false }
+  ];
+  for (const row of rows) {
+    assert.equal(eligible(row), row.ok, JSON.stringify(row));
+  }
+  // Gränsen är en strängjämförelse av ISO-8601 (Azure Table-lagret sparar
+  // createdAt som sträng). Datetime-literal ger tom träff på strängegenskap.
+  assert.ok(uri.includes("createdAt ge '"));
+  assert.ok(!uri.includes("createdAt ge datetime'"));
 });
 
 test('misslyckade försök försvinner aldrig: ingen DELETE, alltid status+orsak+tid kvar', () => {

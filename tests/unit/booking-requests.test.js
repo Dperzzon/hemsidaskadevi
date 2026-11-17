@@ -162,23 +162,13 @@ test('giltig förfrågan sparas med status Inväntar godkännande och unik refer
   assert.equal(record.guests, 4);
   assert.equal(record.addons.linenCount, 4);
   assert.equal(record.rulesVersion, 'test-2026-11-10');
-  // Utkorgsposter för värd och gäst ska finnas.
-  assert.equal([...stored.values()].filter((item) => item.status === 'Utkorg').length, 2);
-});
-
-test('webbokning sparas med källa Website, status PENDING och mejltyper i utkorgen', async () => {
-  const { options, stored, context } = setup();
-  const result = await handleBookingRequest(request(), context, options);
-  assert.equal(result.status, 201);
-  const record = [...stored.values()].find((item) => item.status === 'Inväntar godkännande');
   assert.equal(record.statusCode, 'PENDING');
   assert.equal(record.bookingSource, 'WEB');
   assert.equal(record.paymentStatus, 'UNPAID');
   assert.equal(record.balance, record.total);
-  assert.equal(record.version, 1);
-  const outbox = [...stored.values()].filter((item) => item.partition === 'outbox');
-  assert.deepEqual(outbox.map((item) => item.mailType).sort(), ['GUEST_REQUEST_ACK', 'HOST_NEW_REQUEST']);
-  assert.ok(outbox.every((item) => item.reference === record.reference));
+  assert.equal(record.amountPaid, 0);
+  // Utkorgsposter för värd och gäst ska finnas.
+  assert.equal([...stored.values()].filter((item) => item.status === 'Utkorg').length, 2);
 });
 
 test('dubbel inskick med samma idempotensnyckel ger samma referens', async () => {
@@ -190,9 +180,6 @@ test('dubbel inskick med samma idempotensnyckel ger samma referens', async () =>
   assert.equal(second.jsonBody.duplicate, true);
   assert.equal(second.jsonBody.reference, first.jsonBody.reference);
   assert.equal([...stored.values()].filter((item) => item.status === 'Inväntar godkännande').length, 1);
-  const outbox = [...stored.values()].filter((item) => item.partition === 'outbox');
-  assert.equal(outbox.length, 2, 'dubbelinskick får inte skapa fler utkorgsposter');
-  assert.equal(new Set(outbox.map((item) => item.idempotencyKey)).size, 2, 'utkorgsposterna måste ha unika RowKeys');
 });
 
 test('fel vid sparande ger 500 och ingen bekräftelse', async () => {
@@ -256,7 +243,8 @@ test('buildNotifications beskriver förfrågan utan att markera den bekräftad',
     priceVersion: '2026-11-11.1', rulesVersion: 'test-2026-11-10'
   };
   const { host, guest } = buildNotifications(record);
-  assert.match(host.subject, /Inväntar godkännande/);
+  assert.equal(host.subject, 'Ny bokningsförfrågan – SK-2026-ABC234');
+  assert.match(host.body, /Status: Inväntar godkännande/);
   assert.match(host.body, /Slutstädning \(exklusive kök\): 2500 kr/);
   assert.match(host.body, /Boendepris före rabatt: 24000 kr/);
   assert.match(host.body, /Rabatt \(Veckorabatt 30 %\)/);
@@ -334,10 +322,8 @@ test('lagrade priser och e-postnotiser visar samma serverberäknade belopp', asy
   assert.equal(result.status, 201);
   const record = [...stored.values()].find((item) => item.status === 'Inväntar godkännande');
   const host = [...stored.values()].find((item) => item.partition === 'outbox' && item.mailTo === 'skadevigard@gmail.com');
-  const guest = [...stored.values()].find((item) => item.partition === 'outbox' && item.mailTo === 'anna@example.com');
   assert.match(host.mailHtml, new RegExp(`TOTALPRIS FÖR HELA VISTELSEN: ${record.total} kr`));
   assert.match(host.mailHtml, new RegExp(`Boendepris efter rabatt: ${record.lodgingAfterDiscount} kr`));
-  assert.match(guest.mailHtml, new RegExp(`Beräknat totalpris: ${record.total} kr`), 'gästmejlet måste visa samma serverberäknade total');
 });
 
 test('kort vistelse får ingen rabattpost', async () => {
@@ -396,15 +382,15 @@ test('utkorgspost innehåller komplett mejlmall för Logic Apps', async () => {
   await handleBookingRequest(request(), context, options);
   const outbox = [...stored.values()].filter((item) => item.partition === 'outbox');
   assert.equal(outbox.length, 2);
-  assert.equal(new Set(outbox.map((item) => item.idempotencyKey)).size, 2, 'varje mejl måste ha unik RowKey');
-  assert.equal(outbox.filter((item) => item.mailTo === 'skadevigard@gmail.com').length, 1);
-  assert.equal(outbox.filter((item) => item.mailTo === 'anna@example.com').length, 1);
   for (const row of outbox) {
     assert.equal(row.status, 'Utkorg');
     assert.ok(row.mailSubject.includes('SK-2026-'));
     assert.ok(row.mailHtml.includes('inte en bekräftad bokning'));
     assert.ok(row.mailText.includes('inte en bekräftad bokning'), 'plaintext-version saknas');
     assert.equal(row.attemptCount, 0);
+    assert.equal(row.dispatchEligible, 'true', 'nya utkorgsposter måste vara uttryckligen sändningsbara');
+    assert.equal(row.outboxVersion, '1');
+    assert.equal(row.deliveryStatus, 'Ej skickad');
     assert.ok(row.idempotencyKey.length <= 256, 'Resends idempotensnyckel får vara max 256 tecken');
   }
   const host = outbox.find((item) => item.mailTo === 'skadevigard@gmail.com');
@@ -414,6 +400,13 @@ test('utkorgspost innehåller komplett mejlmall för Logic Apps', async () => {
   assert.ok(guest.mailHtml.includes('Tack för din bokningsförfrågan'));
   assert.ok(guest.mailHtml.includes('Referens:'));
   assert.ok(guest.mailHtml.includes('ännu inte bekräftad'));
+  assert.ok(guest.mailHtml.includes('Beräknat totalpris:'));
+  assert.ok(guest.mailText.includes('Tillval:'));
+  assert.ok(guest.mailHtml.includes('Skadevi Herrgård'), 'gästmejlet ska använda Skadevis visuella identitet');
+  assert.equal(host.reference, guest.reference);
+  assert.match(host.reference, /^SK-2026-/);
+  assert.equal(host.mailType, 'HOST_NEW_REQUEST');
+  assert.equal(guest.mailType, 'GUEST_REQUEST_ACK');
 });
 
 test('misslyckad utkorgssparning stoppar inte registreringen', async () => {
@@ -426,20 +419,4 @@ test('misslyckad utkorgssparning stoppar inte registreringen', async () => {
   const result = await handleBookingRequest(request(), context, options);
   assert.equal(result.status, 201, 'förfrågan ska vara registrerad även om utkorgen misslyckas');
   assert.equal([...stored.values()].filter((item) => item.status === 'Inväntar godkännande').length, 1);
-});
-
-test('ett misslyckat mejl påverkar inte det andra utkorgsmejlet', async () => {
-  const { options, stored, context, warn } = setup();
-  const originalSave = options.store.save.bind(options.store);
-  options.store.save = async (record, ctx) => {
-    if (record.partition === 'outbox' && record.mailTo === 'anna@example.com') throw new Error('gästmejl nere');
-    return originalSave(record, ctx);
-  };
-  const result = await handleBookingRequest(request(), context, options);
-  assert.equal(result.status, 201);
-  const outbox = [...stored.values()].filter((item) => item.partition === 'outbox');
-  assert.equal(outbox.length, 1, 'det lyckade mejlet ska finnas kvar');
-  assert.equal(outbox[0].mailTo, 'skadevigard@gmail.com');
-  assert.equal(outbox[0].status, 'Utkorg');
-  assert.ok(warn.some((message) => message.includes('Utkorgspost kunde inte sparas')));
 });

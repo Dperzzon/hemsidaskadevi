@@ -33,6 +33,10 @@
     "keyVaultSecretUri": {
       "defaultValue": "https://SKADEVI-KEYVAULT.vault.azure.net/secrets/resend-api-key?api-version=7.4",
       "type": "String"
+    },
+    "outboxActivationSince": {
+      "defaultValue": "9999-12-31T23:59:59Z",
+      "type": "String"
     }
   },
   "triggers": {
@@ -55,7 +59,7 @@
       "type": "Http",
       "inputs": {
         "method": "GET",
-        "uri": "@{parameters('storageEndpoint')}/@{parameters('tableName')}()?$filter=PartitionKey%20eq%20%27outbox%27%20and%20%28status%20eq%20%27Skickar%27%20or%20%28%28status%20eq%20%27Utkorg%27%20or%20status%20eq%20%27Misslyckad%27%29%20and%20attemptCount%20lt%20@{parameters('maxAttempts')}%29%29",
+        "uri": "@{parameters('storageEndpoint')}/@{parameters('tableName')}()?$filter=PartitionKey%20eq%20%27outbox%27%20and%20dispatchEligible%20eq%20%27true%27%20and%20outboxVersion%20eq%20%271%27%20and%20createdAt%20ge%20%27@{parameters('outboxActivationSince')}%27%20and%20%28status%20eq%20%27Skickar%27%20or%20%28%28status%20eq%20%27Utkorg%27%20or%20status%20eq%20%27Misslyckad%27%29%20and%20attemptCount%20lt%20@{parameters('maxAttempts')}%29%29",
         "headers": {
           "x-ms-version": "2019-02-02",
           "Accept": "application/json;odata=minimalmetadata"
@@ -236,7 +240,7 @@
                             "status": "Skickad",
                             "sentAt": "@{utcNow()}",
                             "resendId": "@{body('Skicka_mejl_resend')?['id']}",
-                            "deliveryStatus": "Inväntar leveranskontroll"
+                            "deliveryStatus": "Accepterad av Resend – leverans ej verifierad"
                           },
                           "authentication": {
                             "type": "ManagedServiceIdentity",

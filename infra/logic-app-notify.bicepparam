@@ -36,5 +36,11 @@ param keyVaultSecretName = 'resend-api-key'
 param mailFrom = 'bokning@skadeviherrgard.com'
 param mailReplyTo = 'skadevigard@gmail.com'
 param hostRecipient = 'skadevigard@gmail.com'
+
+// SÄKER STARTGRÄNS (steg 8R): framtida värde = ingen automatisk sändning.
+// Sätts uttryckligen till en tidpunkt EFTER godkänd aktivering, så att inga
+// äldre utkorgsposter kan skickas av misstag. Nya poster kräver dessutom
+// dispatchEligible=true och outboxVersion=1.
+param outboxActivationSince = '9999-12-31T23:59:59Z'
 param environment = 'prod'
 param owner = 'Skadevi Herrgård'
