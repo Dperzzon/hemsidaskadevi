@@ -23,7 +23,7 @@ const crypto = require('node:crypto');
 const { handleAvailability } = require('../calendar/availability');
 const { loadRules } = require('./rules');
 const { createStore } = require('./store');
-const { quote, PRICE_VERSION } = require('./pricing');
+const { quote, PRICE_VERSION, LINEN_MAX } = require('./pricing');
 const { MAIL } = require('./mail');
 
 const MAX_GUESTS = 24;
@@ -118,8 +118,9 @@ function validatePayload(body, now = new Date()) {
 
   const addons = body.addons && typeof body.addons === 'object' && !Array.isArray(body.addons) ? body.addons : {};
   const linenCount = addons.lakan ? Number(addons.linenCount) : 0;
-  if (addons.lakan && (!Number.isInteger(linenCount) || linenCount < 0 || linenCount > guests)) {
-    errors.linenCount = 'Ange hur många personer som behöver lakan och handdukar (0 till antal gäster).';
+  const linenMax = Number.isInteger(guests) && guests > 0 ? Math.min(LINEN_MAX, guests) : LINEN_MAX;
+  if (addons.lakan && (!Number.isInteger(linenCount) || linenCount < 0 || linenCount > linenMax)) {
+    errors.linenCount = `Ange hur många personer som behöver lakan och handdukar (0–${linenMax}).`;
   }
 
   if (!body.consentRules) errors.consentRules = 'Bokningsreglerna måste godkännas.';

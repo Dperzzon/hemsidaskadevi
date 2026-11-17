@@ -195,6 +195,18 @@ test('tillval och antal personer: lakan per person 0 till antal gäster', () => 
   assert.deepEqual(addonTotals({ lakan: true }, 5, 'x').total, 0);
 });
 
+test('lakan: 16, 18 och 28 personer ger 3 200, 3 600 och 5 600 kr', () => {
+  assert.equal(addonTotals({ lakan: true }, 16, 16).total, 3200);
+  assert.equal(addonTotals({ lakan: true }, 18, 18).total, 3600);
+  assert.equal(addonTotals({ lakan: true }, 28, 28).total, 5600);
+  // Det gemensamma maxvärdet är 28 uppsättningar.
+  assert.equal(addonTotals({ lakan: true }, 29, 29).total, 5600);
+  // Fler uppsättningar än antal gäster räknas aldrig.
+  assert.equal(addonTotals({ lakan: true }, 4, 28).total, 800);
+  assert.equal(addonTotals({ lakan: true }, 24, 28).total, 4800);
+  assert.equal(addonTotals({ lakan: false }, 28, 28).total, 0);
+});
+
 test('exempel: vanlig helg — ankomst fredag, avresa söndag = 20 000 kr', () => {
   const q = quote({ arrival: '2026-11-20', departure: '2026-11-22' }); // fre–sön
   assert.deepEqual(q.nightlyBreakdown.map((n) => n.rate), [RATES.friday, RATES.saturday]);

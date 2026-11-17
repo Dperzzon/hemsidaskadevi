@@ -1,4 +1,4 @@
-import { formatSek, ADDONS, addonLines, sumAddons, discountNote, quote, NIGHT_RATES } from './booking/pricing.js';
+import { formatSek, ADDONS, addonLines, sumAddons, discountNote, quote, NIGHT_RATES, LINEN_MAX } from './booking/pricing.js';
 
 // Bokningsflödet: formulär, tillval, prisöversikt, bokningsregler och inskick.
 // Formuläret görs synligt när kalendern skickar 'booking:selection' med en
@@ -115,15 +115,22 @@ function updatePrices() {
   els.discountNote.hidden = !note;
 }
 
+function linenLimit() {
+  const guests = Number(els.guests.value) || 0;
+  return Math.max(0, Math.min(LINEN_MAX, guests));
+}
+
 function syncLinenCount() {
+  const limit = linenLimit();
+  els.linenCount.max = String(limit);
   if (!els.lakan.checked) {
     els.linenCount.disabled = true;
     return;
   }
   els.linenCount.disabled = false;
-  const guests = Number(els.guests.value) || 0;
-  if (!els.linenCount.value || Number(els.linenCount.value) < 0 || Number(els.linenCount.value) > guests) {
-    els.linenCount.value = String(guests);
+  const current = Number(els.linenCount.value);
+  if (!els.linenCount.value || !Number.isFinite(current) || current < 0 || current > limit) {
+    els.linenCount.value = String(limit);
   }
   updatePrices();
 }
@@ -159,8 +166,9 @@ function validateForm() {
   check(els.guests, Number.isInteger(guests) && guests >= 1 && guests <= 24, 'Ange antal gäster (1–24).');
   if (els.lakan.checked) {
     const linen = Number(els.linenCount.value);
-    check(els.linenCount, Number.isInteger(linen) && linen >= 0 && linen <= guests,
-      `Ange hur många personer som behöver lakan och handdukar (0–${guests}).`);
+    const limit = linenLimit();
+    check(els.linenCount, Number.isInteger(linen) && linen >= 0 && linen <= limit,
+      `Ange hur många personer som behöver lakan och handdukar (0–${limit}).`);
   } else {
     setError(els.linenCount, '');
   }
@@ -582,6 +590,7 @@ function queryAll() {
 function init() {
   Object.assign(els, queryAll());
   if (!els.section) return;
+  els.linenCount.max = String(linenLimit());
   els.form.addEventListener('submit', submitBooking);
   document.addEventListener('booking:selection', (event) => handleSelection(event.detail));
   document.addEventListener('booking:invalidate', () => {
@@ -596,13 +605,21 @@ function init() {
     });
   }
   els.guests.addEventListener('change', () => {
-    if (els.lakan.checked && !els.linenCount.dataset.userSet) {
-      els.linenCount.value = els.guests.value;
-      updatePrices();
+    const limit = linenLimit();
+    els.linenCount.max = String(limit);
+    if (!els.lakan.checked) return;
+    if (!els.linenCount.dataset.userSet || Number(els.linenCount.value) > limit) {
+      els.linenCount.value = String(limit);
     }
+    updatePrices();
   });
   els.linenCount.addEventListener('input', () => {
     els.linenCount.dataset.userSet = 'true';
+    const limit = linenLimit();
+    const current = Number(els.linenCount.value);
+    if (els.linenCount.value !== '' && Number.isFinite(current) && current > limit) {
+      els.linenCount.value = String(limit);
+    }
     updatePrices();
   });
   els.consentRules.addEventListener('change', () => {

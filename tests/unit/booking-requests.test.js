@@ -6,6 +6,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { handleBookingRequest, validatePayload, nightKeys, createRateLimiter, buildNotifications, escapeHtml } = require('../../server/booking/requests');
+const { quote } = require('../../server/booking/pricing');
 
 const RULES = { published: true, version: 'test-2026-11-10', text: '1. Regel ett.\n2. Regel två.' };
 
@@ -109,6 +110,22 @@ test('fältvalidering returnerar tydliga fel per fält', async () => {
   assert.equal(result.jsonBody.fields.firstName, 'Ange förnamn.');
   assert.ok(result.jsonBody.fields.linenCount);
   assert.ok(result.jsonBody.fields.consentRules);
+});
+
+test('lakan: servern beräknar 16, 18 och 28 personer och nekar 29', () => {
+  const at = (guests, linenCount) =>
+    validatePayload(validBody({ guests, addons: { ...validBody().addons, slutstad: false, lakan: true, linenCount } }));
+  assert.equal(at(16, 16).record.totalAddons, 3200);
+  assert.equal(at(18, 18).record.totalAddons, 3600);
+  assert.equal(at(24, 24).record.totalAddons, 4800);
+  // Prisberäkningen klarar 28 uppsättningar när bokningen har 28 gäster.
+  assert.equal(quote({
+    arrival: '2026-11-20', departure: '2026-11-23', guests: 28,
+    addons: { lakan: true, linenCount: 28 }
+  }).addonsTotal, 5600);
+  // 29 uppsättningar nekas, liksom fler uppsättningar än antal gäster.
+  assert.ok(at(24, 29).errors.linenCount);
+  assert.ok(at(4, 5).errors.linenCount);
 });
 
 test('honungsgrop (dolt bottfält) avvisar förfrågan', async () => {

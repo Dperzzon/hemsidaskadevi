@@ -58,6 +58,17 @@ test('lakan räknas på 0 till antal gäster — aldrig fler', () => {
   assert.equal(clamp[0].label.includes('4 pers'), true);
 });
 
+test('lakan: 16, 18 och 28 personer ger 3 200, 3 600 och 5 600 kr', () => {
+  assert.equal(pricing.addonLines({ lakan: true, linenCount: 16, guests: 16 })[0].amount, 3200);
+  assert.equal(pricing.addonLines({ lakan: true, linenCount: 18, guests: 18 })[0].amount, 3600);
+  assert.equal(pricing.addonLines({ lakan: true, linenCount: 28, guests: 28 })[0].amount, 5600);
+  // Det gemensamma maxvärdet är 28 uppsättningar.
+  assert.equal(pricing.addonLines({ lakan: true, linenCount: 29, guests: 29 })[0].amount, 5600);
+  // Fler uppsättningar än antal gäster räknas aldrig.
+  assert.equal(pricing.addonLines({ lakan: true, linenCount: 28, guests: 4 })[0].amount, 800);
+  assert.equal(pricing.addonLines({ lakan: false, linenCount: 28, guests: 28 }).length, 0);
+});
+
 test('sumAddons summerar tillvalen', () => {
   assert.equal(pricing.sumAddons([]), 0);
   assert.equal(
@@ -166,7 +177,7 @@ test('ofullständig vistelse visar aldrig missvisande totalpris', () => {
 });
 
 test('klienten och servern använder samma prisreglerversion', () => {
-  assert.equal(pricing.PRICE_VERSION, '2026-11-11.4');
+  assert.equal(pricing.PRICE_VERSION, '2026-11-17.1');
   assert.ok(pricing.PRICE_CONFIG.discounts.length >= 2);
 });
 

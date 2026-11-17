@@ -68,6 +68,14 @@ export const DISCOUNTS = config.discounts;
 
 export const NIGHT_RATES = config.nightRates;
 
+// Högsta antal personer som kan hyra lakan och handdukar. Antalet begränsas
+// dessutom alltid av det faktiska antalet gäster i bokningen.
+export const LINEN_MAX = config.addons.linenMax;
+
+function linenLimit(guests) {
+  return Math.max(0, Math.min(LINEN_MAX, Number(guests) || 0));
+}
+
 // 0 = söndag … 6 = lördag (nattens startdatum avgör priset).
 export function weekdayOf(dateKey) {
   const timestamp = Date.parse(`${dateKey}T12:00:00Z`);
@@ -123,7 +131,7 @@ export function addonLines(selection) {
   for (const addon of ADDONS) {
     if (!selection[addon.id]) continue;
     const quantity = addon.perPerson
-      ? Math.min(Math.max(0, Number(selection.linenCount) || 0), Math.max(0, Number(selection.guests) || 0))
+      ? Math.min(Math.max(0, Number(selection.linenCount) || 0), linenLimit(selection.guests))
       : 1;
     lines.push({
       id: addon.id,
@@ -161,7 +169,7 @@ export function quote({ arrival, departure, addons = {}, guests = 0 }) {
   const discountInfo = discount && discountAmount > 0
     ? { id: discount.id, label: discount.label, percent: discount.percent, amount: discountAmount }
     : null;
-  const linenCount = Math.min(Math.max(0, Number(addons.linenCount) || 0), Math.max(0, Number(guests) || 0));
+  const linenCount = Math.min(Math.max(0, Number(addons.linenCount) || 0), linenLimit(guests));
   const addonResult = addonLines({ ...addons, linenCount, guests }).map((line) => ({
     id: line.id, label: line.label, amount: line.amount, request: line.request
   }));

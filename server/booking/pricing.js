@@ -17,6 +17,14 @@ const CONFIG = require('../../shared/pricing-config.json');
 
 const PRICE_VERSION = CONFIG.version;
 
+// Högsta antal personer som kan hyra lakan och handdukar. Antalet begränsas
+// dessutom alltid av det faktiska antalet gäster i bokningen.
+const LINEN_MAX = CONFIG.addons.linenMax;
+
+function linenLimit(guests) {
+  return Math.max(0, Math.min(LINEN_MAX, Number(guests) || 0));
+}
+
 // Kalenderdag-precisa hjälpare (YYYY-MM-DD). Dagnumret beräknas med civilt
 // räknesätt — ingen delning av millisekunder, så sommartidsomställningar,
 // skottår, månads- och årsskiften hanteras korrekt.
@@ -113,7 +121,7 @@ function applyDiscountToLodging(lodgingBase, peakBase, discount, exemptFlag) {
 // tjänsten (0 till antal gäster), övriga tillval per vistelse.
 function addonTotals(addons, guests, linenCount) {
   const prices = CONFIG.addons;
-  linenCount = Math.min(Math.max(0, Number(linenCount) || 0), Math.max(0, Number(guests) || 0));
+  linenCount = Math.min(Math.max(0, Number(linenCount) || 0), linenLimit(guests));
   const lines = [];
   if (addons.slutstad) lines.push({ id: 'slutstad', label: 'Slutstädning (exklusive kök)', quantity: 1, unitPrice: prices.slutstad, amount: prices.slutstad });
   if (addons.lakan) lines.push({ id: 'lakan', label: 'Lakan och handdukar', quantity: linenCount, unitPrice: prices.lakan, amount: prices.lakan * linenCount });
@@ -145,7 +153,7 @@ function quote({ arrival, departure, addons = {}, guests = 0 }) {
   const discountInfo = discount && discountAmount > 0
     ? { id: discount.id, label: discount.label, percent: discount.percent, amount: discountAmount }
     : null;
-  const linenCount = Math.min(Math.max(0, Number(addons.linenCount) || 0), Math.max(0, Number(guests) || 0));
+  const linenCount = Math.min(Math.max(0, Number(addons.linenCount) || 0), linenLimit(guests));
   const addonResult = addonTotals(addons, guests, linenCount);
   return {
     nights,
@@ -164,6 +172,6 @@ function quote({ arrival, departure, addons = {}, guests = 0 }) {
 }
 
 module.exports = {
-  PRICE_VERSION, CONFIG, nightRate, bestDiscount, nightsBetween, nightKeys, quote,
+  PRICE_VERSION, CONFIG, LINEN_MAX, nightRate, bestDiscount, nightsBetween, nightKeys, quote,
   addonTotals, applyDiscountToLodging, dayNumber, keyFromDayNumber, weekdayOf
 };

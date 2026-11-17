@@ -265,6 +265,24 @@ test('antal gäster uppdaterar lakan-priset i totalprisofferten', async ({ page 
   await expect(page.locator('#price-total')).toContainText('21 000 kr');
 });
 
+test('lakan: 18 gäster ger 18 uppsättningar och 3 600 kr', async ({ page }) => {
+  await goto(page);
+  await clickDay(page, '2026-11-16');
+  await clickDay(page, '2026-11-19');
+  await page.locator('#field-guests').selectOption('18');
+  await page.locator('#addon-lakan').check();
+  await expect(page.locator('#linen-count')).toBeEnabled();
+  await expect(page.locator('#linen-count')).toHaveValue('18');
+  await expect(page.locator('#linen-count')).toHaveAttribute('max', '18');
+  await expect(page.locator('#price-list')).toContainText('18 pers');
+  await expect(page.locator('#price-list')).toContainText('3 600 kr');
+  // Fler uppsättningar än antal gäster begränsas direkt i fältet.
+  await page.locator('#linen-count').fill('28');
+  await expect(page.locator('#linen-count')).toHaveValue('18');
+  await expect(page.locator('#price-list')).toContainText('18 pers');
+  await expect(page.locator('#price-total')).toContainText('24 600 kr');
+});
+
 test('tjänster för tidig incheckning och sen utcheckning visar tiderna och bekräftelsekravet', async ({ page }) => {
   await goto(page);
   await clickDay(page, '2026-11-16');
