@@ -2,7 +2,7 @@
 
 // Gemensam analyskonfiguration för Skadevi Herrgård.
 //
-// All mätning går via Google Tag Manager (GTM-T5BNLGR7). GA4 (G-NBQB2HKDYF)
+// All mätning går via Google Tag Manager (GTM-WN83FQXJ). GA4 (G-NBQB2HKDYF)
 // konfigureras som en Google tag inuti GTM – aldrig med en separat gtag.js-
 // installation i sidan. Här finns bara:
 //   * Consent Mode v2 med standardläget "denied".
@@ -10,7 +10,7 @@
 //   * En säker kö för dataLayer-händelser (inga personuppgifter).
 //   * Serverrenderad purchase-data för verifierade betalningar.
 
-const GTM_ID = 'GTM-T5BNLGR7';
+const GTM_ID = 'GTM-WN83FQXJ';
 const GA4_MEASUREMENT_ID = 'G-NBQB2HKDYF';
 const CONSENT_STORAGE_KEY = 'skadevi-consent-v1';
 const CONSENT_VERSION = 1;

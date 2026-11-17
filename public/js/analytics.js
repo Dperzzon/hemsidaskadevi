@@ -13,7 +13,7 @@
 
   var currentScript = document.currentScript;
   var dataset = currentScript && currentScript.dataset ? currentScript.dataset : {};
-  var GTM_ID = dataset.gtm || 'GTM-T5BNLGR7';
+  var GTM_ID = dataset.gtm || 'GTM-WN83FQXJ';
   var GA4_MEASUREMENT_ID = dataset.ga4 || 'G-NBQB2HKDYF';
   var CONSENT_KEY = dataset.consentKey || 'skadevi-consent-v1';
   var CONSENT_VERSION = 1;

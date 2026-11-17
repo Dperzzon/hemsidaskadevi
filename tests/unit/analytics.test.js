@@ -12,13 +12,13 @@ const { renderAnalyticsHead, renderPurchaseEvent, GTM_ID, GA4_MEASUREMENT_ID } =
   require('../../shared/analytics.js');
 
 test('GTM-ID och GA4-ID är de beslutade', () => {
-  assert.equal(GTM_ID, 'GTM-T5BNLGR7');
+  assert.equal(GTM_ID, 'GTM-WN83FQXJ');
   assert.equal(GA4_MEASUREMENT_ID, 'G-NBQB2HKDYF');
 });
 
 test('head-innehållet laddar endast GTM-skriptet från egen domän', () => {
   const head = renderAnalyticsHead();
-  assert.match(head, /data-gtm="GTM-T5BNLGR7"/);
+  assert.match(head, /data-gtm="GTM-WN83FQXJ"/);
   assert.match(head, /data-ga4="G-NBQB2HKDYF"/);
   assert.match(head, /<script src="\/js\/analytics\.js"/);
   assert.doesNotMatch(head, /<script>/);
@@ -68,7 +68,7 @@ test('alla publika sidor har exakt en GTM-installation och ingen noscript-iframe
   ];
   for (const page of pages) {
     const html = fs.readFileSync(path.join(root, page), 'utf8');
-    assert.match(html, /data-gtm="GTM-T5BNLGR7"/, `${page} saknar GTM`);
+    assert.match(html, /data-gtm="GTM-WN83FQXJ"/, `${page} saknar GTM`);
     assert.equal((html.match(/<script src="\/js\/analytics\.js"/g) || []).length, 1, `${page} har dubbel analytics.js`);
     assert.doesNotMatch(html, /googletagmanager\.com\/ns\.html/i, `${page} har noscript-iframe`);
     assert.ok(html.indexOf('<meta charset="UTF-8">') < html.indexOf('SKADEVI ANALYTICS START'), `${page} har analys före charset`);
@@ -86,7 +86,7 @@ test('serverrenderade betalningssidor använder samma analysdel', () => {
     { totalOre: 1000, paidOre: 0, remainingOre: 1000 },
     { stripeEnabled: true, cardEnabled: true }
   );
-  assert.match(page.html, /GTM-T5BNLGR7/);
+  assert.match(page.html, /GTM-WN83FQXJ/);
   assert.match(page.html, /data-analytics-checkout="card"/);
   const custom = layout('Test', '<p>Test</p>', { purchase: { transaction_id: 'SKD-1', value: 10, currency: 'SEK' } });
   assert.match(custom, /data-analytics-purchase/);

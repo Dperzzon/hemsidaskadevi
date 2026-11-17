@@ -8,7 +8,7 @@ Tag Manager och Google Analytics 4.
 
 | Del | Status |
 | --- | --- |
-| GTM-container `GTM-T5BNLGR7` i alla publika sidor | **Installerad i koden** |
+| GTM-container `GTM-WN83FQXJ` i alla publika sidor | **Installerad i koden** |
 | Samtyckeshantering och Consent Mode v2 | **Installerad i koden** |
 | dataLayer-händelser för bokning och betalning | **Installerad i koden** |
 | GA4 Measurement ID `G-NBQB2HKDYF` | **Måste skapas och publiceras som Google tag i GTM** |
@@ -22,7 +22,7 @@ dubbla konverteringar.
 
 | Tjänst | ID |
 | --- | --- |
-| Google Tag Manager-container | `GTM-T5BNLGR7` |
+| Google Tag Manager-container | `GTM-WN83FQXJ` |
 | GA4 Measurement ID | `G-NBQB2HKDYF` |
 
 ## Filer och ansvar
@@ -151,7 +151,7 @@ Avstämning mot Stripe och bokningssystemet ska alltid vara ekonomisk sanning.
 
 ## Manuella steg i Google Tag Manager
 
-1. Öppna `https://tagmanager.google.com/` och välj containern **GTM-T5BNLGR7**.
+1. Öppna `https://tagmanager.google.com/` och välj containern **GTM-WN83FQXJ**.
 2. Kontrollera under **Tags** att det inte redan finns en aktiv GA4-konfiguration
    eller Google-tagg som skickar sidvisningar för `G-NBQB2HKDYF`. Om en sådan
    finns: pausa/ta bort den så att endast en Google tag återstår.

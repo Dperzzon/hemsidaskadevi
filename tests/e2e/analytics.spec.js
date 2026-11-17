@@ -57,7 +57,7 @@ test('accepterat samtycke laddar GTM exakt en gång och uppdaterar consent', asy
   expect(state.consent).toBe(true);
   expect(state.scripts).toBe(1);
   expect(hits.length).toBe(1);
-  expect(hits[0]).toContain('GTM-T5BNLGR7');
+  expect(hits[0]).toContain('GTM-WN83FQXJ');
   expect(state.updates.at(-1)[2].analytics_storage).toBe('granted');
 });
 
