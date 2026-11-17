@@ -29,6 +29,7 @@ function createDemoRepository(options = {}) {
   const directBooking = new Map();
   const history = [];
   const outbox = [];
+  let syncStatus = null;
 
   for (const source of DEMO_BOOKINGS) {
     const record = clone(source);
@@ -235,6 +236,12 @@ function createDemoRepository(options = {}) {
         note: data.note ?? '',
         etag: existing ? 'demo-setting-2' : 'demo-setting-1'
       });
+    },
+    async getCalendarSyncStatus() {
+      return syncStatus ? clone(syncStatus) : null;
+    },
+    async saveCalendarSyncStatus(data) {
+      syncStatus = clone(data);
     },
     async createCalendarNight(night, data, options = {}) {
       createCalendarNight(night, data, options);

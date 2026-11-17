@@ -270,10 +270,19 @@ async function directBookingOverview(repository, now = new Date()) {
     repository.listDirectBookingApprovals(),
     repository.getDirectBookingSetting()
   ]);
+  let syncStatus = null;
+  if (typeof repository.getCalendarSyncStatus === 'function') {
+    try {
+      syncStatus = await repository.getCalendarSyncStatus();
+    } catch {
+      syncStatus = null;
+    }
+  }
   const direct = all.filter((booking) => booking.bookingSource === 'DIRECT');
   return {
     automaticEnabled: setting ? setting.enabled === true : true,
     setting: setting ?? null,
+    syncStatus,
     approvals: approvals ?? [],
     reservations: direct.filter((booking) => booking.statusCode === 'PENDING_PAYMENT'),
     confirmed: direct.filter((booking) => booking.statusCode === 'CONFIRMED'),

@@ -18,7 +18,11 @@ const {
   toOutboxEntity,
   fromDirectBookingEntity,
   directBookingEntity,
-  groupDirectBookingApprovals
+  groupDirectBookingApprovals,
+  fromCalendarSyncEntity,
+  calendarSyncEntity,
+  CALENDAR_SYNC_PARTITION,
+  CALENDAR_SYNC_ROW
 } = require('../../booking/store');
 const {
   normalizeBooking,
@@ -373,6 +377,38 @@ function createTableAdminRepository(options = {}) {
       const result = await request({ method: 'POST', body });
       if (result.status !== 201) {
         throw new Error(`Direktbokningsinställningen kunde inte sparas (${result.status})`);
+      }
+    },
+    async getCalendarSyncStatus() {
+      const result = await request({
+        method: 'GET',
+        target: rowTarget(CALENDAR_SYNC_PARTITION, CALENDAR_SYNC_ROW)
+      });
+      if (result.status === 404) return null;
+      if (result.status !== 200 || !result.json) {
+        throw new Error(`Kalendersynkstatusen kunde inte läsas (${result.status})`);
+      }
+      return fromCalendarSyncEntity({ ...result.json, etag: result.etag });
+    },
+    async saveCalendarSyncStatus(data) {
+      const existing = await this.getCalendarSyncStatus().catch(() => null);
+      const body = calendarSyncEntity(data);
+      if (existing) {
+        const result = await request({
+          method: 'PUT',
+          target: rowTarget(CALENDAR_SYNC_PARTITION, CALENDAR_SYNC_ROW),
+          body,
+          ifMatch: existing.etag || '*'
+        });
+        if (result.status === 412 || result.status === 409) throw conflict('Kalendersynkstatusen har ändrats av någon annan');
+        if (![200, 204].includes(result.status)) {
+          throw new Error(`Kalendersynkstatusen kunde inte uppdateras (${result.status})`);
+        }
+        return;
+      }
+      const result = await request({ method: 'POST', body });
+      if (result.status !== 201) {
+        throw new Error(`Kalendersynkstatusen kunde inte sparas (${result.status})`);
       }
     },
     async createCalendarNight(night, data, { resource } = {}) {

@@ -36,6 +36,9 @@ param keyVaultName string
 @description('Namn på Key Vault-sekretens för kalenderadressen.')
 param keyVaultSecretName string
 
+@description('Namn på Key Vault-sekretens för den hemliga token i Skadevis publika iCal-export. Värdet sätts aldrig via Bicep.')
+param calendarExportSecretName string = 'calendar-export-token'
+
 @description('Domän som planeras kopplas; används som tagg och i domänstegen.')
 param customDomain string
 
@@ -109,6 +112,18 @@ var baseAppSettings = [
   {
     name: 'AIRBNB_ICAL_URL'
     value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/${keyVaultSecretName})'
+  }
+  {
+    name: 'CALENDAR_EXPORT_TOKEN'
+    value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/${calendarExportSecretName})'
+  }
+  {
+    name: 'CALENDAR_SYNC_MONITOR_MINUTES'
+    value: '15'
+  }
+  {
+    name: 'DIRECT_BOOKING_MIN_LEAD_HOURS'
+    value: '0'
   }
   {
     name: 'BOOKING_REQUESTS_ENABLED'

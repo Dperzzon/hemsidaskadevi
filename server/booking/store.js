@@ -244,6 +244,54 @@ function toEntity(record, partition) {
   };
 }
 
+const CALENDAR_SYNC_PARTITION = 'calendarsync';
+const CALENDAR_SYNC_ROW = 'airbnb';
+
+function fromCalendarSyncEntity(entity) {
+  if (!entity) return null;
+  return {
+    status: entity.status ?? 'error',
+    lastCheckAt: entity.lastCheckAt ?? '',
+    lastSuccessAt: entity.lastSuccessAt ?? '',
+    lastErrorAt: entity.lastErrorAt ?? '',
+    lastErrorCode: entity.lastErrorCode ?? '',
+    consecutiveFailures: Number(entity.consecutiveFailures ?? 0),
+    blockedNights: Number(entity.blockedNights ?? 0),
+    nightsChecked: Number(entity.nightsChecked ?? 0),
+    conflicts: (() => {
+      try {
+        const value = JSON.parse(entity.conflicts ?? '[]');
+        return Array.isArray(value) ? value : [];
+      } catch {
+        return [];
+      }
+    })(),
+    source: entity.source ?? '',
+    checkedFrom: entity.checkedFrom ?? '',
+    checkedTo: entity.checkedTo ?? '',
+    etag: entity['odata.etag'] ?? entity.etag ?? ''
+  };
+}
+
+function calendarSyncEntity(data) {
+  return {
+    PartitionKey: CALENDAR_SYNC_PARTITION,
+    RowKey: CALENDAR_SYNC_ROW,
+    status: data.status === 'ok' ? 'ok' : 'error',
+    lastCheckAt: data.lastCheckAt ?? '',
+    lastSuccessAt: data.lastSuccessAt ?? '',
+    lastErrorAt: data.lastErrorAt ?? '',
+    lastErrorCode: data.lastErrorCode ?? '',
+    consecutiveFailures: String(data.consecutiveFailures ?? 0),
+    blockedNights: String(data.blockedNights ?? 0),
+    nightsChecked: String(data.nightsChecked ?? 0),
+    conflicts: JSON.stringify(Array.isArray(data.conflicts) ? data.conflicts : []),
+    source: data.source ?? '',
+    checkedFrom: data.checkedFrom ?? '',
+    checkedTo: data.checkedTo ?? ''
+  };
+}
+
 function fromEntity(entity) {
   const parse = (value, fallback) => {
     if (!value) return fallback;
@@ -834,6 +882,46 @@ function createTableStore(options = {}) {
         throw new Error(`Direktbokningsinställningen kunde inte sparas (${result.status})`);
       }
     },
+    async getCalendarSyncStatus() {
+      const result = await tableRequest({
+        accountName, method: 'GET', table,
+        target: rowTarget(CALENDAR_SYNC_PARTITION, CALENDAR_SYNC_ROW),
+        fetchImpl: options.fetchImpl, auth
+      });
+      if (result.status === 404) return null;
+      if (result.status !== 200 || !result.json) {
+        throw new Error(`Kalendersynkstatusen kunde inte läsas (${result.status})`);
+      }
+      return fromCalendarSyncEntity(result.json);
+    },
+    async saveCalendarSyncStatus(data) {
+      const existing = await this.getCalendarSyncStatus().catch(() => null);
+      const body = calendarSyncEntity(data);
+      if (existing) {
+        const result = await tableRequest({
+          accountName, method: 'PUT', table,
+          target: rowTarget(CALENDAR_SYNC_PARTITION, CALENDAR_SYNC_ROW),
+          body,
+          ifMatch: existing.etag || '*',
+          fetchImpl: options.fetchImpl, auth
+        });
+        if (result.status === 412 || result.status === 409) {
+          throw new Error('Kalendersynkstatusen har ändrats av någon annan');
+        }
+        if (![200, 204].includes(result.status)) {
+          throw new Error(`Kalendersynkstatusen kunde inte uppdateras (${result.status})`);
+        }
+        return;
+      }
+      const result = await tableRequest({
+        accountName, method: 'POST', table,
+        body,
+        fetchImpl: options.fetchImpl, auth
+      });
+      if (result.status !== 201) {
+        throw new Error(`Kalendersynkstatusen kunde inte sparas (${result.status})`);
+      }
+    },
     async updateRequest(record, { ifMatch } = {}) {
       const rowKey = record.rowKey ?? record.idempotencyKey;
       const result = await tableRequest({
@@ -926,6 +1014,7 @@ function createLocalStore(options = {}) {
   const calendar = new Map();
   const calendarKey = (resource, night) => `${resource === 'extrahus' ? 'extrahus' : 'main'}:${night}`;
   const directBooking = new Map();
+  let syncStatus = null;
   let loaded = false;
   function etagFor(record) {
     return `local-${record.version ?? 1}-${record.updatedAt ?? record.createdAt ?? ''}`;
@@ -1108,6 +1197,15 @@ function createLocalStore(options = {}) {
         etag: existing ? `db-setting-2` : 'db-setting-1'
       });
     },
+    async getCalendarSyncStatus() {
+      return syncStatus ? { ...syncStatus, conflicts: [...syncStatus.conflicts] } : null;
+    },
+    async saveCalendarSyncStatus(data) {
+      syncStatus = {
+        ...data,
+        conflicts: Array.isArray(data.conflicts) ? [...data.conflicts] : []
+      };
+    },
     async updateRequest(record, { ifMatch } = {}) {
       await loadOnce();
       const current = records.get(record.idempotencyKey) ??
@@ -1223,6 +1321,8 @@ module.exports = {
   createStore, createTableStore, createLocalStore, isConfigured, sharedKeySignature,
   toEntity, fromEntity, toOutboxEntity, fromOutboxEntity,
   fromDirectBookingEntity, directBookingEntity, groupDirectBookingApprovals,
+  fromCalendarSyncEntity, calendarSyncEntity,
+  CALENDAR_SYNC_PARTITION, CALENDAR_SYNC_ROW,
   createManagedIdentityTokenProvider, createTokenCache, hasManagedIdentity,
   tableRequest, tableUrl, rowTarget,
   MANAGED_IDENTITY_SCOPE_SUFFIX

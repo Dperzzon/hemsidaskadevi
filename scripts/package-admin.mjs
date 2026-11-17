@@ -39,6 +39,7 @@ const required = [
   'server/admin/public/admin.js',
   'server/calendar/availability.js',
   'server/calendar/calendar-worker.js',
+  'server/calendar/sync-status.js',
   'server/booking/store.js',
   'server/booking/pricing.js',
   'server/booking/payment-ledger.js',

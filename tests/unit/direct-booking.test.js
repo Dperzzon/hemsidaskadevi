@@ -613,3 +613,36 @@ test('extrahus stoppar direktbetalning och hänvisar till manuell förfrågan', 
   assert.equal(result.jsonBody.code, 'EXTRAHUS_DIRECT_UNAVAILABLE');
   assert.equal(result.jsonBody.manualReview, true);
 });
+
+test('konfigurerbar ledtidsgräns stoppar direktbetalning nära ankomst', async () => {
+  const { options, context, memory, stripe } = setup({
+    now: new Date('2026-11-19T12:00:00.000Z'),
+    minimumLeadHours: 48
+  });
+  const result = await handleDirectBooking(request(), context, options);
+  assert.equal(result.status, 409);
+  assert.equal(result.jsonBody.code, 'ARRIVAL_TOO_SOON');
+  assert.equal(result.jsonBody.manualReview, true);
+  assert.equal(result.jsonBody.minimumLeadHours, 48);
+  assert.equal(memory.calendar.size, 0);
+  assert.equal(stripe.sessions.size, 0);
+});
+
+test('ledtidsgränsen är avstängd som standard', async () => {
+  const { options, context } = setup({ now: new Date('2026-11-19T12:00:00.000Z') });
+  const result = await handleDirectBooking(request(), context, options);
+  assert.equal(result.status, 201);
+});
+
+test('Stripe Checkout skapas inte om reservationens ägarskap inte kan verifieras', async () => {
+  const { options, context, memory, stripe } = setup();
+  const base = memory.store;
+  const store = {
+    ...base,
+    async listCalendarByReference() { return []; }
+  };
+  const result = await handleDirectBooking(request(), context, { ...options, store });
+  assert.equal(result.status, 503);
+  assert.equal(result.jsonBody.code, 'RESERVATION_UNVERIFIED');
+  assert.equal(stripe.sessions.size, 0);
+});

@@ -15,6 +15,68 @@ const {
   formatDateTime
 } = require('../domain');
 
+const SYNC_ERROR_LABELS = {
+  NOT_CONFIGURED: 'Kalenderadress saknas',
+  CONFIG_INVALID: 'Kalenderadressen är ogiltig',
+  FETCH_TIMEOUT: 'Timeout vid hämtning',
+  FETCH_FAILED: 'Nätverksfel vid hämtning',
+  EMPTY_RESPONSE: 'Tomt svar från kalendern',
+  INVALID_CONTENT_TYPE: 'Svaret var inte en kalenderfil',
+  INVALID_FORMAT: 'Filen är inte en giltig iCal-kalender',
+  PARSE_ERROR: 'Kalendern kunde inte tolkas',
+  RESPONSE_TOO_LARGE: 'Kalenderfilen var för stor',
+  REDIRECT_INVALID: 'Ogiltig omdirigering',
+  REDIRECT_UNTRUSTED: 'Omdirigering till otillåtet mål'
+};
+
+function syncErrorLabel(code) {
+  if (!code) return '';
+  if (SYNC_ERROR_LABELS[code]) return SYNC_ERROR_LABELS[code];
+  if (/^HTTP_\d{3}$/.test(code)) return `Kalendern svarade HTTP ${code.slice(5)}`;
+  return 'Kalenderfel';
+}
+
+function syncLevel(status) {
+  if (!status) return 'unknown';
+  if (status.lastErrorCode) {
+    return Number(status.consecutiveFailures ?? 0) >= 3 || !status.lastSuccessAt ? 'error' : 'warning';
+  }
+  return 'ok';
+}
+
+function syncBadge(level) {
+  if (level === 'ok') return '<span class="badge badge-confirmed">Fungerar</span>';
+  if (level === 'warning') return '<span class="badge badge-warning">Varning</span>';
+  if (level === 'error') return '<span class="badge badge-danger">Fel</span>';
+  return '<span class="badge badge-neutral">Okänd</span>';
+}
+
+function syncStatusPanel(status) {
+  const level = syncLevel(status);
+  const conflicts = Array.isArray(status?.conflicts) ? status.conflicts : [];
+  const conflictText = conflicts.length
+    ? `${conflicts.length} natt(er): ${conflicts.slice(0, 12).join(', ')}${conflicts.length > 12 ? ' …' : ''}`
+    : 'Inga upptäckta konflikter';
+  return `<section class="panel">
+    <h2>Kalenderstatus – Airbnb-import</h2>
+    <p><strong>Status:</strong> ${syncBadge(level)}</p>
+    <ul class="muted">
+      <li>Senaste lyckade hämtning: ${escapeHtml(formatDateTime(status?.lastSuccessAt))}</li>
+      <li>Senaste kontrollförsök: ${escapeHtml(formatDateTime(status?.lastCheckAt))}</li>
+      <li>Senaste fel: ${status?.lastErrorCode
+        ? `${escapeHtml(syncErrorLabel(status.lastErrorCode))} (${escapeHtml(formatDateTime(status.lastErrorAt))})`
+        : '—'}</li>
+      <li>Misslyckade försök i följd: ${escapeHtml(String(status?.consecutiveFailures ?? 0))}</li>
+      <li>Kontrollerat intervall: ${status?.checkedFrom
+        ? `${escapeHtml(formatDateKey(status.checkedFrom))} – ${escapeHtml(formatDateKey(status.checkedTo))}`
+        : '—'}</li>
+      <li>Upptäckta konflikter: ${escapeHtml(conflictText)}</li>
+    </ul>
+    <p class="muted">Statusen bygger på en exporterad iCal-fil, inte realtidsdata. Även en lyckad hämtning kan
+    vara fördröjd hos Airbnb. Vid fel eller osäkerhet stoppas alltid direktbetalning för berörda datum.</p>
+  </section>`;
+}
+
 function approvalRows(approvals) {
   if (!approvals.length) {
     return `<tr><td colspan="5">${emptyState('Ingen historik', 'Inga tidigare manuella direktbokningsgodkännanden finns.')}</td></tr>`;
@@ -85,6 +147,8 @@ function renderDirectBooking({ data, principal, demo, csrfToken, writesEnabled }
       ${data.setting?.note ? `<p class="muted">Anteckning: ${escapeHtml(data.setting.note)}</p>` : ''}
       ${toggleForm}
     </section>
+
+    ${syncStatusPanel(data.syncStatus)}
 
     <section class="panel">
       <h2>Airbnb-synkroniseringens begränsning</h2>

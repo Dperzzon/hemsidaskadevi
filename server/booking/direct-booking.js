@@ -15,6 +15,7 @@
 // Airbnb-delade datum utan ett uttryckligen godkänt beslut om kvarstående risk.
 
 const crypto = require('node:crypto');
+const { Temporal } = require('temporal-polyfill');
 const { handleAvailability } = require('../calendar/availability');
 const { loadRules } = require('./rules');
 const { createStore } = require('./store');
@@ -34,7 +35,8 @@ const {
 const {
   RESERVATION_STATUS,
   reserveNights,
-  releaseReservation
+  releaseReservation,
+  verifyReservation
 } = require('./reservations');
 const { layout } = require('./payment-page');
 
@@ -116,13 +118,19 @@ async function isAutomaticDirectBookingEnabled(store, options = {}) {
 
 // Hämtar färskt iCal-underlag inför varje kontroll. En natt som är upptagen i
 // Airbnb gör hela vistelsen otillgänglig för direktbokning. Vi använder aldrig
-// gamla cachade svar som bevis för tillgänglighet.
-async function checkAirbnbAutomatic(from, to, options) {
+// gamla cachade svar som bevis för tillgänglighet. Varje försök tvingar även en
+// uppdatering av den sparade synkstatusen så att Owner ser senaste kontrollen.
+async function checkAirbnbAutomatic(from, to, options, store) {
   const handler = options.availabilityHandler ?? handleAvailability;
   let availability;
   try {
     const query = new URLSearchParams({ start: from, end: to });
-    availability = await handler({ query }, {}, options.availability ?? {});
+    availability = await handler({ query }, {}, {
+      ...(options.availability ?? {}),
+      calendarStatusStore: options.availability?.calendarStatusStore ?? store,
+      forceStatusWrite: true,
+      statusSource: 'direct-booking'
+    });
   } catch {
     return { ok: false, code: 'AIRBNB_UNAVAILABLE' };
   }
@@ -135,6 +143,28 @@ async function checkAirbnbAutomatic(from, to, options) {
   return { ok: true };
 }
 
+// Konfigurerbar säkerhetsgräns nära ankomst. Standard 0 = avstängd. När den
+// aktiveras krävs att ankomsten ligger längre fram än angivet antal timmar;
+// annars hänvisas gästen till en manuell bokningsförfrågan.
+function minimumLeadHours(options = {}) {
+  const raw = options.minimumLeadHours ??
+    process.env.DIRECT_BOOKING_MIN_LEAD_HOURS ??
+    0;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return Math.min(value, 24 * 30);
+}
+
+function arrivalStartMillis(dateKey) {
+  try {
+    return Temporal.PlainDate.from(dateKey)
+      .toZonedDateTime({ timeZone: 'Europe/Stockholm' })
+      .epochMilliseconds;
+  } catch {
+    return Date.parse(`${dateKey}T00:00:00Z`);
+  }
+}
+
 async function checkDirectBookingAvailability(store, from, to, now, options = {}) {
   if (!directBookingAvailable(options)) {
     return { directBooking: false, code: 'DIRECT_BOOKING_DISABLED', reason: 'disabled' };
@@ -145,6 +175,19 @@ async function checkDirectBookingAvailability(store, from, to, now, options = {}
   const nights = nightKeys(from, to);
   if (!nights.length) {
     return { directBooking: false, code: 'INVALID_RANGE', reason: 'invalid' };
+  }
+  const leadHours = minimumLeadHours(options);
+  if (leadHours > 0) {
+    const arrival = arrivalStartMillis(from);
+    if (!Number.isFinite(arrival) || now.getTime() + leadHours * 3600000 >= arrival) {
+      return {
+        directBooking: false,
+        code: 'ARRIVAL_TOO_SOON',
+        reason: 'lead_time',
+        minimumLeadHours: leadHours,
+        requestOnly: true
+      };
+    }
   }
   if (!store || typeof store.listCalendar !== 'function') {
     return { directBooking: false, code: 'DIRECT_BOOKING_UNAVAILABLE', reason: 'unavailable' };
@@ -166,7 +209,7 @@ async function checkDirectBookingAvailability(store, from, to, now, options = {}
     };
   }
 
-  const airbnb = await checkAirbnbAutomatic(from, to, options);
+  const airbnb = await checkAirbnbAutomatic(from, to, options, store);
   if (!airbnb.ok) {
     return {
       directBooking: false,
@@ -449,6 +492,14 @@ async function handleDirectBooking(request, context = {}, options = {}) {
         nights: availability.nights
       });
     }
+    if (availability.code === 'ARRIVAL_TOO_SOON') {
+      return result(409, {
+        error: `Ankomsten är för nära i tid för automatisk kortbetalning (minst ${availability.minimumLeadHours} timmar krävs). Skicka gärna en bokningsförfrågan.`,
+        code: availability.code,
+        manualReview: true,
+        minimumLeadHours: availability.minimumLeadHours
+      });
+    }
     if (
       availability.code === 'AUTO_DIRECT_BOOKING_DISABLED' ||
       availability.code === 'DIRECT_BOOKING_DISABLED'
@@ -547,6 +598,37 @@ async function handleDirectBooking(request, context = {}, options = {}) {
     return result(503, {
       error: 'Bokningen kunde inte reserveras just nu. Försök igen eller skicka en bokningsförfrågan.',
       code: 'RESERVATION_FAILED'
+    });
+  }
+
+  // Verifiera att reservationen fortfarande ägs av exakt detta försök innan
+  // någon betalning startas. Om låsningen inte kan styrkas frigörs försöket
+  // och ingen Checkout skapas.
+  let ownership;
+  try {
+    ownership = await verifyReservation(store, record);
+  } catch {
+    ownership = { ok: false };
+  }
+  if (!ownership.ok) {
+    await releaseReservation(store, reference, now).catch(() => {});
+    const failed = {
+      ...record,
+      statusCode: 'RESERVATION_FAILED',
+      status: 'Reservationen kunde inte verifieras',
+      reservation: {
+        ...record.reservation,
+        status: RESERVATION_STATUS.FAILED,
+        failedAt: now.toISOString()
+      },
+      version: 2,
+      updatedAt: now.toISOString()
+    };
+    await store.updateRequest(failed, { ifMatch: etagAfterSave }).catch(() => {});
+    warn(`Direktbokning: reservationens ägarskap kunde inte verifieras för ${reference}.`);
+    return result(503, {
+      error: 'Bokningen kunde inte säkras just nu. Försök igen eller skicka en bokningsförfrågan.',
+      code: 'RESERVATION_UNVERIFIED'
     });
   }
 
@@ -821,6 +903,7 @@ module.exports = {
   handleDirectBookingConfirmation,
   directBookingAvailable,
   checkDirectBookingAvailability,
+  minimumLeadHours,
   releaseExpiredReservations,
   expireAndVerify,
   CHECKOUT_TTL_SECONDS

@@ -44,11 +44,16 @@ samma server-side kontroll:
 2. Interna kalenderrader, bekräftade bokningar, manuella blockeringar och
    aktiva betalningsreservationer får inte överlappa.
 3. Airbnb iCal hämtas färskt inför varje kontroll. Gamla cachade svar används
-   aldrig som bevis för tillgänglighet.
+   aldrig som bevis för tillgänglighet. Hämtningen har timeout och begränsade
+   återförsök; HTTP-status, innehållstyp och kalenderformat kontrolleras.
 4. Om iCal inte kan hämtas eller tolkas nekas direktbetalning.
 5. Om någon natt är upptagen i Airbnb nekas direktbetalning.
-6. Först därefter skapas en atomisk nattreservation och en Stripe
-   Checkout-session.
+6. Reservationens nattlås verifieras innan Stripe Checkout skapas.
+7. Först därefter skapas en Stripe Checkout-session.
+
+En konfigurerbar säkerhetsgräns nära ankomst finns via
+`DIRECT_BOOKING_MIN_LEAD_HOURS` (standard `0` = avstängd). Se
+`docs/kalender-export.md` för import/export, synkstatus och övervakning.
 
 Den gamla manuella öppningen av datumintervall krävs inte längre. Tidigare
 `directbooking`-rader och historik bevaras för spårbarhet men påverkar inte

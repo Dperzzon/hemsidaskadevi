@@ -8,6 +8,8 @@ const http = require('node:http');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { handleAvailability } = require('./calendar/availability');
+const { handleCalendarExport } = require('./calendar/export');
+const { createCalendarMonitor } = require('./calendar/monitor');
 const { handleBookingRequest, createRateLimiter } = require('./booking/requests');
 const { handleStripeWebhook } = require('./booking/stripe-webhook');
 const { handlePaymentPage, handlePaymentAction } = require('./booking/payment-page');
@@ -354,6 +356,11 @@ function createRequestListener(options = {}) {
       store: createStore(options)
     }));
   const rulesHandler = options.rulesHandler ?? (async () => publicRules(await loadRules(options)));
+  const calendarExportHandler = options.calendarExportHandler ??
+    ((request, context) => handleCalendarExport(request, context, {
+      ...options,
+      store: createStore(options)
+    }));
   const warn = options.warn ?? ((message) => console.error(message));
   // Kanoniskt värdnamn: rotdomänen 301-omdirigeras till www. Endast exakt
   // angivna apex-värdnamn påverkas — azurewebsites.net, localhost och övriga
@@ -483,6 +490,28 @@ function createRequestListener(options = {}) {
         sendJson(res, result.status, result.jsonBody, result.headers);
       } catch {
         sendJson(res, 503, { error: 'Direktbokningen är tillfälligt otillgänglig. Skicka gärna en bokningsförfrågan.' });
+      }
+      return;
+    }
+
+    const calendarExportMatch =
+      /^\/(?:kalender|api\/calendar\/export)\/([A-Za-z0-9_-]{20,128})\.ics$/.exec(url.pathname);
+    if (calendarExportMatch && (req.method === 'GET' || req.method === 'HEAD')) {
+      try {
+        const result = await calendarExportHandler(
+          { token: calendarExportMatch[1] },
+          { warn },
+          {}
+        );
+        res.writeHead(result.status, result.headers);
+        res.end(req.method === 'HEAD' ? undefined : result.body);
+      } catch {
+        res.writeHead(503, {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'Cache-Control': 'no-store',
+          'X-Content-Type-Options': 'nosniff'
+        });
+        res.end('Kalendern är tillfälligt otillgänglig.');
       }
       return;
     }
@@ -624,6 +653,9 @@ function main() {
     console.error('VARNING: AIRBNB_ICAL_URL är inte konfigurerad — kalenderns tillgänglighet kan inte läsas.');
   }
   const server = http.createServer(createRequestListener());
+  const calendarMonitor = process.env.AIRBNB_ICAL_URL
+    ? createCalendarMonitor({ warn: (message) => console.error(message) })
+    : null;
   server.listen(port, () => {
     console.log(`Skadevi servern lyssnar på port ${port}`);
   });
@@ -633,6 +665,7 @@ function main() {
   const shutdown = (signal) => {
     if (shuttingDown) return;
     shuttingDown = true;
+    calendarMonitor?.stop();
     console.log(`Mottog ${signal}, stänger ner.`);
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 10000).unref();
