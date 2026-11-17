@@ -76,6 +76,12 @@ test('Checkout-session skickas med serverbelopp, metadata och idempotensnyckel',
   assert.match(body, /mode=payment/);
   assert.match(body, /allowed_payment_method_types%5B0%5D=card/);
   assert.doesNotMatch(body, /(?:^|&)payment_method_types%5B0%5D/);
+  assert.match(body, /billing_address_collection=auto/);
+  assert.match(body, /phone_number_collection%5Benabled%5D=false/);
+  assert.match(body, /automatic_tax%5Benabled%5D=false/);
+  assert.match(body, /allow_promotion_codes=false/);
+  assert.match(body, /submit_type=auto/);
+  assert.doesNotMatch(body, /payment_method_collection/);
   assert.match(body, /unit_amount%5D=250000/);
   assert.match(body, /currency%5D=sek/);
   assert.match(body, /client_reference_id=SK-2026-TEST01/);

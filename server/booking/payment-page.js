@@ -387,7 +387,7 @@ async function startCheckout(result, token, method, options, context) {
   if (active) return redirectResponse(active.url);
 
   const base = options.publicBaseUrl ?? process.env.PUBLIC_BASE_URL ?? 'https://www.skadeviherrgard.com';
-  const encodedToken = encodeURIComponent(token);
+  const referenceParam = encodeURIComponent(record.reference);
   const idempotencyKey = `${method}-${record.reference}-${result.summary.remainingOre}-${record.version ?? 1}-${Math.floor(now.getTime() / 3600000)}`;
   let session;
   try {
@@ -399,8 +399,8 @@ async function startCheckout(result, token, method, options, context) {
       productName: `Skadevi Herrgård – ${record.reference}`,
       description: `${record.arrival} – ${record.departure}, ${record.nights} nätter, ${record.guests} gäster`,
       customerEmail: record.email,
-      successUrl: `${base}/betala/${encodedToken}?payment=success`,
-      cancelUrl: `${base}/betala/${encodedToken}?payment=cancelled`,
+      successUrl: `${base}/betalning-klar?ref=${referenceParam}`,
+      cancelUrl: `${base}/betalning-avbruten?ref=${referenceParam}`,
       idempotencyKey,
       metadata: { reference: record.reference, source: 'guest-payment-page' }
     });

@@ -211,8 +211,8 @@ test('kort startar endast en kort-session och sparar betalningsmetoden', async (
   assert.deepEqual(stripe.calls[0].paymentMethods, ['card']);
   assert.equal(stripe.calls[0].currency, 'sek');
   assert.equal(stripe.calls[0].amountOre, 2000000);
-  assert.match(stripe.calls[0].successUrl, /\/betala\/.*\?payment=success/);
-  assert.match(stripe.calls[0].cancelUrl, /\/betala\/.*\?payment=cancelled/);
+  assert.match(stripe.calls[0].successUrl, /\/betalning-klar\?ref=/);
+  assert.match(stripe.calls[0].cancelUrl, /\/betalning-avbruten\?ref=/);
   const stored = store.current;
   assert.equal(stored.paymentRequests.length, 1);
   assert.equal(stored.paymentRequests[0].paymentMethod, 'card');

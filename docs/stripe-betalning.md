@@ -71,6 +71,25 @@ Kort är standard. Swish kräver både `STRIPE_SWISH_ENABLED=1` och att Swish ä
 aktiverat i Stripe Dashboard. Kort, Swish och Klarna kan aldrig blandas av
 misstag eftersom listan alltid skickas explicit.
 
+Checkout-sessionen skickar även:
+
+```text
+mode=payment
+billing_address_collection=auto
+phone_number_collection[enabled]=false
+automatic_tax[enabled]=false
+allow_promotion_codes=false
+submit_type=auto
+success_url=<PUBLIC_BASE_URL>/betalning-klar?ref=<referens>
+cancel_url=<PUBLIC_BASE_URL>/betalning-avbruten?ref=<referens>
+```
+
+`ui_mode`, `integration_identifier` och `origin_context` skickas inte
+automatiskt. De accepterades av test-sandboxen men kan saknas i ett äldre
+live-API-version; standardbeteendet är Stripe-hostad Checkout. Lägg endast till
+dem efter att livekontots API-version verifierats. `payment_method_collection`
+skickas aldrig för engångsbetalningar.
+
 ## Säkerhet
 
 - Token är 32 slumpade byte i base64url. Endast SHA-256-hash lagras.
