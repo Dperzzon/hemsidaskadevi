@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.49.2.45890",
-      "templateHash": "15066542584338367907"
+      "templateHash": "6254356584442992045"
     }
   },
   "parameters": {
@@ -156,6 +156,24 @@
         "description": "Aktiverar Swish-betalningar på gästens betalningssida. Standard false: endast kort och faktura."
       }
     },
+    "stripeMode": {
+      "type": "string",
+      "defaultValue": "test",
+      "allowedValues": [
+        "test",
+        "live"
+      ],
+      "metadata": {
+        "description": "Stripe-läge som visas i admin och används av den publika appen."
+      }
+    },
+    "allowStripeLive": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Tillåter live-nyckel. Standard false: live-nycklar blockeras."
+      }
+    },
     "stripeSecretUri": {
       "type": "string",
       "defaultValue": "",
@@ -259,6 +277,12 @@
           "enableSwishCheckout": {
             "value": "[parameters('enableSwishCheckout')]"
           },
+          "stripeMode": {
+            "value": "[parameters('stripeMode')]"
+          },
+          "allowStripeLive": {
+            "value": "[parameters('allowStripeLive')]"
+          },
           "stripeSecretUri": {
             "value": "[parameters('stripeSecretUri')]"
           },
@@ -273,7 +297,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.49.2.45890",
-              "templateHash": "10282457061376692517"
+              "templateHash": "2167219401158392149"
             }
           },
           "parameters": {
@@ -404,6 +428,24 @@
                 "description": "Aktiverar Swish-betalningar på gästens betalningssida. false = endast kort och faktura."
               }
             },
+            "stripeMode": {
+              "type": "string",
+              "defaultValue": "test",
+              "allowedValues": [
+                "test",
+                "live"
+              ],
+              "metadata": {
+                "description": "Stripe-läge som visas i admin och används av den publika appen."
+              }
+            },
+            "allowStripeLive": {
+              "type": "bool",
+              "defaultValue": false,
+              "metadata": {
+                "description": "Tillåter live-nyckel. Standard false: live-nycklar blockeras."
+              }
+            },
             "stripeSecretUri": {
               "type": "string",
               "defaultValue": "",
@@ -482,7 +524,7 @@
                   "minTlsVersion": "1.2",
                   "ftpsState": "Disabled",
                   "healthCheckPath": "/robots.txt",
-                  "appSettings": "[concat(createArray(createObject('name', 'NODE_ENV', 'value', 'production'), createObject('name', 'AIRBNB_ICAL_URL', 'value', format('@Microsoft.KeyVault(SecretUri={0}secrets/{1})', reference(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), '2023-07-01').vaultUri, parameters('keyVaultSecretName'))), createObject('name', 'BOOKING_REQUESTS_ENABLED', 'value', '0'), createObject('name', 'PUBLIC_BASE_URL', 'value', format('https://{0}', parameters('customDomain'))), createObject('name', 'STRIPE_WEBHOOK_ENABLED', 'value', if(parameters('enableStripeWebhook'), '1', '0')), createObject('name', 'STRIPE_ENABLED', 'value', if(or(parameters('enableCardCheckout'), parameters('enableSwishCheckout')), '1', '0')), createObject('name', 'STRIPE_CARD_ENABLED', 'value', if(parameters('enableCardCheckout'), '1', '0')), createObject('name', 'STRIPE_SWISH_ENABLED', 'value', if(parameters('enableSwishCheckout'), '1', '0')), createObject('name', 'STRIPE_MODE', 'value', 'test'), createObject('name', 'STRIPE_ALLOW_LIVE', 'value', '0'), createObject('name', 'STRIPE_OUTBOX_ENABLED', 'value', '0')), variables('bookingSettings'), if(and(parameters('enableStripeWebhook'), not(empty(parameters('stripeWebhookSecretUri')))), createArray(createObject('name', 'STRIPE_WEBHOOK_SECRET', 'value', format('@Microsoft.KeyVault(SecretUri={0})', parameters('stripeWebhookSecretUri')))), createArray()), if(and(or(parameters('enableCardCheckout'), parameters('enableSwishCheckout')), not(empty(parameters('stripeSecretUri')))), createArray(createObject('name', 'STRIPE_SECRET_KEY', 'value', format('@Microsoft.KeyVault(SecretUri={0})', parameters('stripeSecretUri')))), createArray()))]"
+                  "appSettings": "[concat(createArray(createObject('name', 'NODE_ENV', 'value', 'production'), createObject('name', 'AIRBNB_ICAL_URL', 'value', format('@Microsoft.KeyVault(SecretUri={0}secrets/{1})', reference(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), '2023-07-01').vaultUri, parameters('keyVaultSecretName'))), createObject('name', 'BOOKING_REQUESTS_ENABLED', 'value', '0'), createObject('name', 'PUBLIC_BASE_URL', 'value', format('https://{0}', parameters('customDomain'))), createObject('name', 'STRIPE_WEBHOOK_ENABLED', 'value', if(parameters('enableStripeWebhook'), '1', '0')), createObject('name', 'STRIPE_ENABLED', 'value', if(or(parameters('enableCardCheckout'), parameters('enableSwishCheckout')), '1', '0')), createObject('name', 'STRIPE_CARD_ENABLED', 'value', if(parameters('enableCardCheckout'), '1', '0')), createObject('name', 'STRIPE_SWISH_ENABLED', 'value', if(parameters('enableSwishCheckout'), '1', '0')), createObject('name', 'STRIPE_MODE', 'value', parameters('stripeMode')), createObject('name', 'STRIPE_ALLOW_LIVE', 'value', if(parameters('allowStripeLive'), '1', '0')), createObject('name', 'STRIPE_OUTBOX_ENABLED', 'value', '0')), variables('bookingSettings'), if(and(parameters('enableStripeWebhook'), not(empty(parameters('stripeWebhookSecretUri')))), createArray(createObject('name', 'STRIPE_WEBHOOK_SECRET', 'value', format('@Microsoft.KeyVault(SecretUri={0})', parameters('stripeWebhookSecretUri')))), createArray()), if(and(or(parameters('enableCardCheckout'), parameters('enableSwishCheckout')), not(empty(parameters('stripeSecretUri')))), createArray(createObject('name', 'STRIPE_SECRET_KEY', 'value', format('@Microsoft.KeyVault(SecretUri={0})', parameters('stripeSecretUri')))), createArray()))]"
                 }
               },
               "dependsOn": [

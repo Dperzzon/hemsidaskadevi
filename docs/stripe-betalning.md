@@ -262,28 +262,32 @@ Fokuserade tester:
 
 ## Aktivering i produktion
 
-Funktionerna är inaktiva som standard:
+Stripe Live är aktiverat för **kort** sedan 2026-11-17. Swish och Stripe Tax är
+fortsatt avstängda.
 
-- `infra/main.bicepparam`: `enableStripeWebhook=false`,
-  `enableCardCheckout=false`, `enableSwishCheckout=false`, tomma SecretUri.
-- `infra/admin-webapp.bicepparam`: `enableStripePayments=false`,
-  `stripeSwishEnabled=false`.
+Aktiv produktionskonfiguration:
 
-Aktivera kort i testläge först när:
+- `infra/main.bicepparam`: `enableStripeWebhook=true`,
+  `enableCardCheckout=true`, `enableSwishCheckout=false`,
+  `stripeMode=live`, `allowStripeLive=true`, samt SecretUri till
+  `stripe-secret-key` och `stripe-webhook-secret`.
+- `infra/admin-webapp.bicepparam`: `enableStripePayments=true`,
+  `stripeMode=live`, `stripeSwishEnabled=false`.
+- Publik App Service använder Key Vault-referenser för `STRIPE_SECRET_KEY` och
+  `STRIPE_WEBHOOK_SECRET`.
+- Live-webhooken pekar på `https://www.skadeviherrgard.com/api/stripe/webhook`
+  och prenumererar på `checkout.session.completed`,
+  `checkout.session.async_payment_succeeded`, `checkout.session.expired` och
+  `checkout.session.async_payment_failed`.
 
-1. Kort är aktiverat på Stripe-kontot.
-2. `stripe-secret-key` och `stripe-webhook-secret` finns i befintligt Key Vault.
-3. Webhooken pekar på `https://www.skadeviherrgard.com/api/stripe/webhook` och
-   prenumererar på `checkout.session.completed`,
-   `checkout.session.async_payment_succeeded`, `checkout.session.expired` och
-   `checkout.session.async_payment_failed`.
-4. Ett riktigt testköp med testnyckel har verifierats.
-5. Owner uttryckligen godkänt live-läge.
+Bicep-parametrarna är satta till livevärdena så att en framtida infra-deploy
+inte återställer produktionen till avstängt läge. Kör alltid what-if före en
+infra-deploy.
 
-Publicera sedan webhook och kort med testnyckel först. Byt till live-nyckel och
-`STRIPE_ALLOW_LIVE=1` först efter godkännande. Rollback: sätt
-`STRIPE_ENABLED=0`, `STRIPE_WEBHOOK_ENABLED=0` och publicera om. Stäng öppna
-Checkout-sessioner i Stripe vid omedelbart stopp.
+Rollback: sätt `enableCardCheckout=false`, `enableStripeWebhook=false` och
+`enableStripePayments=false`, eller motsvarande appinställningar
+`STRIPE_ENABLED=0` och `STRIPE_WEBHOOK_ENABLED=0`, och starta om apparna.
+Stäng öppna Checkout-sessioner i Stripe vid omedelbart stopp.
 
 ## Begränsningar
 
