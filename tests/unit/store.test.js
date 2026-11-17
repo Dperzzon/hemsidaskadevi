@@ -15,8 +15,13 @@ const {
 } = require('../../server/booking/store');
 const { reserveNights, releaseReservation, convertReservationToBooking } = require('../../server/booking/reservations');
 
-function baseRecord(overrides = {}) {
-  return {
+let tempCounter = 0;
+function tempFile(suffix = '') {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'skadevi-store-'));
+  return path.join(dir, `booking${suffix}-${process.pid}-${++tempCounter}.jsonl`);
+}
+
+function baseRecord(overrides = {}) {  return {
     idempotencyKey: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
     reference: 'SK-2026-TEST01',
     status: 'Inväntar godkännande',
@@ -186,7 +191,7 @@ test('lokal lagring: persistens över processer (läs från fil)', async () => {
 });
 
 test('samma idempotensnyckel två gånger ger samma post (dubbelinskick)', async () => {
-  const store = createLocalStore({ file: path.join(os.tmpdir(), `skadevi-${Date.now()}.jsonl`) });
+  const store = createLocalStore({ file: tempFile() });
   const first = await store.save(baseRecord());
   const second = await store.save(baseRecord());
   assert.equal(first.duplicate, false);
@@ -195,7 +200,7 @@ test('samma idempotensnyckel två gånger ger samma post (dubbelinskick)', async
 });
 
 test('olika idempotensnycklar för samma period kan sparas samtidigt (ingen atomär låsning)', async () => {
-  const store = createLocalStore({ file: path.join(os.tmpdir(), `skadevi-${Date.now()}.jsonl`) });
+  const store = createLocalStore({ file: tempFile() });
   const [a, b] = await Promise.all([
     store.save(baseRecord({ idempotencyKey: 'nyckel-aaaaaaaaaaaaaaaa' })),
     store.save(baseRecord({ idempotencyKey: 'nyckel-bbbbbbbbbbbbbbbb', reference: 'SK-2026-TEST02' }))
@@ -206,7 +211,7 @@ test('olika idempotensnycklar för samma period kan sparas samtidigt (ingen atom
 });
 
 test('findByReference hittar poster och listPending filtrerar på status', async () => {
-  const store = createLocalStore({ file: path.join(os.tmpdir(), `skadevi-${Date.now()}.jsonl`) });
+  const store = createLocalStore({ file: tempFile() });
   await store.save(baseRecord());
   assert.ok(await store.findByReference('SK-2026-TEST01'));
   assert.equal(await store.findByReference('SK-2026-INGEN'), null);
@@ -255,7 +260,7 @@ test('tabellager: misslyckat sparande (5xx) kastar så att förfrågan aldrig vi
 });
 
 test('extrahus har egen kalenderpartition och kan inte dubbelbokas', async () => {
-  const store = createLocalStore({ file: path.join(os.tmpdir(), `skadevi-${Date.now()}-extrahus.jsonl`) });
+  const store = createLocalStore({ file: tempFile('-extrahus') });
   await store.createCalendarNight('2026-11-20', { reference: 'SK-HUS', type: 'BOOKING' });
   await store.createCalendarNight('2026-11-20', { reference: 'SK-EXTRA', type: 'RESERVATION' }, { resource: 'extrahus' });
 
@@ -278,7 +283,7 @@ test('extrahus har egen kalenderpartition och kan inte dubbelbokas', async () =>
 });
 
 test('samtidiga extrahusreservationer kan inte överlappa och rullas tillbaka', async () => {
-  const store = createLocalStore({ file: path.join(os.tmpdir(), `skadevi-${Date.now()}-res.jsonl`) });
+  const store = createLocalStore({ file: tempFile('-res') });
   const first = await reserveNights(store, {
     reference: 'SK-A', arrival: '2026-11-20', departure: '2026-11-23',
     extrahus: { enabled: true, nightKeys: ['2026-11-20', '2026-11-21'] }
@@ -321,7 +326,7 @@ test('extrahus och totalt gästantal bevaras i bokningsposten', () => {
 });
 
 test('genomförd betalning bekräftar både herrgård och extrahus', async () => {
-  const store = createLocalStore({ file: path.join(os.tmpdir(), `skadevi-${Date.now()}-confirm.jsonl`) });
+  const store = createLocalStore({ file: tempFile('-confirm') });
   const record = {
     reference: 'SK-CONFIRM', arrival: '2026-11-20', departure: '2026-11-22',
     extrahus: { enabled: true, nightKeys: ['2026-11-20'] }
