@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="Digital 3D-visning av Skadevi Gård — utforska herrgården virtuellt. Gå runt fritt både inne och ute, nästan som att vara där på riktigt. Drivs av Splat Reality.">
+  <meta name="description" content="Upptäck Skadevi Herrgård digitalt. Vandra genom herrgårdens rum och miljöer i en interaktiv 3D-visning – när och var det passar dig. Boka sedan ditt besök.">
   <meta name="robots" content="index, follow">
   <link rel="canonical" href="https://www.skadeviherrgard.com/digital-visning">
-  <title>Digital visning — 3D-tur av Skadevi Gård | Skadevi Gård</title>
+  <title>Digital visning — Upptäck Skadevi Herrgård i 3D | Skadevi Gård</title>
   <link rel="icon" type="image/png" href="/images/logo.png">
-  <meta property="og:title" content="Digital visning — 3D-tur av Skadevi Gård | Skadevi Gård">
-  <meta property="og:description" content="Digital 3D-visning av Skadevi Gård — utforska herrgården virtuellt. Gå runt fritt både inne och ute, nästan som att vara där på riktigt. Drivs av Splat Reality.">
+  <meta property="og:title" content="Digital visning — Upptäck Skadevi Herrgård i 3D | Skadevi Gård">
+  <meta property="og:description" content="Vandra genom herrgårdens rum och miljöer i en interaktiv 3D-visning – när och var det passar dig.">
   <meta property="og:image" content="https://www.skadeviherrgard.com/images/og-startsida.jpg">
   <meta property="og:url" content="https://www.skadeviherrgard.com/digital-visning">
   <meta property="og:type" content="website">
@@ -17,73 +17,161 @@
   <link rel="stylesheet" href="/css/style.css">
   <link rel="preload" as="font" type="font/woff2" href="/fonts/v20-UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7.woff2" crossorigin>
   <link rel="preload" as="font" type="font/woff2" href="/fonts/v24-kmKUZrc3Hgbbcjq75U4uslyuy4kn0olVQ-LglH6T17uj8Q4iDgNP.woff2" crossorigin>
+  <link rel="preload" as="image" href="/images/hero-startsida.webp">
   <link rel="stylesheet" href="/css/fonts.css">
 </head>
-<body>
+<body class="digital-visning-page">
 
 <header class="header" role="banner">
-  <div class="header-inner">
-    <a href="/" class="header-logo" aria-label="Skadevi Gård — Hem">Skadevi Gård</a>
-    <button class="mobile-toggle" aria-label="Öppna meny" aria-expanded="false">&#9776;</button>
-    <nav class="header-nav" role="navigation" aria-label="Huvudmeny">
-      <a href="/">Hem</a><a href="/foretag">Företag</a><a href="/brollop">Bröllop</a><a href="/semester">Semester</a><a href="/fest">Fest</a><a href="/boende">Boende</a><a href="/aktiviteter">Aktiviteter</a><a href="/priser">Priser</a><a href="/kontakt" class="header-cta">Bilder</a>
-    </nav>
+  <div class="header-side">
+    <button class="mobile-toggle" aria-label="Meny" aria-expanded="false">&#9776;</button>
+    <a href="/foretag" class="header-link">Företag</a>
+    <a href="/fest" class="header-link">Fest</a>
+    <a href="/brollop" class="header-link">Bröllop</a>
+    <a href="/semester" class="header-link">Semester</a>
   </div>
+  <a href="/" class="header-logo"><img width="512" height="512" src="/images/logo.png" alt="Skadevi Gård"></a>
+  <div class="header-side">
+    <a href="/digital-visning" class="header-link active" aria-current="page">Digital visning</a>
+    <a href="/boende" class="header-link">Boendet</a>
+    <a href="/aktiviteter" class="header-link">Aktiviteter</a>
+    <a href="/kontakt" class="header-link">Bilder</a>
+  </div>
+  <nav class="header-nav" role="navigation" aria-label="Meny">
+    <a href="/foretag">Företag</a>
+    <a href="/fest">Fest</a>
+    <a href="/brollop">Bröllop</a>
+    <a href="/semester">Semester</a>
+    <a href="/digital-visning" class="active" aria-current="page">Digital visning</a>
+    <a href="/boende">Boendet</a>
+    <a href="/aktiviteter">Aktiviteter</a>
+    <a href="/kontakt">Bilder</a>
+    <a href="/boka">Boka</a>
+    <a href="/vanliga-fragor">Vanliga frågor</a>
+  </nav>
 </header>
 
 <main>
 
-<section class="page-hero" style="min-height: 25vh;">
-  <div class="page-hero-bg" style="background: var(--color-primary-dark);"></div>
-  <div class="page-hero-content">
-    <h1>Digital visning</h1>
-    <p>Utforska Skadevi Gård — direkt från din skärm</p>
+<section class="dv-hero" aria-labelledby="dv-title">
+  <div class="dv-hero-bg" aria-hidden="true">
+    <img width="1600" height="900" src="/images/hero-startsida.webp" alt="" fetchpriority="high">
+  </div>
+  <div class="dv-hero-inner">
+    <span class="dv-kicker">Skadevi Herrgård</span>
+    <h1 id="dv-title">Upptäck Skadevi Herrgård</h1>
+    <span class="dv-hero-rule" aria-hidden="true"></span>
+    <p class="dv-hero-sub">En digital visning – när och var det passar dig.</p>
+    <p class="dv-hero-body">Vandra genom herrgårdens rum, upptäck miljöerna och upplev atmosfären redan innan ditt besök.</p>
+    <a href="#digital-upplevelse" class="dv-hero-scroll">Upptäck upplevelsen <span aria-hidden="true">&#8595;</span></a>
   </div>
 </section>
 
-<section class="section">
-  <div class="container-narrow fade-in" style="text-align:center;">
-    <h2>Välkommen till Skadevi Gård</h2>
-    <p class="lead" style="margin: var(--space-lg) auto;">Utforska vår historiska herrgård i en digital tur. Vandra fritt både inne och ute, nästan som att vara där på riktigt.</p>
+<section class="dv-experience" id="digital-upplevelse" aria-labelledby="dv-experience-title">
+  <div class="dv-experience-heading">
+    <span class="dv-eyebrow">Den digitala upplevelsen</span>
+    <h2 id="dv-experience-title">Hela herrgården,<br><em>ett klick bort</em></h2>
+    <p>Rör dig fritt mellan salar, sovrum och trädgård – i din egen takt och på din egen skärm.</p>
+  </div>
 
-    <p>Upplev de ståtliga sällskapsrummen, de rofyllda sovrummen och den historiska atmosfären som gör vår herrgård så unik. Genom vår digitala visning kan du utforska varje sal och vrå i din egen takt.</p>
-
-    <div style="margin: var(--space-2xl) 0; padding: var(--space-3xl); background: var(--color-bg-alt); border-radius: var(--border-radius-lg);">
-      <h3>Starta den digitala visningen</h3>
-      <p style="margin: var(--space-md) 0;">Denna interaktiva upplevelse tillhandahålls av Splat Reality. Genom att klicka nedan tas du till en extern sida där du kan röra dig fritt i huset ungefär som i ett spel.</p>
-      <a href="https://skadevi.splatreality.se/" target="_blank" rel="noopener" class="btn btn-primary" style="margin-top: var(--space-md); font-size: var(--text-lg); padding: var(--space-lg) var(--space-3xl);">Starta tur</a>
-      <p style="margin-top: var(--space-lg); font-size: var(--text-sm); color: var(--color-text-light);">
-        Notera: Denna upplevelse använder cirka 100–150 MB data.<br>
-        För bästa prestanda rekommenderar vi en stabil internetanslutning.
+  <div class="dv-stage">
+    <img width="1448" height="1086" src="/images/gallery/vardagsrum.webp" alt="Sällskapsrum på Skadevi Herrgård" loading="lazy">
+    <div class="dv-stage-content">
+      <span class="dv-stage-tag">Interaktiv 3D-visning</span>
+      <a class="dv-start" href="https://skadevi.splatreality.se/" target="_blank" rel="noopener noreferrer">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <circle cx="12" cy="12" r="9.2" fill="none" stroke="currentColor" stroke-width="1.3"></circle>
+          <path d="M10 8.4v7.2l6.2-3.6z" fill="currentColor"></path>
+        </svg>
+        <span>Starta den digitala visningen</span>
+      </a>
+      <p class="dv-stage-note">Utforska Skadevi Herrgård i din egen takt.</p>
+      <p class="dv-stage-meta">
+        <span>
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M14 4h6v6M20 4l-8.5 8.5M10 5H5.8A1.8 1.8 0 0 0 4 6.8v11.4A1.8 1.8 0 0 0 5.8 20h11.4a1.8 1.8 0 0 0 1.8-1.8V14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"></path>
+          </svg>
+          Öppnas i ny flik
+        </span>
+        <span>Cirka 100–150 MB data</span>
       </p>
     </div>
+  </div>
+</section>
 
-    <h3>Varför en digital visning?</h3>
-    <p>Vi vet att det kan vara svårt att föreställa sig hur en plats känns bara genom bilder. Med vår 3D-visning kan du:</p>
-    <ul style="text-align:left; max-width: 500px; margin: var(--space-lg) auto;">
-      <li>Gå runt fritt i alla rum</li>
-      <li>Se hur sovrummen ligger i förhållande till varandra</li>
-      <li>Uppleva storleken på sällskapsrummen</li>
-      <li>Få en känsla för flödet mellan inne och ute</li>
-      <li>Planera var ni vill placera bord, dekorationer och aktiviteter</li>
-    </ul>
+<section class="dv-steps" aria-labelledby="dv-steps-title">
+  <div class="dv-steps-inner">
+    <span class="dv-eyebrow">Så fungerar det</span>
+    <h2 id="dv-steps-title">Tre steg till en digital rundtur</h2>
+    <ol class="dv-step-grid">
+      <li class="dv-step">
+        <span class="dv-step-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.3"></circle>
+            <path d="M10 8.5v7l6-3.5z" fill="currentColor"></path>
+          </svg>
+        </span>
+        <span class="dv-step-number">01</span>
+        <h3>Starta visningen</h3>
+        <p>Ett klick öppnar den interaktiva turen i en ny flik.</p>
+      </li>
+      <li class="dv-step">
+        <span class="dv-step-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.3"></circle>
+            <path d="M15.6 8.4l-2.1 5.1-5.1 2.1 2.1-5.1z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"></path>
+          </svg>
+        </span>
+        <span class="dv-step-number">02</span>
+        <h3>Navigera fritt mellan miljöerna</h3>
+        <p>Rör dig mellan rum, våningar och omgivningar i din egen takt.</p>
+      </li>
+      <li class="dv-step">
+        <span class="dv-step-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path d="M12 4.5l1.6 4.4 4.4 1.6-4.4 1.6-1.6 4.4-1.6-4.4L6 10.5l4.4-1.6z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"></path>
+            <path d="M17.6 15.4l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"></path>
+          </svg>
+        </span>
+        <span class="dv-step-number">03</span>
+        <h3>Upptäck Skadevi Herrgård</h3>
+        <p>Se hur miljöerna hänger samman och föreställ dig din vistelse.</p>
+      </li>
+    </ol>
+  </div>
+</section>
 
-    <p style="margin-top: var(--space-xl);"><a href="/kontakt" class="btn btn-secondary">Boka en fysisk visning</a></p>
+<section class="dv-booking" aria-labelledby="dv-booking-title">
+  <div class="dv-booking-inner">
+    <span class="dv-booking-kicker">Nästa steg</span>
+    <h2 id="dv-booking-title">Vill du uppleva Skadevi på riktigt?</h2>
+    <p>Från digital upptäcktsfärd till en vistelse att minnas. Välj dina datum och planera ditt besök hos oss.</p>
+    <a class="dv-booking-btn" href="/boka">Se lediga datum &amp; boka <span aria-hidden="true">&#8594;</span></a>
   </div>
 </section>
 
 </main>
 
 <footer class="footer" role="contentinfo">
-  <div class="container">
-    <div class="footer-grid">
-      <div><h3>Skadevi Gård</h3><p>Privat herrgård för uthyrning.</p></div>
-      <div><h3>Sidor</h3><div class="footer-links"><a href="/foretag">Företag</a><a href="/brollop">Bröllop</a><a href="/semester">Semester</a><a href="/fest">Fest</a><a href="/boende">Boende</a></div></div>
-      <div><h3>Info</h3><div class="footer-links"><a href="/priser">Priser</a><a href="/om-oss">Om oss</a><a href="/vanliga-fragor">Vanliga frågor</a><a href="/kontakt">Kontakt</a></div></div>
-      <div><h3>Kontakt</h3><address><p>Skoklostervägen 16<br>746 94 Häggeby</p><p><a href="tel:+46702730422">+46 70 273 04 22</a></p><p><a href="mailto:skadevigard@gmail.com">skadevigard@gmail.com</a></p></address></div>
+  <div class="footer-grid">
+    <div class="footer-col footer-col-contact">
+      <h3>Kontakta oss</h3>
+      <p><a href="tel:+46702730422">+46 70 273 04 22</a></p>
+      <p><a href="mailto:skadevigard@gmail.com">skadevigard@gmail.com</a></p>
+      <p>Skoklostervägen 16<br>746 94 Häggeby</p>
+      <p><a href="https://maps.google.com/?q=Skoklosterv%C3%A4gen+16+746+94+H%C3%A4ggeby" target="_blank" rel="noopener" class="maps-link">Visa på karta</a></p>
     </div>
-    <div class="footer-bottom"><p>&copy; <span data-year>2025</span> Skadevi Gård</p></div>
+    <div class="footer-col footer-col-image">
+      <img width="750" height="500" src="/images/gallery/huset-logga.webp" alt="Skadevi Gård" loading="lazy">
+    </div>
+    <div class="footer-col footer-col-social">
+      <h3>Följ oss</h3>
+      <div class="social-links">
+        <a href="https://www.instagram.com/skadevigard/" target="_blank" rel="noopener"><img loading="lazy" width="750" height="500" src="/images/sociala-symboler.webp" alt="Följ oss på sociala medier" class="social-symbol-img"></a>
+      </div>
+    </div>
   </div>
+  <div class="footer-bottom"><p>&copy; <span data-year>2025</span> Skadevi Gård</p></div>
 </footer>
 
 <script type="module" src="/js/main.js"></script>

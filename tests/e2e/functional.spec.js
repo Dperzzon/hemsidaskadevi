@@ -17,7 +17,7 @@ const PAGES = [
   { path: '/om-oss', title: 'Om oss — Historia & ägare | Skadevi Gård' },
   { path: '/vanliga-fragor', title: 'Vanliga frågor — FAQ | Skadevi Gård' },
   { path: '/kontakt', title: 'Bilder — Skadevi Gård' },
-  { path: '/digital-visning', title: 'Digital visning — 3D-tur av Skadevi Gård | Skadevi Gård' },
+  { path: '/digital-visning', title: 'Digital visning — Upptäck Skadevi Herrgård i 3D | Skadevi Gård' },
   { path: '/boka', title: 'Boka — Skadevi Gård' }
 ];
 
