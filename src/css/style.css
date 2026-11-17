@@ -2545,3 +2545,429 @@ body.digital-visning-page {
   .dv-hero-scroll span,
   .dv-booking-btn span { transition: none; }
 }
+
+/* ==========================================================================
+   Priser (/priser)
+   Exklusiv prissida: bildhero med mörk overlay, champagnevita rubriker,
+   tunna gulddetaljer och tre sammanhängande premiumkort.
+   ========================================================================== */
+
+/* Gemensam frigång under den fasta headern. Headerns höjd varierar mellan
+   brytpunkterna (logotypen är 180 px på desktop och 90 px på mobil), så
+   frigången definieras här och återanvänds av både prissidans hero och de
+   äldre .page-hero-sidorna (priser, mat-dryck, om-oss). */
+:root { --header-clearance: 286px; }
+@media (max-width: 1300px) { :root { --header-clearance: 246px; } }
+@media (max-width: 1100px) { :root { --header-clearance: 166px; } }
+@media (max-width: 768px) { :root { --header-clearance: 146px; } }
+@media (max-width: 480px) { :root { --header-clearance: 138px; } }
+
+/* Rotorsak till överlappningen: .header är position: fixed och .page-hero
+   reserverade bara 60–80 px, medan logotypen sträcker sig 252 px ned.
+   Rubriken hamnade därför under logotypen. Här reserveras headerns höjd. */
+.page-hero { padding-top: var(--header-clearance); }
+
+body.priser-page {
+  background: #fbf8f1;
+  color: #2d2a25;
+  overflow-x: clip;
+}
+.priser-page main { display: block; }
+.priser-page .header-link,
+.priser-page .mobile-toggle { color: #f7f1e5; text-shadow: 0 1px 8px rgba(0, 0, 0, 0.55); }
+.priser-page .header.scrolled .header-link,
+.priser-page .header.scrolled .mobile-toggle { color: #2d2a25; text-shadow: none; }
+.priser-page .header.scrolled { background: rgba(250, 246, 238, 0.98); }
+
+.priser-hero {
+  position: relative;
+  min-height: clamp(430px, 56vh, 560px);
+  display: flex;
+  align-items: flex-end;
+  padding: calc(var(--header-clearance) + 16px) 24px 64px;
+  overflow: hidden;
+  background: #1f1d1a;
+  color: #fff;
+}
+.priser-hero-bg,
+.priser-hero-bg::after { position: absolute; inset: 0; }
+.priser-hero-bg::after {
+  content: '';
+  background:
+    linear-gradient(180deg, rgba(18, 17, 15, 0.82) 0%, rgba(18, 17, 15, 0.36) 42%, rgba(18, 17, 15, 0.86) 100%),
+    linear-gradient(90deg, rgba(18, 17, 15, 0.52), transparent 62%, rgba(18, 17, 15, 0.2));
+}
+.priser-hero-bg img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 56%;
+  filter: saturate(0.68) contrast(1.03) brightness(0.86);
+}
+.priser-hero-inner {
+  position: relative;
+  z-index: 1;
+  width: min(1120px, 100%);
+  margin: 0 auto;
+  animation: priser-rise 0.9s cubic-bezier(0.22, 0.7, 0.3, 1) both;
+}
+.priser-kicker {
+  display: inline-block;
+  color: #d8bc84;
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.3em;
+  line-height: 1.5;
+  text-transform: uppercase;
+}
+.priser-hero h1 {
+  margin: 18px 0 0;
+  color: #fffdf8;
+  font-family: var(--font-heading);
+  font-size: clamp(2.6rem, 5.6vw, 4.6rem);
+  font-weight: 400;
+  line-height: 1.08;
+  letter-spacing: -0.025em;
+  text-shadow: 0 3px 24px rgba(0, 0, 0, 0.32);
+}
+.priser-hero-rule {
+  display: block;
+  width: 84px;
+  height: 1px;
+  margin: 26px 0 22px;
+  background: linear-gradient(90deg, #d6b980, rgba(214, 185, 128, 0.15));
+}
+.priser-hero-sub {
+  margin: 0;
+  color: #f0dfba;
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  line-height: 1.7;
+  text-transform: uppercase;
+}
+
+.priser-section {
+  padding: clamp(64px, 8vw, 104px) 24px clamp(72px, 9vw, 112px);
+  background: #fbf8f1;
+}
+.priser-section--alt {
+  background: #f5eee2;
+  border-top: 1px solid rgba(181, 148, 91, 0.22);
+  border-bottom: 1px solid rgba(181, 148, 91, 0.22);
+}
+.priser-section--plain { background: #fffdf8; }
+.priser-wrap { max-width: 1180px; margin: 0 auto; }
+.priser-wrap--narrow { max-width: 1000px; }
+
+.priser-heading {
+  max-width: 720px;
+  margin: 0 auto clamp(42px, 5vw, 64px);
+  text-align: center;
+}
+.priser-eyebrow {
+  display: block;
+  margin-bottom: 16px;
+  color: #8a6d3e;
+  font-family: var(--font-body);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.28em;
+  line-height: 1.5;
+  text-transform: uppercase;
+}
+.priser-heading h2 {
+  margin: 0 0 18px;
+  color: #26231f;
+  font-size: clamp(2rem, 4vw, 3rem);
+  line-height: 1.15;
+}
+.priser-heading p {
+  max-width: 560px;
+  margin: 0 auto;
+  color: #555149;
+  font-size: 15px;
+  line-height: 1.85;
+}
+
+.priser-subtitle {
+  margin: 0 0 clamp(30px, 4vw, 44px);
+  color: #26231f;
+  font-family: var(--font-heading);
+  font-size: clamp(1.7rem, 3vw, 2.4rem);
+  font-weight: 400;
+  line-height: 1.2;
+  text-align: center;
+}
+.priser-subtitle--spaced { margin-top: clamp(56px, 7vw, 84px); }
+
+.priser-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+  align-items: stretch;
+}
+.priser-grid--2 { grid-template-columns: repeat(2, 1fr); }
+.priser-grid--wedding {
+  grid-template-columns: repeat(2, 1fr);
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+.priser-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 38px 32px 34px;
+  background: linear-gradient(180deg, #fffdf8 0%, #faf6ee 100%);
+  border: 1px solid rgba(181, 148, 91, 0.45);
+  box-shadow: 0 20px 44px rgba(48, 40, 28, 0.08);
+  text-align: center;
+}
+.priser-card::before {
+  content: '';
+  position: absolute;
+  inset: 8px;
+  border: 1px solid rgba(181, 148, 91, 0.16);
+  pointer-events: none;
+}
+.priser-card--featured {
+  border-color: #b5945b;
+  box-shadow: 0 26px 56px rgba(48, 40, 28, 0.13);
+}
+.priser-card--featured::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, #c9a96e, transparent);
+}
+.priser-card--info { text-align: left; }
+.priser-card--wedding { justify-content: flex-start; }
+
+.priser-card-title {
+  margin: 0;
+  color: #26231f;
+  font-family: var(--font-subheading);
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+.priser-card-desc {
+  min-height: 3.1em;
+  margin: 12px 0 0;
+  color: #6a655c;
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+.priser-price {
+  margin: 22px 0 0;
+  padding-bottom: 22px;
+  border-bottom: 1px solid rgba(181, 148, 91, 0.32);
+  color: #26231f;
+  font-family: var(--font-heading);
+  font-size: clamp(2rem, 2.6vw, 2.5rem);
+  line-height: 1.1;
+}
+.priser-price small {
+  display: block;
+  margin-top: 8px;
+  color: #8a6d3e;
+  font-family: var(--font-body);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+.priser-price--sum {
+  margin-bottom: 6px;
+  font-size: clamp(1.25rem, 1.8vw, 1.6rem);
+  border-bottom: none;
+  padding-bottom: 0;
+}
+.priser-card-meta {
+  margin: 4px 0 0;
+  color: #8a6d3e;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.priser-list {
+  flex: 1;
+  margin: 24px 0 30px;
+  text-align: left;
+}
+.priser-list--plain { flex: none; margin-bottom: 0; }
+.priser-list li {
+  position: relative;
+  padding: 8px 0 8px 24px;
+  border-bottom: 1px solid rgba(181, 148, 91, 0.16);
+  color: #4c4841;
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+.priser-list li:last-child { border-bottom: none; }
+.priser-list li::before {
+  content: '✦';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  color: #b5945b;
+  font-size: 10px;
+  line-height: 1.9;
+}
+
+.priser-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  min-width: 168px;
+  min-height: 52px;
+  margin-top: auto;
+  padding: 15px 34px;
+  border: 1px solid #b5945b;
+  border-radius: 0;
+  background: #c9a96e;
+  color: #24211d !important;
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  line-height: 1.3;
+  text-transform: uppercase;
+  transition: background 0.25s ease, border-color 0.25s ease, transform 0.25s ease;
+}
+.priser-btn:hover {
+  background: #b5945b;
+  border-color: #a5824b;
+  color: #24211d !important;
+  transform: translateY(-1px);
+}
+.priser-btn:focus-visible {
+  outline: 2px solid #8a6d3e;
+  outline-offset: 3px;
+}
+
+.priser-note {
+  max-width: 720px;
+  margin: 28px auto 0;
+  color: #555149;
+  font-size: 14px;
+  line-height: 1.8;
+  text-align: center;
+}
+.priser-actions { margin: 30px 0 0; text-align: center; }
+
+.priser-page .price-details-block { max-width: 780px; }
+.priser-page .price-link { margin-bottom: 18px; color: #8a6d3e; }
+.priser-page .price-table {
+  border-top: 1px solid #b5945b;
+  border-bottom: 1px solid #b5945b;
+  background: #fffdf8;
+}
+.priser-page .price-table th {
+  padding: 14px 18px;
+  border-bottom: 1px solid rgba(181, 148, 91, 0.45);
+  color: #26231f;
+  font-family: var(--font-heading);
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+}
+.priser-page .price-table td {
+  padding: 12px 18px;
+  border-bottom: 1px solid rgba(181, 148, 91, 0.18);
+  color: #555149;
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+.priser-page .price-table td:last-child {
+  color: #26231f;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.priser-page .price-table tr:last-child td { border-bottom: none; }
+.priser-page .price-package-block {
+  margin-top: 26px;
+  padding: 26px 30px;
+  border: 1px solid rgba(181, 148, 91, 0.4);
+  border-left: 3px solid #c9a96e;
+  background: #fffdf8;
+}
+.priser-page .price-package-block p { color: #555149; font-size: 14px; line-height: 1.85; }
+.priser-page .price-package-block strong {
+  color: #876847;
+  font-family: var(--font-heading);
+  font-size: 1.2rem;
+  font-weight: 400;
+}
+
+@keyframes priser-rise {
+  from { opacity: 0; transform: translateY(18px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 1024px) {
+  .priser-hero { padding-left: 20px; padding-right: 20px; }
+  .priser-card { padding: 32px 24px 30px; }
+  .priser-list li { font-size: 13px; }
+}
+
+@media (max-width: 900px) {
+  .priser-grid,
+  .priser-grid--2,
+  .priser-grid--wedding {
+    grid-template-columns: 1fr;
+    max-width: 520px;
+    margin: 0 auto;
+  }
+  .priser-grid { gap: 20px; }
+}
+
+@media (max-width: 768px) {
+  .priser-hero {
+    min-height: 420px;
+    padding: calc(var(--header-clearance) + 12px) 16px 52px;
+  }
+  .priser-hero-bg::after {
+    background:
+      linear-gradient(180deg, rgba(18, 17, 15, 0.78) 0%, rgba(18, 17, 15, 0.34) 38%, rgba(18, 17, 15, 0.9) 100%),
+      linear-gradient(90deg, rgba(18, 17, 15, 0.4), transparent 80%);
+  }
+  .priser-hero h1 { font-size: clamp(2.3rem, 10vw, 3.2rem); }
+  .priser-hero-sub { font-size: 10px; letter-spacing: 0.16em; }
+  .priser-section { padding-left: 16px; padding-right: 16px; }
+  .priser-heading p { font-size: 14px; }
+  .priser-page .price-table th,
+  .priser-page .price-table td { padding: 10px 10px; font-size: 13px; }
+  .priser-page .price-table td:last-child { white-space: normal; text-align: right; }
+  .priser-page .price-package-block { padding: 22px 20px; }
+}
+
+@media (max-width: 480px) {
+  .priser-hero { min-height: 400px; padding: calc(var(--header-clearance) + 10px) 14px 46px; }
+  .priser-hero-rule { margin: 22px 0 18px; }
+  .priser-card { padding: 30px 20px 28px; }
+  .priser-btn { width: 100%; max-width: 300px; }
+  .priser-page .price-table th,
+  .priser-page .price-table td { padding: 9px 8px; font-size: 12.5px; }
+  .priser-page .price-table th:last-child,
+  .priser-page .price-table td:last-child { text-align: right; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .priser-hero-inner { animation: none; }
+  .priser-btn { transition: none; }
+}
+

@@ -17,9 +17,10 @@
   <link rel="stylesheet" href="/css/style.css">
   <link rel="preload" as="font" type="font/woff2" href="/fonts/v20-UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7.woff2" crossorigin>
   <link rel="preload" as="font" type="font/woff2" href="/fonts/v24-kmKUZrc3Hgbbcjq75U4uslyuy4kn0olVQ-LglH6T17uj8Q4iDgNP.woff2" crossorigin>
+  <link rel="preload" as="image" href="/images/hero-startsida.webp">
   <link rel="stylesheet" href="/css/fonts.css">
 </head>
-<body>
+<body class="priser-page">
 
 <header class="header" role="banner">
   <div class="header-side">
@@ -52,87 +53,91 @@
 
 <main>
 
-<section class="page-hero" style="min-height: 30vh;">
-  <div class="page-hero-bg" style="background: var(--color-primary-dark);"></div>
-  <div class="page-hero-content">
-    <h1>Priser</h1>
-    <p>Hela herrgården. Helt er. Helt prisvärt.</p>
+<section class="priser-hero" aria-labelledby="priser-title">
+  <div class="priser-hero-bg" aria-hidden="true">
+    <img width="1600" height="900" src="/images/hero-startsida.webp" srcset="/images/hero-startsida-800.webp 800w, /images/hero-startsida.webp 1600w" sizes="100vw" alt="" fetchpriority="high">
+  </div>
+  <div class="priser-hero-inner">
+    <span class="priser-kicker">Skadevi Herrgård</span>
+    <h1 id="priser-title">Våra priser</h1>
+    <span class="priser-hero-rule" aria-hidden="true"></span>
+    <p class="priser-hero-sub">Hela herrgården. Helt er. Helt prisvärt.</p>
   </div>
 </section>
 
-<section class="section fade-in">
-  <div class="container">
-    <div class="section-header">
-      <span class="subtitle">Välj ert paket</span>
-      <h2>Priser per natt för hela gården</h2>
-      <p class="lead">Alla priser gäller exklusiv uthyrning av hela Skadevi Gård. Ni är de enda gästerna.</p>
-    </div>
-    <div class="pricing-grid">
-      <div class="pricing-card">
-        <h4>Semester</h4>
-        <p>Samla familj, släkt och vänner för att spendera tid tillsammans.</p>
-        <div class="price">9 000 kr<small>/natt</small></div>
-        <ul>
+<section class="priser-section" aria-labelledby="paket-title">
+  <div class="priser-wrap">
+    <header class="priser-heading">
+      <span class="priser-eyebrow">Välj ert paket</span>
+      <h2 id="paket-title">Priser per natt för hela gården</h2>
+      <p>Alla priser gäller exklusiv uthyrning av hela Skadevi Gård. Ni är de enda gästerna.</p>
+    </header>
+    <div class="priser-grid">
+      <article class="priser-card">
+        <h3 class="priser-card-title">Semester</h3>
+        <p class="priser-card-desc">Samla familj, släkt och vänner för att spendera tid tillsammans.</p>
+        <div class="priser-price">9 000 kr<small>/natt</small></div>
+        <ul class="priser-list">
           <li>Hela gården exklusivt</li>
           <li>23 bäddar (7 sovrum)</li>
           <li>Fullt utrustat kök</li>
           <li>Tennisbana</li>
           <li>Badtunna</li>
           <li>Lekplats</li>
-          <li>Biljard & sällskapsspel</li>
+          <li>Biljard &amp; sällskapsspel</li>
         </ul>
-        <a href="/boka" class="btn btn-primary">Boka</a>
-      </div>
-      <div class="pricing-card featured">
-        <h4>Företag</h4>
-        <p>Kick-off, ledningsgruppsdagar eller teamträff.</p>
-        <div class="price">12 000 kr<small>/natt</small></div>
-        <ul>
+        <a href="/boka" class="priser-btn">BOKA</a>
+      </article>
+      <article class="priser-card priser-card--featured">
+        <h3 class="priser-card-title">Företag</h3>
+        <p class="priser-card-desc">Kick-off, ledningsgruppsdagar eller teamträff.</p>
+        <div class="priser-price">12 000 kr<small>/natt</small></div>
+        <ul class="priser-list">
           <li>Allt i Semester-paketet</li>
-          <li>Projektor & bioduk</li>
+          <li>Projektor &amp; bioduk</li>
           <li>Whiteboard</li>
           <li>Jabra-puck</li>
           <li>JBL Partybox-högtalare</li>
           <li>Femkamp i trädgården</li>
           <li>Skrivbordsytor</li>
         </ul>
-        <a href="/boka" class="btn btn-primary">Boka</a>
-      </div>
-      <div class="pricing-card">
-        <h4>Event</h4>
-        <p>Bröllop, möhippa, svensexa, dop eller jubileum.</p>
-        <div class="price">15 000 kr<small>/natt</small></div>
-        <ul>
+        <a href="/boka" class="priser-btn">BOKA</a>
+      </article>
+      <article class="priser-card">
+        <h3 class="priser-card-title">Event</h3>
+        <p class="priser-card-desc">Bröllop, möhippa, svensexa, dop eller jubileum.</p>
+        <div class="priser-price">15 000 kr<small>/natt</small></div>
+        <ul class="priser-list">
           <li>Allt i Företag-paketet</li>
-          <li>Dekoration & dukning</li>
+          <li>Dekoration &amp; dukning</li>
           <li>Bröllopsbåge</li>
-          <li>Ljud & ljus</li>
+          <li>Ljud &amp; ljus</li>
           <li>Långbord för 60 gäster</li>
           <li>Bröllopssvit</li>
           <li>Bokningsavgift: 5 000 kr</li>
         </ul>
-        <a href="/boka" class="btn btn-primary">Boka</a>
-      </div>
+        <a href="/boka" class="priser-btn">BOKA</a>
+      </article>
     </div>
   </div>
 </section>
 
-<section class="section section-alt fade-in">
-  <div class="container-narrow">
-    <h2 style="text-align:center; margin-bottom: var(--space-lg);">Tillval</h2>
-    <div class="pricing-grid pricing-grid-2">
-      <div class="pricing-card" style="text-align:left;">
-        <h4>Komfort</h4>
-        <ul>
-          <li>Lakan & handdukar — kontakta oss för pris</li>
+<section class="priser-section priser-section--alt" aria-labelledby="tillval-title">
+  <div class="priser-wrap priser-wrap--narrow">
+    <h2 id="tillval-title" class="priser-subtitle">Tillval</h2>
+    <div class="priser-grid priser-grid--2">
+      <article class="priser-card priser-card--info">
+        <h3 class="priser-card-title">Komfort</h3>
+        <ul class="priser-list priser-list--plain">
+          <li>Lakan &amp; handdukar — kontakta oss för pris</li>
           <li>Städning — kontakta oss för pris</li>
           <li>Ved (för badtunna) — 350 kr/vistelse</li>
           <li>Flexibel in-/utcheckning — kontakta oss</li>
         </ul>
-      </div>
-      <div class="pricing-card" style="text-align:left;">
-        <h4>Upplevelser</h4>
-        <ul>
+      </article>
+      <article class="priser-card priser-card--info">
+        <h3 class="priser-card-title">Upplevelser</h3>
+        <ul class="priser-list priser-list--plain">
           <li>Catering från Sjökrogen — 10% gästrabatt</li>
           <li>Sångare / musiker</li>
           <li>Fotograf</li>
@@ -140,32 +145,32 @@
           <li>Lerduveskytte</li>
           <li>Slottsvandring</li>
         </ul>
-      </div>
+      </article>
     </div>
 
-    <h3 style="margin-top: var(--space-3xl); text-align:center;">Bröllopskoncept — färdiga paket</h3>
-    <div class="pricing-grid" style="margin-top: var(--space-xl);">
-      <div class="pricing-card">
-        <h4>Litet bröllop</h4>
-        <p>Upp till 40 gäster inomhus</p>
-        <div class="price" style="font-size: var(--text-2xl);">130 000 – 150 000 kr</div>
-        <p>1–3 nätter</p>
-      </div>
-      <div class="pricing-card featured">
-        <h4>Stort bröllop</h4>
-        <p>Upp till 60 gäster utomhus</p>
-        <div class="price" style="font-size: var(--text-2xl);">150 000 – 180 000 kr</div>
-        <p>1–3 nätter</p>
-      </div>
+    <h3 class="priser-subtitle priser-subtitle--spaced">Bröllopskoncept — färdiga paket</h3>
+    <div class="priser-grid priser-grid--wedding">
+      <article class="priser-card priser-card--wedding">
+        <h3 class="priser-card-title">Litet bröllop</h3>
+        <p class="priser-card-desc">Upp till 40 gäster inomhus</p>
+        <div class="priser-price priser-price--sum">130 000 – 150 000 kr</div>
+        <p class="priser-card-meta">1–3 nätter</p>
+      </article>
+      <article class="priser-card priser-card--wedding priser-card--featured">
+        <h3 class="priser-card-title">Stort bröllop</h3>
+        <p class="priser-card-desc">Upp till 60 gäster utomhus</p>
+        <div class="priser-price priser-price--sum">150 000 – 180 000 kr</div>
+        <p class="priser-card-meta">1–3 nätter</p>
+      </article>
     </div>
-    <p style="text-align:center; margin-top: var(--space-lg);"><em>I koncepten ingår dekoration, blomsterarrangemang, ljud & ljus, fotograf, buffé med dryck, tårta, kaffe, vickning, serveringspersonal och barnvakt.</em></p>
-    <p style="text-align:center; margin-top: var(--space-xl);"><a href="/boka" class="btn btn-primary">Offertförfrågan</a></p>
+    <p class="priser-note"><em>I koncepten ingår dekoration, blomsterarrangemang, ljud &amp; ljus, fotograf, buffé med dryck, tårta, kaffe, vickning, serveringspersonal och barnvakt.</em></p>
+    <p class="priser-actions"><a href="/boka" class="priser-btn">Offertförfrågan</a></p>
   </div>
 </section>
 
-<section class="section section-alt">
-  <div class="container-narrow">
-    <h2 style="text-align:center; margin-bottom: var(--space-lg);">Tilläggskostnader</h2>
+<section class="priser-section priser-section--plain" aria-labelledby="tillagg-title">
+  <div class="priser-wrap priser-wrap--narrow">
+    <h2 id="tillagg-title" class="priser-subtitle">Tilläggskostnader</h2>
     <div class="price-details-block">
       <a href="#value-title" class="price-link">Länk: Det här ingår</a>
       <table class="price-table">
@@ -188,7 +193,7 @@
       </table>
     </div>
 
-    <h3 style="margin-top: var(--space-3xl); text-align:center;">Bröllopspaket</h3>
+    <h3 class="priser-subtitle priser-subtitle--spaced">Bröllopspaket</h3>
     <div class="price-package-block">
       <p><strong>150 000 kr</strong> - Boende för 40 gäster 2 nätter helg, alkoholfri välkomstdrink, buffe, vickning, tårta, dekoration enligt något av våra 4 teman, blombukett till brud och brudtärnor, dukning, 1 barnvakt, en serveringspersonal, städ, lakanspaket, frukostbuffe, godisbuffé.</p>
     </div>
