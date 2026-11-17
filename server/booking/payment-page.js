@@ -19,6 +19,7 @@ const {
   normalizeInvoiceRequests
 } = require('./invoice-requests');
 const { MAIL } = require('./mail');
+const { renderFooter } = require('../../shared/footer.js');
 
 const PAGE_HEADERS = {
   'Content-Type': 'text/html; charset=utf-8',
@@ -111,11 +112,7 @@ function layout(title, content) {
 <main>
   <div class="payment-page">${content}</div>
 </main>
-<footer class="footer" role="contentinfo">
-  <div class="container">
-    <div class="footer-bottom"><p>&copy; ${new Date().getFullYear()} Skadevi Gård</p></div>
-  </div>
-</footer>
+${renderFooter()}
 </body>
 </html>`;
 }

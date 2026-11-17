@@ -25,6 +25,7 @@
     "test:visual": "playwright test --grep @visual",
     "lint": "eslint .",
     "sync:header": "node scripts/sync-header.mjs",
+    "sync:footer": "node scripts/sync-footer.mjs",
     "optimize-images": "node scripts/optimize-images.mjs",
     "fetch-fonts": "node scripts/fetch-fonts.mjs"
   },
