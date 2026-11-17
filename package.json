@@ -24,6 +24,7 @@
     "test:e2e": "playwright test --grep-invert @visual",
     "test:visual": "playwright test --grep @visual",
     "lint": "eslint .",
+    "sync:header": "node scripts/sync-header.mjs",
     "optimize-images": "node scripts/optimize-images.mjs",
     "fetch-fonts": "node scripts/fetch-fonts.mjs"
   },

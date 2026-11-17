@@ -82,7 +82,7 @@ const HEADER = `<header class="header" role="banner">
     <a href="/digital-visning" class="header-link">Digital visning</a>
     <a href="/boende" class="header-link">Boendet</a>
     <a href="/aktiviteter" class="header-link">Aktiviteter</a>
-    <a href="/boka" class="header-link">Bilder</a>
+    <a href="/boka" class="header-link">Boka</a>
   </div>
   <nav class="header-nav" role="navigation" aria-label="Meny">
     <a href="/foretag">Företag</a>
@@ -92,7 +92,6 @@ const HEADER = `<header class="header" role="banner">
     <a href="/digital-visning">Digital visning</a>
     <a href="/boende">Boendet</a>
     <a href="/aktiviteter">Aktiviteter</a>
-    <a href="/boka">Bilder</a>
     <a href="/boka">Boka</a>
     <a href="/vanliga-fragor">Vanliga frågor</a>
   </nav>

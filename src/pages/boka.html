@@ -22,13 +22,32 @@
 <body>
 
 <header class="header" role="banner">
-  <div class="header-inner">
-    <a href="/" class="header-logo" aria-label="Skadevi Gård — Hem">Skadevi Gård</a>
-    <button class="mobile-toggle" aria-label="Öppna meny" aria-expanded="false">&#9776;</button>
-    <nav class="header-nav" role="navigation" aria-label="Huvudmeny">
-      <a href="/">Hem</a><a href="/foretag">Företag</a><a href="/brollop">Bröllop</a><a href="/semester">Semester</a><a href="/fest">Fest</a><a href="/boende">Boende</a><a href="/aktiviteter">Aktiviteter</a><a href="/priser">Priser</a><a href="/boka">Bilder</a><a href="/boka" class="header-cta active">Boka</a>
-    </nav>
+  <div class="header-side">
+    <button class="mobile-toggle" aria-label="Meny" aria-expanded="false">&#9776;</button>
+    <a href="/foretag" class="header-link">Företag</a>
+    <a href="/fest" class="header-link">Fest</a>
+    <a href="/brollop" class="header-link">Bröllop</a>
+    <a href="/semester" class="header-link">Semester</a>
   </div>
+  <a href="/" class="header-logo"><img width="512" height="512" src="/images/logo.png" alt="Skadevi Gård"></a>
+  <div class="header-side">
+    <a href="/digital-visning" class="header-link">Digital visning</a>
+    <a href="/boende" class="header-link">Boendet</a>
+    <a href="/aktiviteter" class="header-link">Aktiviteter</a>
+    <a href="/boka" class="header-link active" aria-current="page">Boka</a>
+  </div>
+  <nav class="header-nav" role="navigation" aria-label="Meny">
+    <a href="/foretag">Företag</a>
+    <a href="/fest">Fest</a>
+    <a href="/brollop">Bröllop</a>
+    <a href="/semester">Semester</a>
+    <a href="/digital-visning">Digital visning</a>
+    <a href="/boende">Boendet</a>
+    <a href="/aktiviteter">Aktiviteter</a>
+    <a href="/priser">Priser</a>
+    <a href="/boka" class="active" aria-current="page">Boka</a>
+    <a href="/vanliga-fragor">Vanliga frågor</a>
+  </nav>
 </header>
 
 <main>
