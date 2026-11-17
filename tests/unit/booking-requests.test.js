@@ -437,3 +437,28 @@ test('misslyckad utkorgssparning stoppar inte registreringen', async () => {
   assert.equal(result.status, 201, 'förfrågan ska vara registrerad även om utkorgen misslyckas');
   assert.equal([...stored.values()].filter((item) => item.status === 'Inväntar godkännande').length, 1);
 });
+
+test('extrahus: validerar nätter, gäster och kombinerat antal lakan', () => {
+  const withAddons = (addons, guests = 4) => validatePayload(validBody({
+    guests,
+    addons: { ...validBody().addons, ...addons }
+  }));
+  const ok = withAddons({ extrahus: true, extrahusNights: 2, extrahusGuests: 3, linenCount: 7 });
+  assert.equal(ok.errors, undefined);
+  assert.equal(ok.record.extrahus.nights, 2);
+  assert.deepEqual(ok.record.extrahus.nightKeys, ['2026-11-20', '2026-11-21']);
+  assert.equal(ok.record.extrahus.departure, '2026-11-22');
+  assert.equal(ok.record.totalGuests, 7);
+  assert.equal(ok.record.totalAddons, 2500 + 3200 + 1400);
+
+  assert.ok(withAddons({ extrahus: true, extrahusNights: 4, extrahusGuests: 3 }).errors.extrahusNights);
+  assert.ok(withAddons({ extrahus: true, extrahusNights: 0, extrahusGuests: 3 }).errors.extrahusNights);
+  assert.ok(withAddons({ extrahus: true, extrahusNights: 2, extrahusGuests: 7 }).errors.extrahusGuests);
+  assert.ok(withAddons({ extrahus: true, extrahusNights: 2, extrahusGuests: 3, linenCount: 8 }).errors.linenCount);
+
+  const combined = withAddons({ extrahus: true, extrahusNights: 2, extrahusGuests: 6, linenCount: 28 }, 24);
+  assert.equal(combined.errors, undefined);
+  assert.equal(combined.record.totalGuests, 30);
+  assert.equal(combined.record.addonLines.find((line) => line.id === 'lakan').amount, 5600);
+  assert.ok(withAddons({ extrahus: true, extrahusNights: 2, extrahusGuests: 6, linenCount: 29 }, 24).errors.linenCount);
+});

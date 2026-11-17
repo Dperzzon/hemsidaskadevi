@@ -55,8 +55,10 @@ function reservationRow(night, record, now) {
   };
 }
 
-// Skapar nattlåsningar atomiskt. Vid minsta konflikt rullas alla nätter som
-// detta försök hann skapa tillbaka — ingen delvis reservation lämnas kvar.
+// Skapar nattlåsningar atomiskt för huvudbyggnaden och, när extrahuset är
+// valt, även för extrahusets egna nätter i en separat partition. Vid minsta
+// konflikt rullas alla nätter som detta försök hann skapa tillbaka — ingen
+// delvis reservation lämnas kvar.
 async function reserveNights(store, record, now = new Date()) {
   if (!store || typeof store.createCalendarNight !== 'function') {
     throw new Error('Lagringen saknar atomisk nattlåsning');
@@ -67,26 +69,32 @@ async function reserveNights(store, record, now = new Date()) {
     invalid.status = 400;
     throw invalid;
   }
+  const extrahusNights = record.extrahus?.enabled === true && Array.isArray(record.extrahus.nightKeys)
+    ? record.extrahus.nightKeys
+    : [];
   const created = [];
-  for (const night of nights) {
+  const insert = async (night, resource) => {
     try {
-      await store.createCalendarNight(night, reservationRow(night, record, now));
-      created.push(night);
+      await store.createCalendarNight(night, reservationRow(night, record, now), { resource });
+      created.push({ night, resource });
     } catch (error) {
-      for (const inserted of created) {
-        await store.deleteCalendarNight(inserted, record.reference).catch(() => {});
+      for (const inserted of [...created].reverse()) {
+        await store.deleteCalendarNight(inserted.night, record.reference, { resource: inserted.resource }).catch(() => {});
       }
       if (error?.status === 409) {
         const conflict = new Error('Några av nätterna är redan reserverade');
         conflict.status = 409;
         conflict.code = 'RESERVATION_CONFLICT';
         conflict.conflicts = [night];
+        conflict.resource = resource;
         throw conflict;
       }
       throw error;
     }
-  }
-  return { nights, created };
+  };
+  for (const night of nights) await insert(night, 'main');
+  for (const night of extrahusNights) await insert(night, 'extrahus');
+  return { nights, extrahusNights, created };
 }
 
 // Frigör endast rader som tillhör den angivna referensen. Rader som redan
@@ -100,7 +108,7 @@ async function releaseReservation(store, reference, _now = new Date(), options =
     if (!night) continue;
     if (!options.force && row.type === BOOKING_TYPE) continue;
     try {
-      await store.deleteCalendarNight(night, reference);
+      await store.deleteCalendarNight(night, reference, { resource: row.resource });
       released.push(night);
     } catch (error) {
       if (options.strict) throw error;
@@ -109,9 +117,13 @@ async function releaseReservation(store, reference, _now = new Date(), options =
   return released;
 }
 
-// Verifierar att reservationen äger exakt de aktuella nätterna.
+// Verifierar att reservationen äger exakt de aktuella nätterna — både
+// huvudbyggnadens och extrahusets.
 async function verifyReservation(store, record) {
   const expected = nightKeys(record.arrival, record.departure);
+  const expectedExtrahus = record.extrahus?.enabled === true && Array.isArray(record.extrahus.nightKeys)
+    ? record.extrahus.nightKeys
+    : [];
   if (!expected.length) {
     return { ok: false, code: 'RESERVATION_INVALID', message: 'Bokningens datum är ogiltiga.' };
   }
@@ -122,14 +134,16 @@ async function verifyReservation(store, record) {
   const owned = new Set(
     rows
       .filter((row) => !row.type || row.type === RESERVATION_TYPE || row.type === BOOKING_TYPE)
-      .map((row) => row.night ?? row.RowKey)
-      .filter(Boolean)
+      .map((row) => `${row.resource === 'extrahus' ? 'extrahus' : 'main'}:${row.night ?? row.RowKey}`)
+      .filter((key) => !key.endsWith(':'))
   );
-  const missing = expected.filter((night) => !owned.has(night));
+  const missing = expected
+    .filter((night) => !owned.has(`main:${night}`))
+    .concat(expectedExtrahus.filter((night) => !owned.has(`extrahus:${night}`)));
   if (missing.length) {
     return { ok: false, code: 'RESERVATION_MISSING', message: 'Reservationen saknar giltig nattlåsning.', missing };
   }
-  return { ok: true, nights: expected, rows };
+  return { ok: true, nights: expected, extrahusNights: expectedExtrahus, rows };
 }
 
 // Omvandlar RESERVATION-raderna till BOOKING på plats. Ingen rad raderas, så
@@ -142,7 +156,8 @@ async function convertReservationToBooking(store, record, now = new Date()) {
   }
   for (const row of verification.rows) {
     const night = row.night ?? row.RowKey;
-    if (!verification.nights.includes(night)) continue;
+    const resource = row.resource === 'extrahus' ? 'extrahus' : 'main';
+    if (!verification.nights.includes(night) && !verification.extrahusNights.includes(night)) continue;
     if (row.type === BOOKING_TYPE) continue;
     await store.updateCalendarNight(night, {
       type: BOOKING_TYPE,
@@ -152,9 +167,9 @@ async function convertReservationToBooking(store, record, now = new Date()) {
       note: 'Direktbokning',
       createdBy: 'Stripe',
       createdAt: row.createdAt || now.toISOString()
-    }, { ifMatch: row.etag });
+    }, { ifMatch: row.etag, resource });
   }
-  return { ok: true, nights: verification.nights };
+  return { ok: true, nights: verification.nights, extrahusNights: verification.extrahusNights };
 }
 
 function reservationIsActive(record, now = new Date()) {

@@ -23,7 +23,7 @@ const crypto = require('node:crypto');
 const { handleAvailability } = require('../calendar/availability');
 const { loadRules } = require('./rules');
 const { createStore } = require('./store');
-const { quote, PRICE_VERSION, LINEN_MAX } = require('./pricing');
+const { quote, PRICE_VERSION, LINEN_MAX, EXTRAHUS_MAX_GUESTS } = require('./pricing');
 const { MAIL } = require('./mail');
 
 const MAX_GUESTS = 24;
@@ -117,8 +117,20 @@ function validatePayload(body, now = new Date()) {
   }
 
   const addons = body.addons && typeof body.addons === 'object' && !Array.isArray(body.addons) ? body.addons : {};
+  const mainNights = !errors.arrival && !errors.departure ? nightsBetween(arrival, departure) : 0;
+  const extrahus = addons.extrahus === true;
+  const extrahusNights = extrahus ? Number(addons.extrahusNights) : 0;
+  const extrahusGuests = extrahus ? Number(addons.extrahusGuests) : 0;
+  if (extrahus && (!Number.isInteger(extrahusNights) || extrahusNights < 1 || extrahusNights > mainNights)) {
+    errors.extrahusNights = `Ange antal nätter för extrahuset (1–${Math.max(1, mainNights)}).`;
+  }
+  if (extrahus && (!Number.isInteger(extrahusGuests) || extrahusGuests < 1 || extrahusGuests > EXTRAHUS_MAX_GUESTS)) {
+    errors.extrahusGuests = `Ange antal gäster i extrahuset (1–${EXTRAHUS_MAX_GUESTS}).`;
+  }
   const linenCount = addons.lakan ? Number(addons.linenCount) : 0;
-  const linenMax = Number.isInteger(guests) && guests > 0 ? Math.min(LINEN_MAX, guests) : LINEN_MAX;
+  const totalGuests = (Number.isInteger(guests) && guests > 0 ? guests : 0) +
+    (Number.isInteger(extrahusGuests) && extrahusGuests > 0 ? extrahusGuests : 0);
+  const linenMax = Math.min(LINEN_MAX, totalGuests);
   if (addons.lakan && (!Number.isInteger(linenCount) || linenCount < 0 || linenCount > linenMax)) {
     errors.linenCount = `Ange hur många personer som behöver lakan och handdukar (0–${linenMax}).`;
   }
@@ -136,6 +148,9 @@ function validatePayload(body, now = new Date()) {
     arrival, departure, guests,
     addons: {
       slutstad: addons.slutstad === true,
+      extrahus: extrahus,
+      extrahusNights,
+      extrahusGuests,
       lakan: addons.lakan === true,
       linenCount,
       ved: addons.ved === true,
@@ -158,12 +173,16 @@ function validatePayload(body, now = new Date()) {
       message,
       addons: {
         slutstad: addons.slutstad === true,
+        extrahus: extrahus,
+        extrahusNights,
+        extrahusGuests,
         lakan: addons.lakan === true,
         linenCount,
         ved: addons.ved === true,
         tidigIncheckning: addons.tidigIncheckning === true,
         senUtcheckning: addons.senUtcheckning === true
       },
+      extrahus: pricing.extrahus,
       // Serverberäknad offert — sparad i fullhet så att lagringsposten är
       // verifierbar (pris per natt, rabatt, tillval, total, regelversion).
       lodgingBase: pricing.lodgingBase,
@@ -177,6 +196,7 @@ function validatePayload(body, now = new Date()) {
       lodgingAfterDiscount: pricing.lodgingAfterDiscount,
       addonLines: pricing.addonLines,
       totalAddons: pricing.addonsTotal,
+      totalGuests: pricing.totalGuests,
       total: pricing.total,
       priceVersion: PRICE_VERSION,
       rulesVersion: typeof body.rulesVersion === 'string' ? body.rulesVersion.slice(0, 64) : '',
@@ -284,6 +304,7 @@ function buildNotifications(record) {
     `E-post: ${record.email}`,
     `Telefon: ${record.phone}`,
     record.company ? `Företag: ${record.company}` : null,
+    record.extrahus?.enabled ? `Extrahus: ${record.extrahus.nights} nätter (${record.extrahus.arrival}–${record.extrahus.departure}), ${record.extrahus.guests} gäster` : null,
     record.addons.lakan ? `Lakan/handdukar till: ${record.addons.linenCount} personer` : null,
     'Prisöversikt (serverberäknad):',
     ...priceLines,
@@ -302,6 +323,7 @@ function buildNotifications(record) {
     `E-post: ${escapeHtml(record.email)}`,
     `Telefon: ${escapeHtml(record.phone)}`,
     record.company ? `Företag: ${escapeHtml(record.company)}` : null,
+    record.extrahus?.enabled ? `Extrahus: ${record.extrahus.nights} nätter (${escapeHtml(record.extrahus.arrival)}–${escapeHtml(record.extrahus.departure)}), ${record.extrahus.guests} gäster` : null,
     record.addons.lakan ? `Lakan/handdukar till: ${record.addons.linenCount} personer` : null,
     'Prisöversikt (serverberäknad):',
     ...priceLines.map((row) => escapeHtml(row)),
@@ -473,6 +495,32 @@ async function handleBookingRequest(request, context, options = {}) {
       status: 409, headers: API_HEADERS,
       jsonBody: { error: 'Några av de valda nätterna är inte längre tillgängliga. Vänligen välj andra datum i kalendern.', blockedNights }
     };
+  }
+
+  // Extrahuset har en egen kalender. Nätter som redan är bekräftade eller
+  // reserverade där kan aldrig bokas igen, även om herrgården är ledig.
+  if (validated.record.addons.extrahus === true) {
+    let extrahusRows = [];
+    try {
+      extrahusRows = await store.listCalendarByResource(
+        'extrahus', validated.record.extrahus.arrival, validated.record.extrahus.departure
+      ) ?? [];
+    } catch {
+      return {
+        status: 503, headers: API_HEADERS,
+        jsonBody: { error: 'Extrahusets tillgänglighet kunde inte kontrolleras just nu. Försök igen om en stund — era datum har inte sparats.' }
+      };
+    }
+    if (extrahusRows.length) {
+      return {
+        status: 409, headers: API_HEADERS,
+        jsonBody: {
+          error: 'Extrahuset är redan bokat någon av de valda nätterna. Välj ett annat antal nätter eller kontakta oss.',
+          fields: { extrahusNights: 'Extrahuset är redan bokat någon av de valda nätterna.' },
+          extrahusNights: extrahusRows.map((row) => row.night)
+        }
+      };
+    }
   }
 
   // 7. Överlapp mot andra väntande förfrågningar: eftersom Airbnb-iCal inte

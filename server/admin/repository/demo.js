@@ -66,24 +66,32 @@ function createDemoRepository(options = {}) {
     return { record: clone(record), etag: etagFor(record) };
   }
 
-  function createCalendarNight(night, data) {
-    if (calendar.has(night)) {
+  function calendarKey(resource, night) {
+    return `${resource === 'extrahus' ? 'extrahus' : 'main'}:${night}`;
+  }
+
+  function createCalendarNight(night, data, { resource } = {}) {
+    const target = resource === 'extrahus' ? 'extrahus' : 'main';
+    const key = calendarKey(target, night);
+    if (calendar.has(key)) {
       const cause = new Error('Natten är redan blockerad');
       cause.status = 409;
       throw cause;
     }
-    calendar.set(night, { night, ...data });
+    calendar.set(key, { night, resource: target, ...data });
   }
 
-  function deleteCalendarNight(night, reference) {
-    const existing = calendar.get(night);
+  function deleteCalendarNight(night, reference, { resource } = {}) {
+    const target = resource === 'extrahus' ? 'extrahus' : 'main';
+    const key = calendarKey(target, night);
+    const existing = calendar.get(key);
     if (!existing) return;
     if (reference && existing.reference !== reference) {
       const cause = new Error('Natten tillhör en annan bokning');
       cause.status = 409;
       throw cause;
     }
-    calendar.delete(night);
+    calendar.delete(key);
   }
 
   return {
@@ -150,12 +158,18 @@ function createDemoRepository(options = {}) {
     },
     async listCalendar(from, to) {
       return [...calendar.values()]
-        .filter((row) => row.night >= from && row.night < to)
+        .filter((row) => (row.resource ?? 'main') === 'main' && row.night >= from && row.night < to)
         .sort((a, b) => a.night.localeCompare(b.night))
         .map(clone);
     },
     async listCalendarByReference(reference) {
       return [...calendar.values()].filter((row) => row.reference === reference).map(clone);
+    },
+    async listCalendarByResource(resource, from, to) {
+      return [...calendar.values()]
+        .filter((row) => (row.resource ?? 'main') === resource && row.night >= from && row.night < to)
+        .sort((a, b) => a.night.localeCompare(b.night))
+        .map(clone);
     },
     async getDirectBookingNight(night) {
       return directBooking.get(night) ? clone(directBooking.get(night)) : null;
@@ -222,11 +236,11 @@ function createDemoRepository(options = {}) {
         etag: existing ? 'demo-setting-2' : 'demo-setting-1'
       });
     },
-    async createCalendarNight(night, data) {
-      createCalendarNight(night, data);
+    async createCalendarNight(night, data, options = {}) {
+      createCalendarNight(night, data, options);
     },
-    async deleteCalendarNight(night, reference) {
-      deleteCalendarNight(night, reference);
+    async deleteCalendarNight(night, reference, options = {}) {
+      deleteCalendarNight(night, reference, options);
     },
     async appendHistory(entry) {
       history.push(clone(entry));

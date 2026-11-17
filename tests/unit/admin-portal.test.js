@@ -1048,3 +1048,43 @@ test('Staff och skrivningar utan aktiverat stöd nekas server-side', async () =>
     close(disabled);
   }
 });
+
+test('Owner kan skapa manuell bokning med extrahus och få rätt pris och kalenderrader', async () => {
+  const repository = createDemoRepository({ now: new Date() });
+  const server = await listen(demoServer({ repository }));
+  const port = server.address().port;
+  try {
+    const csrf = await ownerSession(port);
+    const created = await request(port, '/api/admin/bookings', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrf, 'Idempotency-Key': 'manual-extrahus-0001' },
+      body: manualBookingBody({
+        arrival: '2027-02-10',
+        departure: '2027-02-13',
+        addons: {
+          slutstad: false,
+          extrahus: true,
+          extrahusNights: 2,
+          extrahusGuests: 3,
+          lakan: true,
+          linenCount: 7,
+          ved: false,
+          tidigIncheckning: false,
+          senUtcheckning: false
+        }
+      })
+    });
+    assert.equal(created.status, 201);
+    assert.ok(created.json.total > 0);
+
+    const detail = await request(port, `/api/admin/bookings/${created.json.reference}`);
+    assert.match(detail.body, /Extrahus/);
+    assert.match(detail.body, /2027-02-10/);
+
+    const extrahusRows = await repository.listCalendarByResource('extrahus', '2027-02-10', '2027-02-13');
+    assert.equal(extrahusRows.length, 2);
+    assert.ok(extrahusRows.every((row) => row.reference === created.json.reference));
+  } finally {
+    close(server);
+  }
+});

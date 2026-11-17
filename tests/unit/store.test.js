@@ -13,6 +13,7 @@ const {
   createManagedIdentityTokenProvider, createTokenCache, hasManagedIdentity,
   toEntity, fromEntity, toOutboxEntity, fromOutboxEntity, sharedKeySignature
 } = require('../../server/booking/store');
+const { reserveNights, releaseReservation, convertReservationToBooking } = require('../../server/booking/reservations');
 
 function baseRecord(overrides = {}) {
   return {
@@ -251,4 +252,88 @@ test('tabellager: misslyckat sparande (5xx) kastar så att förfrågan aldrig vi
     fetchImpl: async () => ({ status: 500, headers: new Map(), text: async () => '{}' })
   });
   await assert.rejects(() => store.save(baseRecord()), /kunde inte sparas/);
+});
+
+test('extrahus har egen kalenderpartition och kan inte dubbelbokas', async () => {
+  const store = createLocalStore({ file: path.join(os.tmpdir(), `skadevi-${Date.now()}-extrahus.jsonl`) });
+  await store.createCalendarNight('2026-11-20', { reference: 'SK-HUS', type: 'BOOKING' });
+  await store.createCalendarNight('2026-11-20', { reference: 'SK-EXTRA', type: 'RESERVATION' }, { resource: 'extrahus' });
+
+  const main = await store.listCalendar('2026-11-20', '2026-11-21');
+  assert.equal(main.length, 1);
+  assert.equal(main[0].reference, 'SK-HUS');
+  const extra = await store.listCalendarByResource('extrahus', '2026-11-20', '2026-11-21');
+  assert.equal(extra.length, 1);
+  assert.equal(extra[0].reference, 'SK-EXTRA');
+  const rows = await store.listCalendarByReference('SK-EXTRA');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].resource, 'extrahus');
+
+  await assert.rejects(
+    () => store.createCalendarNight('2026-11-20', { reference: 'SK-OTHER' }, { resource: 'extrahus' }),
+    (error) => error.status === 409
+  );
+  await store.deleteCalendarNight('2026-11-20', 'SK-EXTRA', { resource: 'extrahus' });
+  assert.equal((await store.listCalendarByResource('extrahus', '2026-11-20', '2026-11-21')).length, 0);
+});
+
+test('samtidiga extrahusreservationer kan inte överlappa och rullas tillbaka', async () => {
+  const store = createLocalStore({ file: path.join(os.tmpdir(), `skadevi-${Date.now()}-res.jsonl`) });
+  const first = await reserveNights(store, {
+    reference: 'SK-A', arrival: '2026-11-20', departure: '2026-11-23',
+    extrahus: { enabled: true, nightKeys: ['2026-11-20', '2026-11-21'] }
+  });
+  assert.equal(first.nights.length, 3);
+  assert.equal(first.extrahusNights.length, 2);
+
+  await assert.rejects(() => reserveNights(store, {
+    reference: 'SK-B', arrival: '2026-11-20', departure: '2026-11-23',
+    extrahus: { enabled: true, nightKeys: ['2026-11-21', '2026-11-22'] }
+  }), (error) => error.status === 409 && error.code === 'RESERVATION_CONFLICT');
+
+  const mainRows = await store.listCalendar('2026-11-20', '2026-11-23');
+  assert.deepEqual(mainRows.map((row) => row.reference), ['SK-A', 'SK-A', 'SK-A']);
+  const extraRows = await store.listCalendarByResource('extrahus', '2026-11-20', '2026-11-23');
+  assert.deepEqual(extraRows.map((row) => row.night), ['2026-11-20', '2026-11-21']);
+
+  await releaseReservation(store, 'SK-A');
+  assert.equal((await store.listCalendar('2026-11-20', '2026-11-23')).length, 0);
+  assert.equal((await store.listCalendarByResource('extrahus', '2026-11-20', '2026-11-23')).length, 0);
+
+  await reserveNights(store, {
+    reference: 'SK-C', arrival: '2026-11-20', departure: '2026-11-23'
+  });
+  assert.equal((await store.listCalendar('2026-11-20', '2026-11-23')).length, 3);
+});
+
+test('extrahus och totalt gästantal bevaras i bokningsposten', () => {
+  const entity = toEntity(baseRecord({
+    totalGuests: 7,
+    extrahus: {
+      enabled: true, nights: 2, guests: 3, arrival: '2026-11-20',
+      departure: '2026-11-22', nightKeys: ['2026-11-20', '2026-11-21']
+    }
+  }), 'request');
+  const restored = fromEntity(entity);
+  assert.equal(restored.totalGuests, 7);
+  assert.equal(restored.extrahus.enabled, true);
+  assert.deepEqual(restored.extrahus.nightKeys, ['2026-11-20', '2026-11-21']);
+});
+
+test('genomförd betalning bekräftar både herrgård och extrahus', async () => {
+  const store = createLocalStore({ file: path.join(os.tmpdir(), `skadevi-${Date.now()}-confirm.jsonl`) });
+  const record = {
+    reference: 'SK-CONFIRM', arrival: '2026-11-20', departure: '2026-11-22',
+    extrahus: { enabled: true, nightKeys: ['2026-11-20'] }
+  };
+  await reserveNights(store, record);
+  const converted = await convertReservationToBooking(store, record);
+  assert.equal(converted.ok, true);
+  assert.equal(converted.nights.length, 2);
+  assert.equal(converted.extrahusNights.length, 1);
+  const main = await store.listCalendar('2026-11-20', '2026-11-22');
+  const extra = await store.listCalendarByResource('extrahus', '2026-11-20', '2026-11-22');
+  assert.ok(main.every((row) => row.type === 'BOOKING'));
+  assert.equal(extra.length, 1);
+  assert.equal(extra[0].type, 'BOOKING');
 });

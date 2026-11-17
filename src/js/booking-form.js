@@ -1,4 +1,4 @@
-import { formatSek, ADDONS, addonLines, sumAddons, discountNote, quote, NIGHT_RATES, LINEN_MAX } from './booking/pricing.js';
+import { formatSek, ADDONS, addonLines, sumAddons, discountNote, quote, NIGHT_RATES, LINEN_MAX, EXTRAHUS_MAX_GUESTS } from './booking/pricing.js';
 
 // Bokningsflödet: formulär, tillval, prisöversikt, bokningsregler och inskick.
 // Formuläret görs synligt när kalendern skickar 'booking:selection' med en
@@ -45,6 +45,9 @@ function updateSummary({ arrival = null, departure = null, nights = 0 }) {
 function selectedAddons() {
   return {
     slutstad: els.slutstad.checked,
+    extrahus: els.extrahus.checked,
+    extrahusNights: els.extrahus.checked ? Number(els.extrahusNights.value) : 0,
+    extrahusGuests: els.extrahus.checked ? Number(els.extrahusGuests.value) : 0,
     lakan: els.lakan.checked,
     linenCount: els.lakan.checked ? Number(els.linenCount.value) : 0,
     ved: els.ved.checked,
@@ -91,7 +94,11 @@ function updatePrices() {
         <span>${formatSek(q.lodgingAfterDiscount)}</span>
       </li>`);
   }
-  const addonRows = addonLines({ ...selection, guests });
+  const addonRows = addonLines({
+    ...selection, guests,
+    arrival: els.arrival.value,
+    departure: els.departure.value
+  });
   for (const line of addonRows) {
     lines.push(`
       <li class="price-line${line.request ? ' price-line-request' : ''}">
@@ -115,9 +122,46 @@ function updatePrices() {
   els.discountNote.hidden = !note;
 }
 
+function totalGuests() {
+  const main = Number(els.guests.value) || 0;
+  const extrahus = els.extrahus.checked ? Number(els.extrahusGuests.value) || 0 : 0;
+  return main + extrahus;
+}
+
 function linenLimit() {
-  const guests = Number(els.guests.value) || 0;
-  return Math.max(0, Math.min(LINEN_MAX, guests));
+  return Math.max(0, Math.min(LINEN_MAX, totalGuests()));
+}
+
+function addDays(dateKey, days) {
+  return new Date(Date.parse(`${dateKey}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
+}
+
+function syncExtrahus({ resetNights = false } = {}) {
+  const enabled = els.extrahus.checked;
+  els.extrahusNights.disabled = !enabled;
+  els.extrahusGuests.disabled = !enabled;
+  if (!enabled) {
+    els.extrahusDates.hidden = true;
+    return;
+  }
+  const nights = Number(els.nights.value) || 0;
+  els.extrahusNights.max = String(Math.max(1, nights));
+  let count = Number(els.extrahusNights.value);
+  if (resetNights || !Number.isInteger(count) || count < 1 || count > nights) {
+    count = nights > 0 ? nights : 1;
+    els.extrahusNights.value = String(count);
+  }
+  let guests = Number(els.extrahusGuests.value);
+  if (!Number.isInteger(guests) || guests < 1) guests = 1;
+  if (guests > EXTRAHUS_MAX_GUESTS) guests = EXTRAHUS_MAX_GUESTS;
+  els.extrahusGuests.value = String(guests);
+  const arrival = els.arrival.value;
+  if (arrival && count > 0) {
+    els.extrahusDates.textContent = `Extrahuset gäller ${count} ${count === 1 ? 'natt' : 'nätter'}: ${formatDay(arrival)} – ${formatDay(addDays(arrival, count))}. Det är de första nätterna av huvudvistelsen.`;
+    els.extrahusDates.hidden = false;
+  } else {
+    els.extrahusDates.hidden = true;
+  }
 }
 
 function syncLinenCount() {
@@ -163,7 +207,19 @@ function validateForm() {
   check(els.email, /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(trimmed(els.email)), 'Ange en giltig e-postadress.');
   check(els.phone, /^\+?[0-9 ()-]{5,32}$/.test(trimmed(els.phone)), 'Ange ett giltigt telefonnummer.');
   const guests = Number(els.guests.value);
-  check(els.guests, Number.isInteger(guests) && guests >= 1 && guests <= 24, 'Ange antal gäster (1–24).');
+  check(els.guests, Number.isInteger(guests) && guests >= 1 && guests <= 24, 'Ange antal gäster i herrgården (1–24).');
+  const nights = Number(els.nights.value);
+  if (els.extrahus.checked) {
+    const extrahusNights = Number(els.extrahusNights.value);
+    check(els.extrahusNights, Number.isInteger(extrahusNights) && extrahusNights >= 1 && extrahusNights <= nights,
+      `Ange antal nätter för extrahuset (1–${Math.max(1, nights)}).`);
+    const extrahusGuests = Number(els.extrahusGuests.value);
+    check(els.extrahusGuests, Number.isInteger(extrahusGuests) && extrahusGuests >= 1 && extrahusGuests <= EXTRAHUS_MAX_GUESTS,
+      `Ange antal gäster i extrahuset (1–${EXTRAHUS_MAX_GUESTS}).`);
+  } else {
+    setError(els.extrahusNights, '');
+    setError(els.extrahusGuests, '');
+  }
   if (els.lakan.checked) {
     const linen = Number(els.linenCount.value);
     const limit = linenLimit();
@@ -250,6 +306,9 @@ function updateSubmitState() {
 }
 
 function availabilityMessage() {
+  if (els.extrahus?.checked) {
+    return 'Extrahusets tillgänglighet kan inte verifieras automatiskt. Skicka en bokningsförfrågan så bekräftar vi extrahuset manuellt innan bokningen blir giltig.';
+  }
   if (els.availabilityChecking) {
     return 'Kontrollerar tillgänglighet …';
   }
@@ -273,7 +332,8 @@ function availabilityMessage() {
 }
 
 function updatePaymentOptions() {
-  const available = els.directBookingEnabled === true && els.directBookingAvailable === true;
+  const extrahusSelected = els.extrahus?.checked === true;
+  const available = els.directBookingEnabled === true && els.directBookingAvailable === true && !extrahusSelected;
   if (els.paymentCardOption) els.paymentCardOption.hidden = !available;
   if (!available && els.paymentCard?.checked) {
     els.paymentRequest.checked = true;
@@ -362,7 +422,12 @@ function buildPayload() {
     message: els.message.value.trim(),
     addons: selectedAddons(),
     // Info till servern — servern beräknar alltid om och ignorerar belopp.
-    totalAddons: sumAddons(addonLines({ ...selectedAddons(), guests: Number(els.guests.value) || 0 })),
+    totalAddons: sumAddons(addonLines({
+      ...selectedAddons(),
+      guests: Number(els.guests.value) || 0,
+      arrival: els.arrival.value,
+      departure: els.departure.value
+    })),
     rulesVersion: els.rules?.version ?? '',
     consentRules: els.consentRules.checked,
     consentContact: els.consentContact.checked
@@ -374,6 +439,7 @@ function applyFieldErrors(fields) {
     arrival: els.arrival, departure: els.departure,
     firstName: els.firstName, lastName: els.lastName,
     email: els.email, phone: els.phone, guests: els.guests,
+    extrahusNights: els.extrahusNights, extrahusGuests: els.extrahusGuests,
     linenCount: els.linenCount, consentRules: els.consentRules
   };
   let first = null;
@@ -497,6 +563,7 @@ function handleSelection(detail) {
   const previousArrival = els.arrival.value;
   const previousDeparture = els.departure.value;
   updateSummary({ arrival, departure, nights });
+  syncExtrahus();
   els.formError.hidden = true;
   if (els.manualReview) els.manualReview.hidden = true;
   if (complete && (arrival !== previousArrival || departure !== previousDeparture)) {
@@ -560,6 +627,10 @@ function queryAll() {
     company: q('field-company'),
     message: q('field-message'),
     slutstad: q('addon-slutstad'),
+    extrahus: q('addon-extrahus'),
+    extrahusNights: q('extrahus-nights'),
+    extrahusGuests: q('extrahus-guests'),
+    extrahusDates: q('extrahus-dates'),
     lakan: q('addon-lakan'),
     linenCount: q('linen-count'),
     ved: q('addon-ved'),
@@ -591,6 +662,7 @@ function init() {
   Object.assign(els, queryAll());
   if (!els.section) return;
   els.linenCount.max = String(linenLimit());
+  syncExtrahus();
   els.form.addEventListener('submit', submitBooking);
   document.addEventListener('booking:selection', (event) => handleSelection(event.detail));
   document.addEventListener('booking:invalidate', () => {
@@ -601,6 +673,10 @@ function init() {
     const checkbox = els[addon.id];
     checkbox?.addEventListener('change', () => {
       if (addon.perPerson) syncLinenCount();
+      if (addon.perNight) {
+        syncExtrahus({ resetNights: els.extrahus.checked });
+        updatePaymentOptions();
+      }
       updatePrices();
     });
   }
@@ -621,6 +697,14 @@ function init() {
       els.linenCount.value = String(limit);
     }
     updatePrices();
+  });
+  els.extrahusNights.addEventListener('input', () => {
+    syncExtrahus();
+    updatePrices();
+  });
+  els.extrahusGuests.addEventListener('input', () => {
+    syncExtrahus();
+    syncLinenCount();
   });
   els.consentRules.addEventListener('change', () => {
     if (els.consentRules.checked) {

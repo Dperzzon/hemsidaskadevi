@@ -47,7 +47,7 @@ function renderBookings(options) {
             <td data-label="Referens">${bookingLink(booking)}<span class="cell-sub">${escapeHtml(booking.bookingSourceLabel)}</span></td>
             <td data-label="Gäst">${guestCell(booking)}</td>
             <td data-label="Vistelse">${stayCell(booking)}</td>
-            <td data-label="Gäster">${booking.guests}</td>
+            <td data-label="Gäster">${booking.guests}${booking.extrahus?.enabled ? `<span class="cell-sub">+ ${booking.extrahus.guests} i extrahus</span>` : ''}</td>
             <td data-label="Belopp">${amountCell(booking)}</td>
             <td data-label="Status">${statusBadge(booking)}</td>
             <td data-label="Åtgärd">${booking.hasAction ? actionChips(booking) : '<span class="muted">—</span>'}</td>

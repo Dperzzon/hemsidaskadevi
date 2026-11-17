@@ -63,8 +63,11 @@ function renderNewBooking(options) {
         <div class="panel-heading"><div><p class="eyebrow">Tillval</p><h2>Alla befintliga tillval</h2></div></div>
         <div class="addon-editor">
           <label class="check-row"><input type="checkbox" name="slutstad"> <span>Slutstädning</span></label>
+          <label class="check-row"><input type="checkbox" name="extrahus"> <span>Extrahus (1 600 kr/natt, max 6 gäster)</span></label>
+          <label class="field field-inline"><span>Antal extrahusnätter</span><input type="number" name="extrahusNights" min="1" value="1"></label>
+          <label class="field field-inline"><span>Gäster i extrahuset</span><input type="number" name="extrahusGuests" min="1" max="6" value="1"></label>
           <label class="check-row"><input type="checkbox" name="lakan"> <span>Lakan och handdukar</span></label>
-          <label class="field field-inline"><span>Antal lakan</span><input type="number" name="linenCount" min="0" max="24" value="0"></label>
+          <label class="field field-inline"><span>Antal lakan</span><input type="number" name="linenCount" min="0" max="28" value="0"></label>
           <label class="check-row"><input type="checkbox" name="ved"> <span>Ved</span></label>
           <label class="check-row"><input type="checkbox" name="tidigIncheckning"> <span>Tidig incheckning</span></label>
           <label class="check-row"><input type="checkbox" name="senUtcheckning"> <span>Sen utcheckning</span></label>

@@ -649,3 +649,43 @@ test('TEST E: datumbyte i mobilvy', async ({ page }) => {
   await clickDay(page, '2026-11-25');
   await expect(page.locator('#summary-departure')).toHaveText('25 november 2026');
 });
+
+test('extrahus: nätter, gäster, pris och manuell betalning', async ({ page }) => {
+  await goto(page);
+  await clickDay(page, '2026-11-16');
+  await clickDay(page, '2026-11-19');
+
+  await page.locator('#field-guests').selectOption('4');
+  await page.locator('#addon-extrahus').check();
+  await expect(page.locator('#extrahus-nights')).toBeEnabled();
+  await expect(page.locator('#extrahus-nights')).toHaveValue('3');
+  await page.locator('#extrahus-nights').fill('2');
+  await page.locator('#extrahus-guests').fill('2');
+  await expect(page.locator('#extrahus-dates')).toContainText('16 november 2026');
+  await expect(page.locator('#extrahus-dates')).toContainText('18 november 2026');
+  await expect(page.locator('#price-list')).toContainText('Extrahus (2 nätter × 1 600 kr');
+  await expect(page.locator('#price-list')).toContainText('3 200 kr');
+  await expect(page.locator('#price-total')).toContainText('24 200 kr');
+
+  // Fler nätter än huvudvistelsen tillåts inte.
+  await page.locator('#extrahus-nights').fill('5');
+  await expect(page.locator('#extrahus-nights')).toHaveValue('3');
+
+  // Lakan räknas på totalt antal gäster och högst 28.
+  await page.locator('#addon-lakan').check();
+  await expect(page.locator('#linen-count')).toHaveValue('6');
+  await page.locator('#field-guests').selectOption('24');
+  await page.locator('#extrahus-guests').fill('6');
+  await page.locator('#linen-count').fill('30');
+  await expect(page.locator('#linen-count')).toHaveValue('28');
+  await expect(page.locator('#price-list')).toContainText('28 pers');
+
+  // Extrahuset kan inte direktbetalas eftersom extern tillgänglighet är okänd.
+  await expect(page.locator('#payment-card-option')).toBeHidden();
+  await expect(page.locator('#payment-request')).toBeChecked();
+
+  await page.locator('#addon-lakan').uncheck();
+  await page.locator('#addon-extrahus').uncheck();
+  await expect(page.locator('#price-list')).not.toContainText('Extrahus (');
+  await expect(page.locator('#price-total')).toContainText('21 000 kr');
+});

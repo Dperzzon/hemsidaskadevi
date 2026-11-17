@@ -20,9 +20,23 @@ const PRICE_VERSION = CONFIG.version;
 // Högsta antal personer som kan hyra lakan och handdukar. Antalet begränsas
 // dessutom alltid av det faktiska antalet gäster i bokningen.
 const LINEN_MAX = CONFIG.addons.linenMax;
+const EXTRAHUS_MAX_GUESTS = CONFIG.addons.extrahusMaxGuests;
 
 function linenLimit(guests) {
   return Math.max(0, Math.min(LINEN_MAX, Number(guests) || 0));
+}
+
+function formatSek(amount) {
+  return `${new Intl.NumberFormat('sv-SE').format(amount)} kr`;
+}
+
+function dayAfter(dateKey) {
+  return keyFromDayNumber(dayNumber(dateKey) + 1);
+}
+
+function extrahusNightRange(keys) {
+  if (!keys.length) return '';
+  return `${keys[0]}–${dayAfter(keys[keys.length - 1])}`;
 }
 
 // Kalenderdag-precisa hjälpare (YYYY-MM-DD). Dagnumret beräknas med civilt
@@ -118,18 +132,51 @@ function applyDiscountToLodging(lodgingBase, peakBase, discount, exemptFlag) {
 }
 
 // Tillvalskostnader. Lakan/handdukar prisas per person som faktiskt behöver
-// tjänsten (0 till antal gäster), övriga tillval per vistelse.
-function addonTotals(addons, guests, linenCount) {
+// tjänsten (0 till totalt antal gäster, högst 28). Extrahus prisas per vald
+// natt och omfattas aldrig av boendets rabatter.
+function extrahusSelection(addons, mainNightKeys) {
+  const enabled = addons.extrahus === true;
+  const keys = Array.isArray(mainNightKeys) ? mainNightKeys : [];
+  const nights = enabled
+    ? Math.min(Math.max(0, Math.trunc(Number(addons.extrahusNights) || 0)), keys.length)
+    : 0;
+  const guests = enabled
+    ? Math.min(Math.max(0, Math.trunc(Number(addons.extrahusGuests) || 0)), EXTRAHUS_MAX_GUESTS)
+    : 0;
+  return {
+    enabled,
+    nights,
+    guests,
+    nightKeys: enabled ? keys.slice(0, nights) : [],
+    arrival: enabled && nights ? keys[0] : '',
+    departure: enabled && nights ? dayAfter(keys[nights - 1]) : ''
+  };
+}
+
+function addonTotals(addons, guests, linenCount, options = {}) {
   const prices = CONFIG.addons;
-  linenCount = Math.min(Math.max(0, Number(linenCount) || 0), linenLimit(guests));
+  const mainNightKeys = Array.isArray(options.mainNightKeys) ? options.mainNightKeys : [];
+  const extrahus = extrahusSelection(addons, mainNightKeys);
+  const totalGuests = Math.max(0, Number(guests) || 0) + extrahus.guests;
+  linenCount = Math.min(Math.max(0, Number(linenCount) || 0), linenLimit(totalGuests));
   const lines = [];
   if (addons.slutstad) lines.push({ id: 'slutstad', label: 'Slutstädning (exklusive kök)', quantity: 1, unitPrice: prices.slutstad, amount: prices.slutstad });
+  if (addons.extrahus) {
+    const range = extrahusNightRange(extrahus.nightKeys);
+    lines.push({
+      id: 'extrahus',
+      label: `Extrahus (${extrahus.nights} ${extrahus.nights === 1 ? 'natt' : 'nätter'} × ${formatSek(prices.extrahus)}${range ? `, ${range}` : ''})`,
+      quantity: extrahus.nights,
+      unitPrice: prices.extrahus,
+      amount: prices.extrahus * extrahus.nights
+    });
+  }
   if (addons.lakan) lines.push({ id: 'lakan', label: 'Lakan och handdukar', quantity: linenCount, unitPrice: prices.lakan, amount: prices.lakan * linenCount });
   if (addons.ved) lines.push({ id: 'ved', label: 'Ved', quantity: 1, unitPrice: prices.ved, amount: prices.ved });
   if (addons.tidigIncheckning) lines.push({ id: 'tidigIncheckning', label: 'Tidig incheckning', quantity: 1, unitPrice: prices.tidigIncheckning, amount: prices.tidigIncheckning });
   if (addons.senUtcheckning) lines.push({ id: 'senUtcheckning', label: 'Sen utcheckning', quantity: 1, unitPrice: prices.senUtcheckning, amount: prices.senUtcheckning });
   const total = lines.reduce((sum, line) => sum + line.amount, 0);
-  return { lines, total };
+  return { lines, total, extrahus, totalGuests };
 }
 
 // Full offert: { nights, nightlyBreakdown, lodgingBase, peakNights, peakBase,
@@ -139,7 +186,8 @@ function quote({ arrival, departure, addons = {}, guests = 0 }) {
   if (!Number.isFinite(nights) || nights < 1) {
     return { nights: Math.max(0, nights || 0), incomplete: true };
   }
-  const breakdown = nightKeys(arrival, departure).map((date) => {
+  const mainNightKeys = nightKeys(arrival, departure);
+  const breakdown = mainNightKeys.map((date) => {
     const { rate, type, periodId, periodLabel } = nightRate(date);
     return { date, type, rate, periodId: periodId ?? null, periodLabel: periodLabel ?? null };
   });
@@ -153,8 +201,10 @@ function quote({ arrival, departure, addons = {}, guests = 0 }) {
   const discountInfo = discount && discountAmount > 0
     ? { id: discount.id, label: discount.label, percent: discount.percent, amount: discountAmount }
     : null;
-  const linenCount = Math.min(Math.max(0, Number(addons.linenCount) || 0), linenLimit(guests));
-  const addonResult = addonTotals(addons, guests, linenCount);
+  const extrahus = extrahusSelection(addons, mainNightKeys);
+  const totalGuests = Math.max(0, Number(guests) || 0) + extrahus.guests;
+  const linenCount = Math.min(Math.max(0, Number(addons.linenCount) || 0), linenLimit(totalGuests));
+  const addonResult = addonTotals(addons, guests, linenCount, { mainNightKeys });
   return {
     nights,
     nightlyBreakdown: breakdown,
@@ -166,12 +216,14 @@ function quote({ arrival, departure, addons = {}, guests = 0 }) {
     lodgingAfterDiscount: discountedBase,
     addonLines: addonResult.lines,
     addonsTotal: addonResult.total,
+    extrahus,
+    totalGuests,
     total: discountedBase + addonResult.total,
     priceVersion: PRICE_VERSION
   };
 }
 
 module.exports = {
-  PRICE_VERSION, CONFIG, LINEN_MAX, nightRate, bestDiscount, nightsBetween, nightKeys, quote,
-  addonTotals, applyDiscountToLodging, dayNumber, keyFromDayNumber, weekdayOf
+  PRICE_VERSION, CONFIG, LINEN_MAX, EXTRAHUS_MAX_GUESTS, nightRate, bestDiscount, nightsBetween, nightKeys, quote,
+  addonTotals, extrahusSelection, applyDiscountToLodging, dayNumber, keyFromDayNumber, weekdayOf
 };

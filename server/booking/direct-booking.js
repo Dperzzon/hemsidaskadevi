@@ -392,6 +392,13 @@ async function handleDirectBooking(request, context = {}, options = {}) {
       fields: { consentRules: 'Bokningsreglerna har uppdaterats — godkänn den aktuella versionen.' }
     });
   }
+  if (validated.record.addons.extrahus === true) {
+    return result(409, {
+      error: 'Extrahusets tillgänglighet kan inte verifieras automatiskt. Skicka en bokningsförfrågan så bekräftar vi extrahuset manuellt innan bokningen blir giltig.',
+      code: 'EXTRAHUS_DIRECT_UNAVAILABLE',
+      manualReview: true
+    });
+  }
 
   let stripe;
   try {

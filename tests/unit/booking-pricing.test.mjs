@@ -177,7 +177,7 @@ test('ofullstÃ¤ndig vistelse visar aldrig missvisande totalpris', () => {
 });
 
 test('klienten och servern anvÃ¤nder samma prisreglerversion', () => {
-  assert.equal(pricing.PRICE_VERSION, '2026-11-17.1');
+  assert.equal(pricing.PRICE_VERSION, '2026-11-17.2');
   assert.ok(pricing.PRICE_CONFIG.discounts.length >= 2);
 });
 
@@ -207,4 +207,27 @@ test('rabattinfo beskriver rabatten diskret', () => {
   assert.match(pricing.discountNote(7), /Veckorabatt 30 %/);
   assert.match(pricing.discountNote(28), /MÃ¥nadsrabatt 69 %/);
   assert.equal(pricing.discountNote(3), null);
+});
+
+test('extrahus: 1, 2 och 5 nätter kostar 1 600, 3 200 och 8 000 kr', () => {
+  const base = (extrahusNights, extrahus = true) => pricing.quote({
+    arrival: '2026-11-16', departure: '2026-11-21', guests: 4,
+    addons: { extrahus, extrahusNights, extrahusGuests: 2 }
+  });
+  assert.equal(base(1).addonsTotal, 1600);
+  assert.equal(base(2).addonsTotal, 3200);
+  assert.equal(base(5).addonsTotal, 8000);
+  assert.equal(base(2, false).addonsTotal, 0);
+  assert.equal(base(9).extrahus.nights, 5);
+});
+
+test('extrahus: kombinerad bokning ger upp till 28 lakan av 30 gäster', () => {
+  const result = pricing.quote({
+    arrival: '2026-11-16', departure: '2026-11-19', guests: 24,
+    addons: { extrahus: true, extrahusNights: 2, extrahusGuests: 6, lakan: true, linenCount: 30 }
+  });
+  assert.equal(result.totalGuests, 30);
+  assert.equal(result.addonLines.find((line) => line.id === 'lakan').quantity, 28);
+  assert.equal(result.addonLines.find((line) => line.id === 'lakan').amount, 5600);
+  assert.equal(result.addonLines.find((line) => line.id === 'extrahus').amount, 3200);
 });

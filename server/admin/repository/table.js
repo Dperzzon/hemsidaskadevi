@@ -34,6 +34,14 @@ function escapeOData(value) {
   return String(value).replaceAll("'", "''");
 }
 
+function calendarPartition(resource) {
+  return resource === 'extrahus' ? 'calendar-extrahus' : 'calendar';
+}
+
+function calendarResourceOf(partition) {
+  return partition === 'calendar-extrahus' ? 'extrahus' : 'main';
+}
+
 function conflict(message) {
   const cause = new Error(message);
   cause.status = 409;
@@ -216,6 +224,7 @@ function createTableAdminRepository(options = {}) {
       );
       return rows.map((row) => ({
         night: row.RowKey,
+        resource: 'main',
         type: row.type ?? '',
         reference: row.reference ?? '',
         blockId: row.blockId ?? '',
@@ -227,10 +236,28 @@ function createTableAdminRepository(options = {}) {
     },
     async listCalendarByReference(reference) {
       const rows = await query(
-        `PartitionKey eq 'calendar' and reference eq '${escapeOData(reference)}'`
+        `(PartitionKey eq 'calendar' or PartitionKey eq 'calendar-extrahus') and reference eq '${escapeOData(reference)}'`
       );
       return rows.map((row) => ({
         night: row.RowKey,
+        resource: calendarResourceOf(row.PartitionKey),
+        type: row.type ?? '',
+        reference: row.reference ?? '',
+        blockId: row.blockId ?? '',
+        source: row.source ?? '',
+        note: row.note ?? '',
+        createdBy: row.createdBy ?? '',
+        createdAt: row.createdAt ?? ''
+      }));
+    },
+    async listCalendarByResource(resource, from, to) {
+      const partition = calendarPartition(resource);
+      const rows = await query(
+        `PartitionKey eq '${partition}' and RowKey ge '${escapeOData(from)}' and RowKey lt '${escapeOData(to)}'`
+      );
+      return rows.map((row) => ({
+        night: row.RowKey,
+        resource: calendarResourceOf(partition),
         type: row.type ?? '',
         reference: row.reference ?? '',
         blockId: row.blockId ?? '',
@@ -348,14 +375,15 @@ function createTableAdminRepository(options = {}) {
         throw new Error(`Direktbokningsinställningen kunde inte sparas (${result.status})`);
       }
     },
-    async createCalendarNight(night, data) {
+    async createCalendarNight(night, data, { resource } = {}) {
       // Table Storage POST/Insert Entity är create-only: samma PartitionKey +
       // RowKey ger 409 EntityAlreadyExists. If-None-Match får inte skickas på
       // POST och behövs inte för atomisk nattlåsning.
+      const partition = calendarPartition(resource);
       const result = await request({
         method: 'POST',
         body: {
-          PartitionKey: 'calendar',
+          PartitionKey: partition,
           RowKey: night,
           type: data.type ?? '',
           reference: data.reference ?? '',
@@ -371,10 +399,11 @@ function createTableAdminRepository(options = {}) {
         throw new Error(`Kalenderraden kunde inte sparas (${result.status})`);
       }
     },
-    async deleteCalendarNight(night, reference) {
+    async deleteCalendarNight(night, reference, { resource } = {}) {
+      const partition = calendarPartition(resource);
       const single = await request({
         method: 'GET',
-        target: rowTarget('calendar', night)
+        target: rowTarget(partition, night)
       });
       if (single.status === 404) return;
       if (single.status !== 200 || !single.json) {
@@ -385,7 +414,7 @@ function createTableAdminRepository(options = {}) {
       }
       const removed = await request({
         method: 'DELETE',
-        target: rowTarget('calendar', night),
+        target: rowTarget(partition, night),
         ifMatch: single.etag || '*'
       });
       if (removed.status === 412 || removed.status === 409) throw conflict('ETag-konflikt');

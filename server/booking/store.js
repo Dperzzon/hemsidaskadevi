@@ -176,6 +176,8 @@ function toEntity(record, partition) {
     departure: record.departure,
     nights: String(record.nights),
     guests: String(record.guests),
+    totalGuests: String(record.totalGuests ?? record.guests ?? 0),
+    extrahus: record.extrahus ? JSON.stringify(record.extrahus) : '',
     firstName: record.firstName,
     lastName: record.lastName,
     email: record.email,
@@ -258,6 +260,8 @@ function fromEntity(entity) {
     departure: entity.departure,
     nights: Number(entity.nights),
     guests: Number(entity.guests),
+    totalGuests: Number(entity.totalGuests ?? entity.guests ?? 0),
+    extrahus: parse(entity.extrahus, null),
     firstName: entity.firstName,
     lastName: entity.lastName,
     email: entity.email,
@@ -321,6 +325,16 @@ function fromEntity(entity) {
 
 function rowTarget(partition, rowKey) {
   return `(PartitionKey='${partition}',RowKey='${encodeURIComponent(rowKey)}')`;
+}
+
+// Huvudbyggnaden och extrahuset har separata kalenderpartitioner. Samma natt
+// kan därför bokas på båda resurserna utan att den ena blockerar den andra.
+function calendarPartition(resource) {
+  return resource === 'extrahus' ? 'calendar-extrahus' : 'calendar';
+}
+
+function calendarResourceOf(partition) {
+  return partition === 'calendar-extrahus' ? 'extrahus' : 'main';
 }
 
 function escapeOData(value) {
@@ -510,7 +524,7 @@ function createTableStore(options = {}) {
       const safe = String(reference ?? '').replaceAll("'", "''");
       const result = await tableRequest({
         accountName, method: 'GET', table,
-        query: [['$filter', `PartitionKey eq 'calendar' and reference eq '${safe}'`]],
+        query: [['$filter', `(PartitionKey eq 'calendar' or PartitionKey eq 'calendar-extrahus') and reference eq '${safe}'`]],
         fetchImpl: options.fetchImpl, auth
       });
       if (result.status !== 200 || !Array.isArray(result.json?.value)) {
@@ -518,6 +532,7 @@ function createTableStore(options = {}) {
       }
       return result.json.value.map((row) => ({
         night: row.RowKey,
+        resource: calendarResourceOf(row.PartitionKey),
         type: row.type ?? '',
         reference: row.reference ?? '',
         blockId: row.blockId ?? '',
@@ -541,6 +556,32 @@ function createTableStore(options = {}) {
       }
       return result.json.value.map((row) => ({
         night: row.RowKey,
+        resource: 'main',
+        type: row.type ?? '',
+        reference: row.reference ?? '',
+        blockId: row.blockId ?? '',
+        source: row.source ?? '',
+        note: row.note ?? '',
+        createdBy: row.createdBy ?? '',
+        createdAt: row.createdAt ?? '',
+        etag: row['odata.etag'] ?? row.etag ?? ''
+      }));
+    },
+    async listCalendarByResource(resource, from, to) {
+      const safeFrom = String(from ?? '').replaceAll("'", "''");
+      const safeTo = String(to ?? '').replaceAll("'", "''");
+      const partition = calendarPartition(resource);
+      const result = await tableRequest({
+        accountName, method: 'GET', table,
+        query: [['$filter', `PartitionKey eq '${partition}' and RowKey ge '${safeFrom}' and RowKey lt '${safeTo}'`]],
+        fetchImpl: options.fetchImpl, auth
+      });
+      if (result.status !== 200 || !Array.isArray(result.json?.value)) {
+        return null;
+      }
+      return result.json.value.map((row) => ({
+        night: row.RowKey,
+        resource: calendarResourceOf(partition),
         type: row.type ?? '',
         reference: row.reference ?? '',
         blockId: row.blockId ?? '',
@@ -554,11 +595,12 @@ function createTableStore(options = {}) {
     // Atomisk nattlåsning: Table Storage Insert Entity är create-only. Samma
     // PartitionKey + RowKey ger 409 EntityAlreadyExists, vilket gör att två
     // samtidiga bokningsförsök aldrig kan äga samma natt.
-    async createCalendarNight(night, data) {
+    async createCalendarNight(night, data, { resource } = {}) {
+      const partition = calendarPartition(resource);
       const result = await tableRequest({
         accountName, method: 'POST', table,
         body: {
-          PartitionKey: 'calendar',
+          PartitionKey: partition,
           RowKey: night,
           type: data.type ?? '',
           reference: data.reference ?? '',
@@ -582,12 +624,13 @@ function createTableStore(options = {}) {
     // Uppdaterar en befintlig nattlåsning på plats (t.ex. RESERVATION ->
     // BOOKING) utan att radera raden. Därmed finns ingen tidslucka där en
     // annan bokning kan ta datumen.
-    async updateCalendarNight(night, data, { ifMatch } = {}) {
+    async updateCalendarNight(night, data, { ifMatch, resource } = {}) {
+      const partition = calendarPartition(resource);
       const result = await tableRequest({
         accountName, method: 'PUT', table,
-        target: rowTarget('calendar', night),
+        target: rowTarget(partition, night),
         body: {
-          PartitionKey: 'calendar',
+          PartitionKey: partition,
           RowKey: night,
           type: data.type ?? '',
           reference: data.reference ?? '',
@@ -609,10 +652,11 @@ function createTableStore(options = {}) {
         throw new Error(`Kalenderraden kunde inte uppdateras (${result.status})`);
       }
     },
-    async deleteCalendarNight(night, reference) {
+    async deleteCalendarNight(night, reference, { resource } = {}) {
+      const partition = calendarPartition(resource);
       const single = await tableRequest({
         accountName, method: 'GET', table,
-        target: rowTarget('calendar', night),
+        target: rowTarget(partition, night),
         fetchImpl: options.fetchImpl, auth
       });
       if (single.status === 404) return;
@@ -626,7 +670,7 @@ function createTableStore(options = {}) {
       }
       const removed = await tableRequest({
         accountName, method: 'DELETE', table,
-        target: rowTarget('calendar', night),
+        target: rowTarget(partition, night),
         ifMatch: single.etag || '*',
         fetchImpl: options.fetchImpl, auth
       });
@@ -880,6 +924,7 @@ function createLocalStore(options = {}) {
   const historyFile = path.resolve(options.historyFile ?? path.join(path.dirname(file), 'booking-history.jsonl'));
   const records = new Map();
   const calendar = new Map();
+  const calendarKey = (resource, night) => `${resource === 'extrahus' ? 'extrahus' : 'main'}:${night}`;
   const directBooking = new Map();
   let loaded = false;
   function etagFor(record) {
@@ -939,17 +984,25 @@ function createLocalStore(options = {}) {
     },
     async listCalendar(from, to) {
       return [...calendar.values()]
-        .filter((row) => row.night >= from && row.night < to)
+        .filter((row) => (row.resource ?? 'main') === 'main' && row.night >= from && row.night < to)
         .map((row) => ({ ...row }));
     },
-    async createCalendarNight(night, data) {
-      if (calendar.has(night)) {
+    async listCalendarByResource(resource, from, to) {
+      return [...calendar.values()]
+        .filter((row) => (row.resource ?? 'main') === resource && row.night >= from && row.night < to)
+        .map((row) => ({ ...row }));
+    },
+    async createCalendarNight(night, data, { resource } = {}) {
+      const target = resource === 'extrahus' ? 'extrahus' : 'main';
+      const key = calendarKey(target, night);
+      if (calendar.has(key)) {
         const conflict = new Error('Natten är redan blockerad');
         conflict.status = 409;
         throw conflict;
       }
-      calendar.set(night, {
+      calendar.set(key, {
         night,
+        resource: target,
         type: data.type ?? '',
         reference: data.reference ?? '',
         blockId: data.blockId ?? '',
@@ -957,11 +1010,13 @@ function createLocalStore(options = {}) {
         note: data.note ?? '',
         createdBy: data.createdBy ?? '',
         createdAt: data.createdAt ?? new Date().toISOString(),
-        etag: `cal-${night}-1`
+        etag: `cal-${target}-${night}-1`
       });
     },
-    async updateCalendarNight(night, data, { ifMatch } = {}) {
-      const current = calendar.get(night);
+    async updateCalendarNight(night, data, { ifMatch, resource } = {}) {
+      const target = resource === 'extrahus' ? 'extrahus' : 'main';
+      const key = calendarKey(target, night);
+      const current = calendar.get(key);
       if (!current) {
         const missing = new Error('Kalenderraden hittades inte');
         missing.status = 404;
@@ -972,7 +1027,7 @@ function createLocalStore(options = {}) {
         conflict.status = 409;
         throw conflict;
       }
-      calendar.set(night, {
+      calendar.set(key, {
         ...current,
         type: data.type ?? '',
         reference: data.reference ?? '',
@@ -981,18 +1036,20 @@ function createLocalStore(options = {}) {
         note: data.note ?? '',
         createdBy: data.createdBy ?? '',
         createdAt: data.createdAt ?? current.createdAt,
-        etag: `cal-${night}-${Number(current.etag.split('-').at(-1)) + 1}`
+        etag: `cal-${target}-${night}-${Number(current.etag.split('-').at(-1)) + 1}`
       });
     },
-    async deleteCalendarNight(night, reference) {
-      const current = calendar.get(night);
+    async deleteCalendarNight(night, reference, { resource } = {}) {
+      const target = resource === 'extrahus' ? 'extrahus' : 'main';
+      const key = calendarKey(target, night);
+      const current = calendar.get(key);
       if (!current) return;
       if (reference && current.reference !== reference) {
         const conflict = new Error('Natten tillhör en annan bokning');
         conflict.status = 409;
         throw conflict;
       }
-      calendar.delete(night);
+      calendar.delete(key);
     },
     async listBlockingBookings(arrival, departure) {
       await loadOnce();

@@ -597,3 +597,19 @@ test('bekräftelsesidan visar inte bekräftat enbart från Stripe-redirect', asy
   assert.match(confirmed.html, /Bokningen är bekräftad/);
   assert.match(confirmed.html, new RegExp(reference));
 });
+
+test('extrahus stoppar direktbetalning och hänvisar till manuell förfrågan', async () => {
+  const { options, context } = setup();
+  const body = validBody({
+    addons: {
+      ...validBody().addons,
+      extrahus: true,
+      extrahusNights: 2,
+      extrahusGuests: 2
+    }
+  });
+  const result = await handleDirectBooking(request({ body }), context, options);
+  assert.equal(result.status, 409);
+  assert.equal(result.jsonBody.code, 'EXTRAHUS_DIRECT_UNAVAILABLE');
+  assert.equal(result.jsonBody.manualReview, true);
+});

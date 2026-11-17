@@ -65,7 +65,7 @@
             <p class="field-error" aria-live="polite"></p>
           </div>
           <div class="booking-field">
-            <label for="field-guests">Antal gäster *</label>
+            <label for="field-guests">Antal gäster i herrgården *</label>
             <select id="field-guests" name="guests" required>
               <option value="">Välj antal</option>
               <option value="1">1 gäst</option>
@@ -107,6 +107,20 @@
               <input type="checkbox" id="addon-slutstad" name="slutstad">
               <label for="addon-slutstad">Slutstädning (exklusive kök) — 2 500 kr</label>
               <p class="booking-addon-note">Ett engångspris per vistelse. Köket ingår inte i städningen.</p>
+            </div>
+            <div class="booking-addon">
+              <input type="checkbox" id="addon-extrahus" name="extrahus">
+              <label for="addon-extrahus">Extrahus – 1 600 kr per natt</label>
+              <p class="booking-addon-note">Boka vårt extrahus som komplement till herrgården. Plats för upp till 6 personer.</p>
+              <div class="booking-addon-count">
+                <label for="extrahus-nights">Antal nätter:</label>
+                <input type="number" id="extrahus-nights" name="extrahusNights" min="1" value="1" disabled>
+              </div>
+              <div class="booking-addon-count">
+                <label for="extrahus-guests">Antal gäster i extrahuset (max 6):</label>
+                <input type="number" id="extrahus-guests" name="extrahusGuests" min="1" max="6" value="1" disabled>
+              </div>
+              <p class="booking-addon-note" id="extrahus-dates" hidden></p>
             </div>
             <div class="booking-addon">
               <input type="checkbox" id="addon-lakan" name="lakan">

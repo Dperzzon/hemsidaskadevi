@@ -86,11 +86,15 @@ function priceSummary(booking) {
 
 function addonEditor(booking) {
   const addons = booking.addons ?? {};
+  const extrahus = booking.extrahus ?? {};
   const row = (id, label, checked) => `<label class="check-row"><input type="checkbox" name="${id}"${checked ? ' checked' : ''}> <span>${escapeHtml(label)}</span></label>`;
   return `<div class="addon-editor">
     ${row('slutstad', 'Slutstädning', addons.slutstad)}
+    ${row('extrahus', 'Extrahus (1 600 kr/natt, max 6 gäster)', addons.extrahus)}
+    <label class="field field-inline"><span>Antal extrahusnätter</span><input type="number" min="1" max="${booking.nights}" name="extrahusNights" value="${escapeHtml(String(extrahus.nights || addons.extrahusNights || 1))}"></label>
+    <label class="field field-inline"><span>Gäster i extrahuset</span><input type="number" min="1" max="6" name="extrahusGuests" value="${escapeHtml(String(extrahus.guests || addons.extrahusGuests || 1))}"></label>
     ${row('lakan', 'Lakan och handdukar', addons.lakan)}
-    <label class="field field-inline"><span>Antal lakan</span><input type="number" min="0" max="${booking.guests}" name="linenCount" value="${escapeHtml(String(addons.linenCount ?? 0))}"></label>
+    <label class="field field-inline"><span>Antal lakan</span><input type="number" min="0" max="28" name="linenCount" value="${escapeHtml(String(addons.linenCount ?? 0))}"></label>
     ${row('ved', 'Ved', addons.ved)}
     ${row('tidigIncheckning', 'Tidig incheckning', addons.tidigIncheckning)}
     ${row('senUtcheckning', 'Sen utcheckning', addons.senUtcheckning)}
@@ -493,7 +497,11 @@ function renderBookingDetail(options) {
             ${fact('Ankomst', `<time datetime="${escapeHtml(booking.arrival)}">${escapeHtml(formatDateKey(booking.arrival, { long: true }))}</time>`)}
             ${fact('Avresa', `<time datetime="${escapeHtml(booking.departure)}">${escapeHtml(formatDateKey(booking.departure, { long: true }))}</time>`)}
             ${fact('Antal nätter', String(booking.nights))}
-            ${fact('Antal gäster', String(booking.guests))}
+            ${fact('Antal gäster (herrgård)', String(booking.guests))}
+            ${booking.extrahus?.enabled
+              ? fact('Extrahus', `${booking.extrahus.nights} nätter · ${escapeHtml(booking.extrahus.arrival)}–${escapeHtml(booking.extrahus.departure)} · ${booking.extrahus.guests} gäster`)
+              : ''}
+            ${fact('Totalt antal gäster', String(booking.totalGuests || booking.guests))}
           </div>
         </section>
 

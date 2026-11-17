@@ -428,3 +428,24 @@ test('filnamn saneras och modellen avvisar bekräftelse för icke bekräftade bo
     (error) => error instanceof DocumentError && error.status === 422
   );
 });
+
+test('offertmodellen visar extrahusets nätter, datum och belopp', () => {
+  const line = {
+    id: 'extrahus',
+    label: 'Extrahus (2 nätter × 1 600 kr, 2026-12-10–2026-12-12)',
+    quantity: 2,
+    unitPrice: 1600,
+    amount: 3200
+  };
+  const model = buildQuoteModel(bookingRecord({
+    addonLines: [line],
+    totalAddons: 3200,
+    total: 27200,
+    calculatedTotal: 27200
+  }), { rules: { published: false } });
+  assert.equal(model.addons.length, 1);
+  assert.equal(model.addons[0].label, line.label);
+  assert.equal(model.addons[0].quantity, 2);
+  assert.equal(model.addons[0].unitPrice, 1600);
+  assert.equal(model.addons[0].amount, 3200);
+});

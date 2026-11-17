@@ -449,6 +449,9 @@
             body: {
               addons: {
                 slutstad: checked(form, 'slutstad'),
+                extrahus: checked(form, 'extrahus'),
+                extrahusNights: Number(formValue(form, 'extrahusNights') || 0),
+                extrahusGuests: Number(formValue(form, 'extrahusGuests') || 0),
                 lakan: checked(form, 'lakan'),
                 linenCount: Number(formValue(form, 'linenCount') || 0),
                 ved: checked(form, 'ved'),
@@ -561,6 +564,9 @@
             airbnbOverrideIntent: checked(form, 'airbnbOverrideIntent'),
             addons: {
               slutstad: checked(form, 'slutstad'),
+              extrahus: checked(form, 'extrahus'),
+              extrahusNights: Number(formValue(form, 'extrahusNights') || 0),
+              extrahusGuests: Number(formValue(form, 'extrahusGuests') || 0),
               lakan: checked(form, 'lakan'),
               linenCount: Number(formValue(form, 'linenCount') || 0),
               ved: checked(form, 'ved'),

@@ -303,3 +303,43 @@ test('rÃ¤kneexempel: mÃ¥ndag till mÃ¥ndag = 7 nÃ¤tter = 55 000 kr fÃ¶re rabatt, 
   assert.equal(q.discountAmount, 16500);
   assert.equal(q.lodgingAfterDiscount, 38500);
 });
+
+test('extrahus: 1, 2 och 5 nätter kostar 1 600, 3 200 och 8 000 kr', () => {
+  const base = {
+    arrival: '2026-11-16', departure: '2026-11-21', guests: 4,
+    addons: { extrahus: true, extrahusNights: 1, extrahusGuests: 2 }
+  };
+  assert.equal(quote(base).addonsTotal, 1600);
+  assert.equal(quote({ ...base, addons: { ...base.addons, extrahusNights: 2 } }).addonsTotal, 3200);
+  assert.equal(quote({ ...base, addons: { ...base.addons, extrahusNights: 5 } }).addonsTotal, 8000);
+  assert.equal(quote({ ...base, addons: { ...base.addons, extrahus: false } }).addonsTotal, 0);
+});
+
+test('extrahus: nätter begränsas till huvudvistelsen och rabatt påverkar inte extrahuset', () => {
+  const keys = nightKeys('2026-11-16', '2026-11-21');
+  const many = quote({
+    arrival: '2026-11-16', departure: '2026-11-21', guests: 4,
+    addons: { extrahus: true, extrahusNights: 9, extrahusGuests: 2 }
+  });
+  assert.equal(many.extrahus.nights, 5);
+  assert.equal(many.extrahus.nightKeys.length, 5);
+  assert.equal(many.addonLines.find((line) => line.id === 'extrahus').amount, 8000);
+  const long = quote({
+    arrival: '2026-11-16', departure: '2026-11-23', guests: 4,
+    addons: { extrahus: true, extrahusNights: 2, extrahusGuests: 2 }
+  });
+  assert.ok(long.discountAmount > 0);
+  assert.equal(long.addonLines.find((line) => line.id === 'extrahus').amount, 3200);
+  assert.deepEqual(long.extrahus.nightKeys, keys.slice(0, 2));
+});
+
+test('extrahus: kombinerad bokning ger upp till 28 lakan av 30 gäster', () => {
+  const result = quote({
+    arrival: '2026-11-16', departure: '2026-11-19', guests: 24,
+    addons: { extrahus: true, extrahusNights: 2, extrahusGuests: 6, lakan: true, linenCount: 30 }
+  });
+  assert.equal(result.totalGuests, 30);
+  assert.equal(result.addonLines.find((line) => line.id === 'lakan').quantity, 28);
+  assert.equal(result.addonLines.find((line) => line.id === 'lakan').amount, 5600);
+  assert.equal(result.addonLines.find((line) => line.id === 'extrahus').amount, 3200);
+});

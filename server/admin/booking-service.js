@@ -14,7 +14,7 @@
 //   bara vid uttrycklig ändring och bevarar originalpriset.
 
 const crypto = require('node:crypto');
-const { quote, PRICE_VERSION } = require('../booking/pricing');
+const { quote, PRICE_VERSION, LINEN_MAX, EXTRAHUS_MAX_GUESTS } = require('../booking/pricing');
 const { handleAvailability } = require('../calendar/availability');
 const { MAIL } = require('../booking/mail');
 const { revokePaymentAccess } = require('../booking/payment-access');
@@ -84,14 +84,41 @@ function error(status, message, extra = {}) {
   return { status, jsonBody: { error: message, ...extra } };
 }
 
-function validAddons(input, guests) {
+function extrahusAddonErrors(input, nights) {
   const source = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
+  if (source.extrahus !== true) return {};
+  const errors = {};
+  const count = Number(source.extrahusNights);
+  if (!Number.isInteger(count) || count < 1 || count > nights) {
+    errors.extrahusNights = `Ange antal extrahusnätter (1–${Math.max(1, nights)}).`;
+  }
+  const guests = Number(source.extrahusGuests);
+  if (!Number.isInteger(guests) || guests < 1 || guests > EXTRAHUS_MAX_GUESTS) {
+    errors.extrahusGuests = `Ange antal gäster i extrahuset (1–${EXTRAHUS_MAX_GUESTS}).`;
+  }
+  return errors;
+}
+
+function validAddons(input, guests, options = {}) {  const source = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
   const lakan = source.lakan === true;
+  const extrahus = source.extrahus === true;
+  const mainNights = Math.max(0, Math.trunc(Number(options.nights) || 0));
+  let extrahusNights = extrahus ? Math.trunc(Number(source.extrahusNights) || 0) : 0;
+  if (extrahus) {
+    if (mainNights > 0) extrahusNights = Math.min(Math.max(1, extrahusNights), mainNights);
+    else extrahusNights = 0;
+  }
+  let extrahusGuests = extrahus ? Math.trunc(Number(source.extrahusGuests) || 0) : 0;
+  if (extrahus) extrahusGuests = Math.min(Math.max(1, extrahusGuests), EXTRAHUS_MAX_GUESTS);
   let linenCount = lakan ? Number(source.linenCount) : 0;
   if (!Number.isFinite(linenCount)) linenCount = 0;
-  linenCount = Math.min(Math.max(0, Math.trunc(linenCount)), guests);
+  const totalGuests = Math.max(0, Number(guests) || 0) + extrahusGuests;
+  linenCount = Math.min(Math.max(0, Math.trunc(linenCount)), Math.min(LINEN_MAX, totalGuests));
   return {
     slutstad: source.slutstad === true,
+    extrahus,
+    extrahusNights,
+    extrahusGuests,
     lakan,
     linenCount,
     ved: source.ved === true,
@@ -165,6 +192,7 @@ function validateManualBooking(body, now = new Date()) {
     if (!Number.isInteger(guests) || guests < 1 || guests > MAX_GUESTS) {
       errors.guests = `Ange antal gäster (1–${MAX_GUESTS}).`;
     }
+    Object.assign(errors, extrahusAddonErrors(body.addons, dates.nights));
     if (!SOURCES.has(bookingSource) || bookingSource === 'WEB') {
       errors.bookingSource = 'Ange en giltig bokningskälla.';
     }
@@ -192,7 +220,7 @@ function validateManualBooking(body, now = new Date()) {
   }
 
   const addons = mode === 'booking'
-    ? validAddons(body.addons, guests)
+    ? validAddons(body.addons, guests, { nights: dates.nights })
     : validAddons({}, 0);
   let pricing = null;
   if (mode === 'booking') {
@@ -227,6 +255,8 @@ function validateManualBooking(body, now = new Date()) {
       statusCode: mode === 'block' ? 'BLOCKED' : statusCode,
       status: statusLabel(mode === 'block' ? 'BLOCKED' : statusCode),
       addons,
+      extrahus: pricing?.extrahus ?? { enabled: false, nights: 0, guests: 0, nightKeys: [] },
+      totalGuests: pricing?.totalGuests ?? guests,
       lodgingBase: pricing?.lodgingBase ?? 0,
       peakNights: pricing?.peakNights ?? 0,
       peakBase: pricing?.peakBase ?? 0,
@@ -276,6 +306,17 @@ async function calendarConflicts(repo, record) {
   return rows.filter((row) => row.reference !== record.reference);
 }
 
+async function extrahusConflicts(repo, record) {
+  if (record.extrahus?.enabled !== true || !Array.isArray(record.extrahus.nightKeys) || !record.extrahus.nightKeys.length) {
+    return [];
+  }
+  if (typeof repo.listCalendarByResource !== 'function') return [];
+  const rows = await repo.listCalendarByResource(
+    'extrahus', record.extrahus.nightKeys[0], record.extrahus.departure
+  );
+  return rows.filter((row) => row.reference !== record.reference);
+}
+
 async function airbnbConflicts(record, options, context) {
   if (options.requireAirbnbCheck === false) return { blocked: [] };
   const handler = options.availabilityHandler ?? handleAvailability;
@@ -313,6 +354,15 @@ async function assertConfirmable(repo, record, options, context, now, body = {})
       error: error(409, 'Datumen är redan blockerade i den interna kalendern.', {
         code: 'INTERNAL_CALENDAR_CONFLICT',
         conflicts: calendar.map((row) => row.night ?? row.RowKey)
+      })
+    };
+  }
+  const extrahusCalendar = await extrahusConflicts(repo, record);
+  if (extrahusCalendar.length) {
+    return {
+      error: error(409, 'Extrahuset är redan bokat någon av de valda nätterna.', {
+        code: 'EXTRAHUS_CALENDAR_CONFLICT',
+        conflicts: extrahusCalendar.map((row) => row.night ?? row.RowKey)
       })
     };
   }
@@ -365,35 +415,46 @@ async function assertConfirmable(repo, record, options, context, now, body = {})
 async function lockCalendar(repo, record, principal, now) {
   const created = [];
   const actor = actorOf(principal);
-  const nights = nightKeys(record.arrival, record.departure);
+  const jobs = [
+    { resource: 'main', nights: nightKeys(record.arrival, record.departure) },
+    {
+      resource: 'extrahus',
+      nights: record.extrahus?.enabled === true && Array.isArray(record.extrahus.nightKeys)
+        ? record.extrahus.nightKeys
+        : []
+    }
+  ];
   // Nätter som redan ägs av samma referens (t.ex. en betalningsreservation
   // som ska bekräftas manuellt) återanvänds i stället för att skapas om.
   const existing = await repo.listCalendarByReference(record.reference).catch(() => []);
-  const owned = new Set((existing ?? []).map((row) => row.night ?? row.RowKey));
-  for (const night of nights) {
-    if (owned.has(night)) continue;
-    try {
-      await repo.createCalendarNight(night, {
-        type: record.statusCode === 'BLOCKED' ? 'MANUAL' : 'BOOKING',
-        reference: record.reference,
-        blockId: record.blockId ?? '',
-        source: record.bookingSource,
-        note: record.latestNote ?? '',
-        createdBy: actor.name,
-        createdAt: now.toISOString()
-      });
-      created.push(night);
-    } catch (cause) {
-      for (const inserted of created) {
-        await repo.deleteCalendarNight(inserted, record.reference).catch(() => {});
+  const owned = new Set((existing ?? []).map((row) =>
+    `${row.resource === 'extrahus' ? 'extrahus' : 'main'}:${row.night ?? row.RowKey}`));
+  for (const job of jobs) {
+    for (const night of job.nights) {
+      if (owned.has(`${job.resource}:${night}`)) continue;
+      try {
+        await repo.createCalendarNight(night, {
+          type: record.statusCode === 'BLOCKED' ? 'MANUAL' : 'BOOKING',
+          reference: record.reference,
+          blockId: record.blockId ?? '',
+          source: record.bookingSource,
+          note: record.latestNote ?? '',
+          createdBy: actor.name,
+          createdAt: now.toISOString()
+        }, { resource: job.resource });
+        created.push({ night, resource: job.resource });
+      } catch (cause) {
+        for (const inserted of [...created].reverse()) {
+          await repo.deleteCalendarNight(inserted.night, record.reference, { resource: inserted.resource }).catch(() => {});
+        }
+        if (cause?.status === 409) {
+          return error(409, 'Datumen är redan blockerade i den interna kalendern. Ingen delvis blockering sparades.', {
+            code: 'INTERNAL_CALENDAR_CONFLICT',
+            conflicts: [night]
+          });
+        }
+        throw cause;
       }
-      if (cause?.status === 409) {
-        return error(409, 'Datumen är redan blockerade i den interna kalendern. Ingen delvis blockering sparades.', {
-          code: 'INTERNAL_CALENDAR_CONFLICT',
-          conflicts: [night]
-        });
-      }
-      throw cause;
     }
   }
   return { created };
@@ -402,8 +463,58 @@ async function lockCalendar(repo, record, principal, now) {
 async function releaseCalendar(repo, reference) {
   const rows = await repo.listCalendarByReference(reference);
   for (const row of rows) {
-    await repo.deleteCalendarNight(row.night ?? row.RowKey, reference).catch(() => {});
+    await repo.deleteCalendarNight(row.night ?? row.RowKey, reference, { resource: row.resource }).catch(() => {});
   }
+}
+
+// Håller extrahusets kalenderrad i takt med att tillvalet ändras på en
+// bekräftad bokning. Nya nätter skapas först när alla är lediga, därefter
+// tas nätter som inte längre omfattas bort.
+async function syncExtrahusCalendar(repo, record, existingRows, principal, now) {
+  if (typeof repo.listCalendarByResource !== 'function') return { ok: true };
+  const existing = (existingRows ?? []).filter((row) => row.resource === 'extrahus');
+  const oldKeys = existing.map((row) => row.night ?? row.RowKey);
+  const newKeys = record.extrahus?.enabled === true && Array.isArray(record.extrahus.nightKeys)
+    ? record.extrahus.nightKeys
+    : [];
+  const newSet = new Set(newKeys);
+  const oldSet = new Set(oldKeys);
+  const actor = actorOf(principal);
+  const created = [];
+  for (const night of newKeys) {
+    if (oldSet.has(night)) continue;
+    try {
+      await repo.createCalendarNight(night, {
+        type: 'BOOKING',
+        reference: record.reference,
+        blockId: record.blockId ?? '',
+        source: record.bookingSource,
+        note: record.latestNote ?? '',
+        createdBy: actor.name,
+        createdAt: now.toISOString()
+      }, { resource: 'extrahus' });
+      created.push(night);
+    } catch (cause) {
+      for (const inserted of created) {
+        await repo.deleteCalendarNight(inserted, record.reference, { resource: 'extrahus' }).catch(() => {});
+      }
+      if (cause?.status === 409) {
+        return {
+          ok: false,
+          error: error(409, 'Extrahuset är redan bokat någon av de valda nätterna.', {
+            code: 'EXTRAHUS_CALENDAR_CONFLICT',
+            conflicts: [night]
+          })
+        };
+      }
+      throw cause;
+    }
+  }
+  for (const night of oldKeys) {
+    if (newSet.has(night)) continue;
+    await repo.deleteCalendarNight(night, record.reference, { resource: 'extrahus' }).catch(() => {});
+  }
+  return { ok: true };
 }
 
 async function warningContext(repo, record, now) {
@@ -1314,21 +1425,34 @@ async function updateAddons(repo, principal, reference, body = {}, options = {},
   if (expectedEtag && raw.etag && expectedEtag !== raw.etag) {
     return error(409, 'Bokningen har ändrats av någon annan. Uppdatera sidan och försök igen.');
   }
-  const addons = validAddons(body.addons, Number(record.guests || 0));
+  const extrahusErrors = extrahusAddonErrors(body.addons, Number(record.nights || 0));
+  if (Object.keys(extrahusErrors).length) {
+    return error(400, 'Kontrollera extrahusets uppgifter.', { fields: extrahusErrors });
+  }
+  const addons = validAddons(body.addons, Number(record.guests || 0), { nights: Number(record.nights || 0) });
   const pricing = quote({
     arrival: record.arrival,
     departure: record.departure,
     guests: Number(record.guests || 0),
     addons
   });
+  const now = options.now ?? new Date();
+  if (record.statusCode === 'CONFIRMED') {
+    const existingCalendar = await repo.listCalendarByReference(record.reference).catch(() => []);
+    const sync = await syncExtrahusCalendar(repo, {
+      ...record, addons, extrahus: pricing.extrahus
+    }, existingCalendar, principal, now);
+    if (!sync.ok) return sync.error;
+  }
   const originalPricing = record.originalPricing ?? pricingSnapshot(record);
   const total = record.agreedTotal !== null && record.agreedTotal !== undefined
     ? Number(record.agreedTotal)
     : pricing.total;
-  const now = options.now ?? new Date();
   const updatedRecord = {
     ...record,
     addons,
+    extrahus: pricing.extrahus,
+    totalGuests: pricing.totalGuests,
     lodgingBase: pricing.lodgingBase,
     peakNights: pricing.peakNights,
     peakBase: pricing.peakBase,

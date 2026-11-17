@@ -320,6 +320,20 @@ function normalizeBooking(record = {}, options = {}) {
     departure: String(record.departure ?? ''),
     nights: numberOr(record.nights),
     guests: numberOr(record.guests),
+    totalGuests: numberOr(record.totalGuests, numberOr(record.guests)),
+    addons: record.addons && typeof record.addons === 'object' && !Array.isArray(record.addons)
+      ? { ...record.addons }
+      : {},
+    extrahus: record.extrahus && typeof record.extrahus === 'object'
+      ? {
+        enabled: record.extrahus.enabled === true,
+        nights: numberOr(record.extrahus.nights),
+        guests: numberOr(record.extrahus.guests),
+        arrival: String(record.extrahus.arrival ?? ''),
+        departure: String(record.extrahus.departure ?? ''),
+        nightKeys: Array.isArray(record.extrahus.nightKeys) ? record.extrahus.nightKeys.map(String) : []
+      }
+      : null,
     firstName: String(record.firstName ?? ''),
     lastName: String(record.lastName ?? ''),
     guestName: [record.firstName, record.lastName].filter(Boolean).join(' ') ||
