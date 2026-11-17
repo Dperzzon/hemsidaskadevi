@@ -41,6 +41,8 @@ try {
     ['/boende', 200], ['/aktiviteter', 200], ['/priser', 200], ['/mat-dryck', 200],
     ['/om-oss', 200], ['/vanliga-fragor', 200], ['/kontakt', 200],
     ['/digital-visning', 200], ['/boka', 200], ['/lediga-datum', 200],
+    ['/betalning-klar', 200], ['/betalning-avbruten', 200],
+    [`/betala/${'x'.repeat(43)}`, 404],
     ['/robots.txt', 200],
     ['/sitemap.xml', 200],
     ['/images/logo.png', 200],
@@ -81,6 +83,14 @@ try {
   });
   if (bookingPost.status !== 503) fail(`POST /api/booking-requests gav ${bookingPost.status}, förväntat 503 innan konfiguration`);
   await bookingPost.body?.cancel();
+
+  const stripeWebhook = await fetch(`${base}/api/stripe/webhook`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Stripe-Signature': 't=1,v1=0' },
+    body: '{}'
+  });
+  if (stripeWebhook.status !== 503) fail(`POST /api/stripe/webhook gav ${stripeWebhook.status}, förväntat 503 innan aktivering`);
+  await stripeWebhook.body?.cancel();
 
   // Hashade resurser ska ha immutable cache och serveras komprimerade,
   // och typsnittet ska finnas lokalt.

@@ -9,6 +9,8 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { handleAvailability } = require('./calendar/availability');
 const { handleBookingRequest, createRateLimiter } = require('./booking/requests');
+const { handleStripeWebhook } = require('./booking/stripe-webhook');
+const { handlePaymentPage, handlePaymentAction } = require('./booking/payment-page');
 const { loadRules, publicRules } = require('./booking/rules');
 const { createStore, isConfigured } = require('./booking/store');
 
@@ -40,7 +42,7 @@ const ALLOWED_DIRS = new Set(['pages', 'assets', 'images', 'fonts', 'css', 'js']
 const PAGE_ROUTES = new Set([
   'foretag', 'fest', 'brollop', 'semester', 'boende', 'aktiviteter',
   'priser', 'mat-dryck', 'om-oss', 'vanliga-fragor', 'kontakt',
-  'digital-visning', 'boka', 'lediga-datum'
+  'digital-visning', 'boka', 'lediga-datum', 'betalning-klar', 'betalning-avbruten'
 ]);
 
 const SECURITY_HEADERS = {
@@ -214,6 +216,53 @@ function readJsonBody(req, limit = 16 * 1024) {
   });
 }
 
+function readRawBody(req, limit = 64 * 1024) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks = [];
+    req.on('data', (chunk) => {
+      size += chunk.length;
+      if (size > limit) {
+        reject(new Error('För stort meddelande'));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
+async function readFormBody(req, limit = 32 * 1024) {
+  const contentType = String(req.headers['content-type'] ?? '').toLowerCase();
+  if (!contentType.startsWith('application/x-www-form-urlencoded')) {
+    throw new Error('Fel innehållstyp');
+  }
+  const raw = await readRawBody(req, limit);
+  const params = new URLSearchParams(raw.toString('utf8'));
+  const body = {};
+  for (const [key, value] of params) {
+    if (!(key in body)) body[key] = value;
+  }
+  return body;
+}
+
+function isSameOrigin(req) {
+  const origin = req.headers.origin;
+  if (!origin) return true;
+  try {
+    return new URL(origin).host === String(req.headers.host ?? '');
+  } catch {
+    return false;
+  }
+}
+
+function sendHtmlResult(res, result) {
+  res.writeHead(result.status, { ...SECURITY_HEADERS, ...(result.headers || {}) });
+  res.end(result.html || '');
+}
+
 function clientIp(req) {
   // App Service lägger till klientens IP sist i X-Forwarded-For. Ta sista
   // posten så att en klient inte kan kringgå hastighetsbegränsningen genom
@@ -236,6 +285,24 @@ function createRequestListener(options = {}) {
       store: createStore(options),
       rateLimiter
     }));
+  const stripeWebhookHandler = options.stripeWebhookHandler ??
+    ((request, context) => handleStripeWebhook(request, context, { ...options, store: createStore(options) }));
+  const paymentOptions = {
+    stripeEnabled: options.stripeEnabled ?? process.env.STRIPE_ENABLED === '1',
+    stripeSecretKey: options.stripeSecretKey ?? process.env.STRIPE_SECRET_KEY,
+    stripeAllowLive: options.stripeAllowLive,
+    stripeFetchImpl: options.stripeFetchImpl,
+    stripeApiBase: options.stripeApiBase,
+    stripeClient: options.stripeClient,
+    cardEnabled: options.cardEnabled ?? process.env.STRIPE_CARD_ENABLED !== '0',
+    swishEnabled: options.swishEnabled ?? process.env.STRIPE_SWISH_ENABLED === '1',
+    publicBaseUrl: options.publicBaseUrl,
+    outboxEnabled: options.outboxEnabled ?? process.env.STRIPE_OUTBOX_ENABLED === '1'
+  };
+  const paymentPageHandler = options.paymentPageHandler ??
+    ((request, context) => handlePaymentPage(request, context, { ...paymentOptions, store: createStore(options) }));
+  const paymentActionHandler = options.paymentActionHandler ??
+    ((request, context) => handlePaymentAction(request, context, { ...paymentOptions, store: createStore(options) }));
   const rulesHandler = options.rulesHandler ?? (async () => publicRules(await loadRules(options)));
   const warn = options.warn ?? ((message) => console.error(message));
   // Kanoniskt värdnamn: rotdomänen 301-omdirigeras till www. Endast exakt
@@ -308,6 +375,79 @@ function createRequestListener(options = {}) {
       return;
     }
 
+    const paymentPageMatch = /^\/betala\/([A-Za-z0-9_-]{43})$/.exec(url.pathname);
+    if (paymentPageMatch && (req.method === 'GET' || req.method === 'HEAD')) {
+      try {
+        const result = await paymentPageHandler(
+          {
+            token: paymentPageMatch[1],
+            query: Object.fromEntries(url.searchParams)
+          },
+          { warn },
+          {}
+        );
+        sendHtmlResult(res, result);
+      } catch {
+        await sendErrorPage(res, root, 503);
+      }
+      return;
+    }
+
+    const paymentActionMatch = /^\/api\/payments\/([A-Za-z0-9_-]{43})\/(card|swish|invoice-request)$/.exec(url.pathname);
+    if (paymentActionMatch && req.method === 'POST') {
+      if (!isSameOrigin(req)) {
+        sendJson(res, 403, { error: 'Förfrågan kommer från en otillåten origin.' });
+        return;
+      }
+      let form = {};
+      if (paymentActionMatch[2] === 'invoice-request') {
+        try {
+          form = await readFormBody(req);
+        } catch {
+          sendJson(res, 400, { error: 'Fakturauppgifterna kunde inte tolkas.' });
+          return;
+        }
+      }
+      try {
+        const result = await paymentActionHandler(
+          {
+            token: paymentActionMatch[1],
+            action: paymentActionMatch[2] === 'card'
+              ? 'card'
+              : (paymentActionMatch[2] === 'swish' ? 'swish' : 'invoice'),
+            form
+          },
+          { warn },
+          {}
+        );
+        sendHtmlResult(res, result);
+      } catch {
+        sendJson(res, 503, { error: 'Betalningssidan är tillfälligt otillgänglig.' });
+      }
+      return;
+    }
+
+    if (url.pathname === '/api/stripe/webhook' && req.method === 'POST') {
+      let rawBody;
+      try {
+        rawBody = await readRawBody(req);
+      } catch {
+        sendJson(res, 400, { error: 'Förfrågan kunde inte tolkas.' });
+        return;
+      }
+      try {
+        const result = await stripeWebhookHandler(
+          { rawBody, signature: req.headers['stripe-signature'] },
+          { warn },
+          {}
+        );
+        sendJson(res, result.status, result.jsonBody, result.headers);
+      } catch {
+        sendJson(res, 503, { error: 'Betalningen kunde inte registreras just nu.' });
+      }
+      return;
+    }
+
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       sendJson(res, 405, { error: 'Metod tillåts inte.' }, { Allow: 'GET, HEAD, POST' });
       return;
@@ -361,4 +501,12 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { createRequestListener, readJsonBody, resolveStatic, MIME_TYPES, PAGE_ROUTES };
+module.exports = {
+  createRequestListener,
+  readJsonBody,
+  readRawBody,
+  readFormBody,
+  resolveStatic,
+  MIME_TYPES,
+  PAGE_ROUTES
+};

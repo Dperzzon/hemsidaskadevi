@@ -89,34 +89,168 @@ Googles kvoter för den kontotypen räcker (de gör det med god marginal).
 - **"Visas aldrig som mottagen om lagringen misslyckas":** misslyckat sparande
   kastar → HTTP 500 och ingen bekräftelse visas (tester bekräftar).
 
-## Logic Apps och Gmail (förberett, ej deployerat)
+## E-postutskick: Resend via Logic Apps (steg 4B/4C, ej aktiverat)
 
-Fil: `infra/logicapp/email-notifier.workflow.json` + modul
-`infra/modules/logic-app-notify.bicep`.
+Beslut 2026-11-11: Gmail-connectorn (privata Gmail-konton begränsar HTTP-actions)
+och Azure Communication Services Email (pensioneras 2028-09-30) avvisades.
+**Resend** används för transaktionsmejl.
 
-- **Trigger:** Recurrence var 5:e minut (ingen HTTP-trigger/webbhook alls —
-  det finns ingen publikt oskyddad ingång).
-- **Flöde:** hämta utkorgsposter (`PartitionKey eq 'outbox' and status eq
-  'Utkorg' and attemptCount lt 5`) → markera "Skickar" (If-Match, räknare +
-  1) → **Send email (V2)** via den befintliga Gmail-anslutningen (till
-  skadevigard@gmail.com, reply-to samma adress) → markera "Skickad" (sentAt).
-  Vid fel: markera "Misslyckad"; försöksräknaren förhindrar oändliga
-  återförsök, och exponentiell retry-policy (4 försök) hanterar tillfälliga
-  fel inom körningen.
-- **Idempotens/undvik duplicering:** en post i "Skickar" plockas aldrig igen
-  av pågående pollning; "Skickad"/"Misslyckad" plockas aldrig. Om körningen
-  kraschar mellan sändning och statusuppdatering kan mejlet i värsta fall
-  skickas en gång till vid manuell omkörning — residuerlig risk som är
-  dokumenterad och rimlig för denna volym.
-- **Personuppgifter i körhistorik:** känsliga in/utdata döljs med
-  `secureData` på HTTP- och mejlaktionerna; HTML-bodyn är servergenererad och
-  HTML-escapad (`escapeHtml` i `server/booking/requests.js`, tester bekräftar)
-  så Logic Apps aldrig tolkar gästuppgifter som HTML. Rekommendation:
-  begränsa läsbehörigheten till resursgruppen (RBAC).
-- **Källmål för mejlen:** värdnotis till skadevigard@gmail.com med referens,
-  datum, gäster, tillval, rabatt, överlappsvarningar och kontaktuppgifter;
-  mottagningsbekräftelse till gästens e-postadress (reply-to
-  skadevigard@gmail.com). Båda märkta tydligt: "inte en bekräftad bokning".
+- **Arkitektur:** utkorgsposter i `bookingrequests` (PartitionKey `outbox`) →
+  Logic App `logic-skadevi-bokningsnotis` (Recurrence 5 min, concurrency 1,
+  skapas Disabled) → hämtar API-nyckeln från Key Vault-sekret
+  `resend-api-key` med Managed Identity (audience `https://vault.azure.net`,
+  rollen Key Vault Secrets User — endast getSecret) → POST
+  `https://api.resend.com/emails` med `Authorization: Bearer` och
+  `Idempotency-Key` = utkorgspostens RowKey.
+- **Avsändare:** bokning@skadeviherrgard.com (kräver domänverifiering hos
+  Resend: TXT `resend._domainkey` DKIM, TXT `send` SPF, MX `send` — alla
+  subdomän-scopade, rör inte befintliga poster). Mottagare för värdenotiser och
+  reply-to: skadevigard@gmail.com. Gästbekräftelser till gästens angivna
+  adress.
+- **API-acceptans ≠ leverans:** status "Skickad" betyder endast att Resend
+  accepterat anropet; `resendId` och `deliveryStatus = "Inväntar
+  leveranskontroll"` sparas separat. Verklig leverans/studs följs upp via
+  Resends webhooks (`email.delivered/bounced/failed/complained`) eller
+  `GET /emails/:id` (`last_event`) — implementeras som eget steg före
+  aktivering.
+- **Skydd mot dubbla utskick:** Logic Apps ETag-anspråk ("Skickar") +
+  Resends idempotensnyckel. Resends skydd gäller dock endast 24 timmar —
+  därför flaggas en post som legat i "Skickar" utan bekräftat resultat i mer
+  än 24 timmar som **"Kräver manuell kontroll"** i stället för att skickas
+  igen. HTTP 409 (idempotenskonflikt) flaggas också för manuell kontroll, liksom
+  det sista återförsöket (`attemptCount` uppnått `maxAttempts`) — ingen post
+  dör tyst. Både Resends `invalid_idempotent_request` (avvikande innehåll) och
+  `concurrent_idempotent_requests` (samtidigt pågående anrop) behandlas
+  konservativt som manuell kontroll; det senare kan skickas om manuellt utan
+  risk för dubblett. `Skickar` hämtas alltid av filtret (även vid `attemptCount
+  >= maxAttempts`) så att en kvarglömd post kan flaggas manuellt i stället för
+  att bli osynlig för all framtid. En post som står kvar i `Skickar` när
+  `attemptCount` nått `maxAttempts` flaggas manuellt utan omsändning.
+
+### Steg 7A — två förberedda mejltyper
+
+Båda mejlen skapas som separata utkorgsposter med komplett HTML **och**
+plaintext (`mailHtml`/`mailText`); Logic App skickar båda fälten till Resend.
+
+- **A. Ny bokningsförfrågan till Skadevi** — mottagare
+  `skadevigard@gmail.com`, reply-to samma adress. Ämne: `Ny bokningsförfrågan
+  SK-… — Inväntar godkännande`. Innehåller referens, status, vistelse, gäster,
+  kontaktuppgifter, serverberäknad prisöversikt (nattpriser, rabatt, tillval,
+  totalpris, prisversion), regelversion, överlappsvarning och gästens
+  önskemål. Alla gästfält HTML-escapas.
+- **B. Mottagningsbekräftelse till gästen** — mottagare gästens e-post,
+  reply-to `skadevigard@gmail.com`. Ämne: `Vi har tagit emot din
+  bokningsförfrågan (SK-…)`. Innehåller referens, vistelse, gästantal och
+  beräknat totalpris samt en tydlig markering att vistelsen **ännu inte är
+  bekräftad**.
+
+**Status 2026-11-11 (steg 7A, före aktivering):**
+
+- `integration/resend-bokning` är sammanslagen med senaste `main`; pris-,
+  kalender- och bokningsändringarna är identiska med `main` (verifierat med
+  diff och 216 enhetstester).
+- Logic App-mallen är byggd utan fel och anropar Resends aktuella
+  `POST /emails` (fälten `from`, `to`, `reply_to`, `subject`, `html`, `text`
+  och `Idempotency-Key`). API-nyckeln hämtas per körning från Key Vault.
+- Key Vault `kv-skadevi-prod` har RBAC aktiverat. **Sekretet `resend-api-key`
+  finns ännu inte** (endast `airbnb-ical-url`) — det måste skapas manuellt
+  innan aktivering; inga behörigheter ändras i detta steg.
+- Ingen Logic App är driftsatt i `rg-skadevi-prod`; modulen skapar den i
+  `Disabled`-läge först vid en godkänd deployment.
+- `BOOKING_REQUESTS_ENABLED` är fortsatt avstängt: live-appen saknar
+  inställningen (standard = av) och Bicep sätter `'0'` vid nästa deployment.
+- Domänen ligger fortfarande på Wix namnservrar och Resend-posterna
+  (`resend._domainkey`, `send` TXT/MX) finns inte i DNS. Domänverifiering hos
+  Resend kan därför inte slutföras förrän överföringen till GoDaddy är klar.
+
+### Steg 7C/7D — isolerad, tvåfasig deployment av Logic App
+
+Deploymenten är uppdelad i två separata moduler/filer eftersom Key Vault-rollen
+scopas till det enskilda sekretet, som ännu inte finns.
+
+**Fas A** – `infra/modules/logic-app-notify.bicep` med
+`infra/logic-app-notify.bicepparam` skapar exakt:
+
+1. `logic-skadevi-bokningsnotis` (`state: Disabled`, system-assigned identity)
+2. `Storage Table Data Contributor` på tabellnivån `bookingrequests`
+
+**Fas B** – `infra/modules/keyvault-secret-role.bicep` med
+`infra/keyvault-secret-role.bicepparam`, först när sekretet `resend-api-key`
+har skapats manuellt, skapar exakt:
+
+3. `Key Vault Secrets User` på resursen
+   `.../vaults/kv-skadevi-prod/secrets/resend-api-key`
+
+Fas B skapar ingen Logic App och ingen tabellroll; den refererar den befintliga
+Logic Appens managed identity och det befintliga sekretet. Ingen App Service,
+lagringskonto, Key Vault-konfiguration eller DNS ingår i någon av faserna.
+Befintliga resurser refereras endast som `existing`, och inga befintliga
+RBAC-tilldelningar ändras.
+
+Kör alltid validate och what-if före en godkänd deployment:
+
+```powershell
+# Fas A
+az deployment group validate -g rg-skadevi-prod `
+  --template-file infra/modules/logic-app-notify.bicep `
+  --parameters infra/logic-app-notify.bicepparam
+az deployment group what-if -g rg-skadevi-prod `
+  --template-file infra/modules/logic-app-notify.bicep `
+  --parameters infra/logic-app-notify.bicepparam
+
+# Fas B (endast efter att resend-api-key skapats manuellt)
+az deployment group validate -g rg-skadevi-prod `
+  --template-file infra/modules/keyvault-secret-role.bicep `
+  --parameters infra/keyvault-secret-role.bicepparam
+az deployment group what-if -g rg-skadevi-prod `
+  --template-file infra/modules/keyvault-secret-role.bicep `
+  --parameters infra/keyvault-secret-role.bicepparam
+```
+
+What-if ska visa **2 att skapa i fas A** och **1 att skapa i fas B**; övriga
+befintliga resurser som `Ignore`. Om något befintligt visas som `Modify` eller
+`Delete` ska deploymenten avbrytas.
+
+**RBAC-scope:** Azure RBAC stöder rolltilldelning på enskild hemlighet enligt
+[Key Vault RBAC-guiden](https://learn.microsoft.com/en-us/azure/key-vault/general/rbac-guide)
+(secret scope role assignment). Här används `Key Vault Secrets User` på
+`.../secrets/resend-api-key`, vilket ger läsbehörighet till just den hemligheten
+och inte till `airbnb-ical-url` eller valvets övriga hemligheter. Logic Appens
+identitet har ingen annan Key Vault-roll, så ingen bredare åtkomst ärvs.
+Sekretesscope rekommenderas generellt bara i undantagsfall; här är det motiverat
+av principen om minsta behörighet. Microsofts exempel förutsätter att sekretet
+redan finns, och rolltilldelningen är en extension-resurs på sekretesscopet.
+Fas B körs därför först efter att sekretet skapats manuellt; vad-if kan visserligen
+visa den planerade rolltilldelningen även innan sekretet finns, men det är inte
+ett bevis på att deploymenten är giltig.
+
+
+
+### GDPR — Resends personuppgiftsbehandling (kräver godkännande före aktivering)
+
+- **Lagringsplats:** all kontodata (metadata, loggar, API-poster) lagras i
+  **USA** oavsett vald sändningsregion (eu-west-1 är valbar för själva
+  sändningen). Import till USA sker enligt EU-US Data Privacy Framework /
+  standardavtalsklausuler i Resends DPA.
+- **DPA:** finns i Resend Dashboard under Settings → Documents
+  (resend.com/legal/dpa); förtecknad underkonsulenter på
+  resend.com/legal/subprocessors. SOC 2 Type II-rapport finns i samma sektion.
+- **Innehållslagring:** Resend lagrar skickat innehåll; det kan stängas av
+  (kräver Pro-plan ≥ 1 månad + tillägg 50 USD/mån + minst 3 000 skickade mejl
+  med < 5 % bounce). Vid låg volym är avstängning alltså inte möjlig från
+  start — acceptera att sända mejl lagras hos Resend (i USA) eller välj annan
+  leverantör.
+- **Dataminimering:** endast referens, datum, nätter, gästantal, tillval och
+  kontaktuppgifter skickas; ingen IP, inga interna ID:n, inga extra fält
+  (verifierat i `tests/unit/email-resend-workflow.test.js`).
+- **Åtgärder före aktivering (godkännande krävs):**
+  1. Signera/granska Resends DPA (ingens contrasignering krävs — gäller vid
+     kontoansvariga).
+  2. Välj sändningsregion (förslag: eu-west-1, Irland).
+  3. Acceptera innehållslagring i USA tills volymkraven för avstängning är
+     uppfyllda, eller välj EU-alternativ hos annan leverantör.
+  4. Planera radering: utkorgsposter gallras enligt 24-månadersrutinen;
+     Resends lagrade mejl kvarstår tills kontot stängs/renas.
 
 ## Kill switch (inskick avstängt tills vidare)
 

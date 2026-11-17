@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.49.2.45890",
-      "templateHash": "9632791705926322816"
+      "templateHash": "15066542584338367907"
     }
   },
   "parameters": {
@@ -135,6 +135,41 @@
         "description": "Namn på lagringskontot för bokningsförfrågningar (Azure Table Storage, Sweden Central). Tomt = bokningslagring förbereds ännu inte. Sätts först efter Skadevis godkännande."
       }
     },
+    "enableStripeWebhook": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Aktiverar Stripe-webhooken på den publika appen. Standard false: endpointen svarar 503 och ingen betalning registreras."
+      }
+    },
+    "enableCardCheckout": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Aktiverar kortbetalningar på gästens betalningssida. Standard false: endast faktura."
+      }
+    },
+    "enableSwishCheckout": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Aktiverar Swish-betalningar på gästens betalningssida. Standard false: endast kort och faktura."
+      }
+    },
+    "stripeSecretUri": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "SecretUri till Stripes hemliga nyckel i befintligt Key Vault. Ingen hemlighet anges i Git. Tomt = fail-closed."
+      }
+    },
+    "stripeWebhookSecretUri": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "SecretUri till Stripe-webhookens hemlighet i befintligt Key Vault. Ingen hemlighet anges i Git. Tomt = fail-closed."
+      }
+    },
     "logicAppPrincipalId": {
       "type": "string",
       "defaultValue": "",
@@ -214,6 +249,21 @@
           },
           "bookingStorageAccountName": {
             "value": "[parameters('bookingStorageAccountName')]"
+          },
+          "enableStripeWebhook": {
+            "value": "[parameters('enableStripeWebhook')]"
+          },
+          "enableCardCheckout": {
+            "value": "[parameters('enableCardCheckout')]"
+          },
+          "enableSwishCheckout": {
+            "value": "[parameters('enableSwishCheckout')]"
+          },
+          "stripeSecretUri": {
+            "value": "[parameters('stripeSecretUri')]"
+          },
+          "stripeWebhookSecretUri": {
+            "value": "[parameters('stripeWebhookSecretUri')]"
           }
         },
         "template": {
@@ -223,7 +273,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.49.2.45890",
-              "templateHash": "2866168765345082724"
+              "templateHash": "10282457061376692517"
             }
           },
           "parameters": {
@@ -332,6 +382,41 @@
               "metadata": {
                 "description": "Namn på lagringskontot för bokningsförfrågningar. Tomt = ingen bokningslagring aktiverad ännu (se infra/modules/storage-tables.bicep)."
               }
+            },
+            "enableStripeWebhook": {
+              "type": "bool",
+              "defaultValue": false,
+              "metadata": {
+                "description": "Aktiverar Stripe-webhooken. false = /api/stripe/webhook svarar 503 och inga betalningar registreras."
+              }
+            },
+            "enableCardCheckout": {
+              "type": "bool",
+              "defaultValue": false,
+              "metadata": {
+                "description": "Aktiverar kortbetalningar på gästens betalningssida. false = endast faktura."
+              }
+            },
+            "enableSwishCheckout": {
+              "type": "bool",
+              "defaultValue": false,
+              "metadata": {
+                "description": "Aktiverar Swish-betalningar på gästens betalningssida. false = endast kort och faktura."
+              }
+            },
+            "stripeSecretUri": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Fullständig SecretUri till Stripes hemliga nyckel, utan versionsnummer. Krävs för Swish. Tomt = fail-closed."
+              }
+            },
+            "stripeWebhookSecretUri": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Fullständig SecretUri till Stripe-webhookens hemlighet, utan versionsnummer. Tomt = webhooken saknar hemlighet och fail-closed."
+              }
             }
           },
           "variables": {
@@ -397,7 +482,7 @@
                   "minTlsVersion": "1.2",
                   "ftpsState": "Disabled",
                   "healthCheckPath": "/robots.txt",
-                  "appSettings": "[concat(createArray(createObject('name', 'NODE_ENV', 'value', 'production'), createObject('name', 'AIRBNB_ICAL_URL', 'value', format('@Microsoft.KeyVault(SecretUri={0}secrets/{1})', reference(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), '2023-07-01').vaultUri, parameters('keyVaultSecretName'))), createObject('name', 'BOOKING_REQUESTS_ENABLED', 'value', '0')), variables('bookingSettings'))]"
+                  "appSettings": "[concat(createArray(createObject('name', 'NODE_ENV', 'value', 'production'), createObject('name', 'AIRBNB_ICAL_URL', 'value', format('@Microsoft.KeyVault(SecretUri={0}secrets/{1})', reference(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), '2023-07-01').vaultUri, parameters('keyVaultSecretName'))), createObject('name', 'BOOKING_REQUESTS_ENABLED', 'value', '0'), createObject('name', 'PUBLIC_BASE_URL', 'value', format('https://{0}', parameters('customDomain'))), createObject('name', 'STRIPE_WEBHOOK_ENABLED', 'value', if(parameters('enableStripeWebhook'), '1', '0')), createObject('name', 'STRIPE_ENABLED', 'value', if(or(parameters('enableCardCheckout'), parameters('enableSwishCheckout')), '1', '0')), createObject('name', 'STRIPE_CARD_ENABLED', 'value', if(parameters('enableCardCheckout'), '1', '0')), createObject('name', 'STRIPE_SWISH_ENABLED', 'value', if(parameters('enableSwishCheckout'), '1', '0')), createObject('name', 'STRIPE_MODE', 'value', 'test'), createObject('name', 'STRIPE_ALLOW_LIVE', 'value', '0'), createObject('name', 'STRIPE_OUTBOX_ENABLED', 'value', '0')), variables('bookingSettings'), if(and(parameters('enableStripeWebhook'), not(empty(parameters('stripeWebhookSecretUri')))), createArray(createObject('name', 'STRIPE_WEBHOOK_SECRET', 'value', format('@Microsoft.KeyVault(SecretUri={0})', parameters('stripeWebhookSecretUri')))), createArray()), if(and(or(parameters('enableCardCheckout'), parameters('enableSwishCheckout')), not(empty(parameters('stripeSecretUri')))), createArray(createObject('name', 'STRIPE_SECRET_KEY', 'value', format('@Microsoft.KeyVault(SecretUri={0})', parameters('stripeSecretUri')))), createArray()))]"
                 }
               },
               "dependsOn": [

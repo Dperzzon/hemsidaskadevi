@@ -58,6 +58,21 @@ param secretAdminPrincipalId string = ''
 @description('Namn på lagringskontot för bokningsförfrågningar. Tomt = ingen bokningslagring aktiverad ännu (se infra/modules/storage-tables.bicep).')
 param bookingStorageAccountName string = ''
 
+@description('Aktiverar Stripe-webhooken. false = /api/stripe/webhook svarar 503 och inga betalningar registreras.')
+param enableStripeWebhook bool = false
+
+@description('Aktiverar kortbetalningar på gästens betalningssida. false = endast faktura.')
+param enableCardCheckout bool = false
+
+@description('Aktiverar Swish-betalningar på gästens betalningssida. false = endast kort och faktura.')
+param enableSwishCheckout bool = false
+
+@description('Fullständig SecretUri till Stripes hemliga nyckel, utan versionsnummer. Krävs för Swish. Tomt = fail-closed.')
+param stripeSecretUri string = ''
+
+@description('Fullständig SecretUri till Stripe-webhookens hemlighet, utan versionsnummer. Tomt = webhooken saknar hemlighet och fail-closed.')
+param stripeWebhookSecretUri string = ''
+
 var tags = {
   Owner: owner
   Environment: environment
@@ -86,6 +101,38 @@ var baseAppSettings = [
     name: 'BOOKING_REQUESTS_ENABLED'
     value: '0'
   }
+  {
+    name: 'PUBLIC_BASE_URL'
+    value: 'https://${customDomain}'
+  }
+  {
+    name: 'STRIPE_WEBHOOK_ENABLED'
+    value: enableStripeWebhook ? '1' : '0'
+  }
+  {
+    name: 'STRIPE_ENABLED'
+    value: (enableCardCheckout || enableSwishCheckout) ? '1' : '0'
+  }
+  {
+    name: 'STRIPE_CARD_ENABLED'
+    value: enableCardCheckout ? '1' : '0'
+  }
+  {
+    name: 'STRIPE_SWISH_ENABLED'
+    value: enableSwishCheckout ? '1' : '0'
+  }
+  {
+    name: 'STRIPE_MODE'
+    value: 'test'
+  }
+  {
+    name: 'STRIPE_ALLOW_LIVE'
+    value: '0'
+  }
+  {
+    name: 'STRIPE_OUTBOX_ENABLED'
+    value: '0'
+  }
 ]
 
 // Lagringskontots NAMN är ingen hemlighet — autentisering sker med webbappens
@@ -99,7 +146,22 @@ var bookingSettings = !empty(bookingStorageAccountName)
     ]
   : []
 
-var appSettings = concat(baseAppSettings, bookingSettings)
+var appSettings = concat(
+  baseAppSettings,
+  bookingSettings,
+  enableStripeWebhook && !empty(stripeWebhookSecretUri) ? [
+    {
+      name: 'STRIPE_WEBHOOK_SECRET'
+      value: '@Microsoft.KeyVault(SecretUri=${stripeWebhookSecretUri})'
+    }
+  ] : [],
+  (enableCardCheckout || enableSwishCheckout) && !empty(stripeSecretUri) ? [
+    {
+      name: 'STRIPE_SECRET_KEY'
+      value: '@Microsoft.KeyVault(SecretUri=${stripeSecretUri})'
+    }
+  ] : []
+)
 
 resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
   name: keyVaultName
