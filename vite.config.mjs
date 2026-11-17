@@ -12,6 +12,7 @@ const require = createRequire(import.meta.url);
 const { handleAvailability } = require('./server/calendar/availability.js');
 const { handleBookingRequest } = require('./server/booking/requests.js');
 const { loadRules, publicRules } = require('./server/booking/rules.js');
+const { legacyRedirect } = require('./server/seo/legacy-redirects.js');
 
 // Syntetisk kalender för lokal utveckling: två nätter blockade, 12 dagar fram.
 function devFetch() {
@@ -97,6 +98,17 @@ function cleanUrlsAndApi() {
         } catch {
           res.writeHead(503, { 'Content-Type': 'application/json; charset=utf-8' });
           res.end(JSON.stringify({ error: 'Förfrågningar kan tyvärr inte tas emot just nu. Vänligen kontakta oss direkt.' }));
+        }
+        return;
+      }
+      const legacy = legacyRedirect(url.pathname);
+      if (legacy) {
+        if (legacy.status === 301) {
+          res.writeHead(301, { Location: `${legacy.location}${url.search}`, 'Cache-Control': 'no-cache' });
+          res.end();
+        } else {
+          res.writeHead(410, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-cache' });
+          res.end('Sidan finns inte längre.');
         }
         return;
       }
