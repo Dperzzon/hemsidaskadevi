@@ -17,17 +17,17 @@ const IMAGE_PATHS = {
   'gallery-10': '/images/gallery/biljardbord.webp',
   'gallery-11': '/images/gallery/badtunna.webp',
 
-  'gallery-thumb-1': '/images/gallery/kok-open-spis.webp',
-  'gallery-thumb-2': '/images/gallery/vardagsrum.webp',
-  'gallery-thumb-3': '/images/gallery/blommigt-rum.webp',
-  'gallery-thumb-4': '/images/gallery/svart-badrum.webp',
-  'gallery-thumb-5': '/images/gallery/gront-badrum.webp',
-  'gallery-thumb-6': '/images/gallery/dukning-langbord.webp',
-  'gallery-thumb-7': '/images/gallery/dukning-pergola.webp',
-  'gallery-thumb-8': '/images/gallery/mohippa-pergola.webp',
-  'gallery-thumb-9': '/images/gallery/tennisplan.webp',
-  'gallery-thumb-10': '/images/gallery/biljardbord.webp',
-  'gallery-thumb-11': '/images/gallery/badtunna.webp',
+  'gallery-thumb-1': '/images/gallery/kok-open-spis-thumb.webp',
+  'gallery-thumb-2': '/images/gallery/vardagsrum-thumb.webp',
+  'gallery-thumb-3': '/images/gallery/blommigt-rum-thumb.webp',
+  'gallery-thumb-4': '/images/gallery/svart-badrum-thumb.webp',
+  'gallery-thumb-5': '/images/gallery/gront-badrum-thumb.webp',
+  'gallery-thumb-6': '/images/gallery/dukning-langbord-thumb.webp',
+  'gallery-thumb-7': '/images/gallery/dukning-pergola-thumb.webp',
+  'gallery-thumb-8': '/images/gallery/mohippa-pergola-thumb.webp',
+  'gallery-thumb-9': '/images/gallery/tennisplan-thumb.webp',
+  'gallery-thumb-10': '/images/gallery/biljardbord-thumb.webp',
+  'gallery-thumb-11': '/images/gallery/badtunna-thumb.webp',
 
   location: '/images/gallery/skadevi-gard.webp',
   corporate: '/images/gallery/foretag-akvarell.webp',
@@ -35,10 +35,10 @@ const IMAGE_PATHS = {
   wedding: '/images/gallery/dukning-pergola.webp',
   party: '/images/gallery/mohippa-pergola.webp',
 
-  'strip-1': '/images/gallery/tennisplan.webp',
-  'strip-2': '/images/gallery/dukning-pergola.webp',
-  'strip-3': '/images/gallery/biljardbord.webp',
-  'strip-4': '/images/gallery/badtunna.webp'
+  'strip-1': '/images/gallery/tennisplan-800.webp',
+  'strip-2': '/images/gallery/dukning-pergola-800.webp',
+  'strip-3': '/images/gallery/biljardbord-800.webp',
+  'strip-4': '/images/gallery/badtunna-800.webp'
 };
 
 function getUrl(key) {

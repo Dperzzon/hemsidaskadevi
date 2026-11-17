@@ -2941,3 +2941,1173 @@ body.priser-page {
   .priser-btn { transition: none; }
 }
 
+@media (max-width: 767px) {
+  :root {
+    --mobile-gutter: 20px;
+    --header-clearance: 118px;
+  }
+
+  html { -webkit-text-size-adjust: 100%; }
+
+  h1,
+  h2,
+  h3,
+  h4 { overflow-wrap: anywhere; }
+
+  body {
+    overflow-x: clip;
+    font-size: 16px;
+  }
+
+  body.priser-page,
+  body.digital-visning-page,
+  body.payment-result-page { overflow-x: clip; }
+
+  .header {
+    padding: 8px var(--mobile-gutter) 12px;
+    align-items: center;
+    background: linear-gradient(180deg, rgba(250, 246, 238, 0.97) 0%, rgba(250, 246, 238, 0.88) 64%, rgba(250, 246, 238, 0) 100%);
+  }
+
+  .header.scrolled {
+    padding: 6px var(--mobile-gutter);
+    background: rgba(250, 246, 238, 0.98);
+    box-shadow: 0 6px 22px rgba(46, 42, 36, 0.08);
+  }
+
+  .header-side,
+  .header-side:last-child,
+  .header-link { display: none; }
+
+  .header-side:first-child {
+    display: flex;
+    position: absolute;
+    left: var(--mobile-gutter);
+    top: 50%;
+    transform: translateY(-50%);
+  }
+
+  .header-logo {
+    margin: 0 auto;
+    font-size: var(--text-lg);
+  }
+
+  .header-logo img { height: 78px; }
+
+  .header.scrolled .header-logo img { height: 54px; }
+
+  .mobile-toggle {
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    color: var(--color-text);
+    font-size: 22px;
+    text-shadow: none;
+  }
+
+  .header.scrolled .mobile-toggle { color: var(--color-text); }
+
+  .priser-page .mobile-toggle,
+  .digital-visning-page .mobile-toggle,
+  .payment-result-page .mobile-toggle,
+  .priser-page .header.scrolled .mobile-toggle,
+  .digital-visning-page .header.scrolled .mobile-toggle,
+  .payment-result-page .header.scrolled .mobile-toggle {
+    color: var(--color-text);
+    text-shadow: none;
+  }
+
+  .header-nav {
+    max-height: calc(100svh - 98px);
+    padding: 8px var(--mobile-gutter) 14px;
+    overflow-y: auto;
+    background: #fbf8f1;
+    border-bottom: 1px solid var(--color-border);
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .header-nav a {
+    display: flex;
+    align-items: center;
+    min-height: 48px;
+    padding: 12px 2px;
+    font-size: 12px;
+    letter-spacing: 0.12em;
+  }
+
+  .header-nav a.active { color: var(--color-secondary); }
+
+  .hero {
+    min-height: 0;
+    padding: 108px var(--mobile-gutter) 0;
+    justify-content: flex-start;
+  }
+
+  .hero-bg img { object-position: 62% 50%; }
+
+  .hero-content {
+    width: 100%;
+    max-width: 430px;
+    margin: clamp(24px, 7vh, 64px) auto 0;
+    padding: 34px 16px 30px;
+    transform: none;
+  }
+
+  .hero-content::before {
+    width: 148%;
+    height: 174%;
+    background: radial-gradient(circle closest-side at center, rgba(255, 255, 255, 0.97) 0%, rgba(255, 255, 255, 0.72) 58%, transparent 100%);
+  }
+
+  .hero-content h1 {
+    margin-bottom: 14px;
+    font-size: clamp(1.55rem, 6.6vw, 2rem);
+    line-height: 1.14;
+    letter-spacing: -0.35px;
+  }
+
+  .hero-content .hero-sub {
+    margin-bottom: 10px;
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    line-height: 1.6;
+  }
+
+  .hero-content .hero-body {
+    margin-bottom: 24px;
+    font-size: clamp(11.5px, 3.1vw, 13px);
+    line-height: 1.75;
+    letter-spacing: 0.04em;
+  }
+
+  .hero .btn {
+    display: inline-flex;
+    width: 100%;
+    max-width: 300px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .strip-cards {
+    width: 100%;
+    max-width: 420px;
+    margin: 30px auto -64px;
+    padding: 0;
+    gap: 12px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .strip-card {
+    min-width: 0;
+    padding: 8px 8px 14px;
+    border-radius: 6px;
+  }
+
+  .strip-card-img { aspect-ratio: 4 / 3; }
+
+  .strip-card h2 {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 2.9em;
+    padding: 0.4rem 0.15rem 0.1rem;
+    font-size: 9.5px;
+    line-height: 1.35;
+    letter-spacing: 0.1em;
+  }
+
+  .value-prop {
+    max-width: none;
+    margin: 0 auto;
+    padding: 126px var(--mobile-gutter) 52px;
+  }
+
+  .value-prop .subtitle {
+    margin-bottom: 16px;
+    font-size: clamp(1.35rem, 5.8vw, 1.7rem);
+    line-height: 1.15;
+  }
+
+  .value-prop h2 {
+    max-width: 34ch;
+    margin-bottom: 18px;
+    font-size: 13px;
+    line-height: 1.8;
+  }
+
+  .value-prop h2 br { display: none; }
+
+  .value-prop .price { font-size: 1.3rem; }
+
+  .value-prop .price-addon { font-size: 12px; }
+
+  .value-prop .price-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    margin-bottom: 8px;
+    font-size: 10.5px;
+    letter-spacing: 0.12em;
+  }
+
+  .value-prop .price-details { max-width: none; }
+
+  .value-prop .price-list li {
+    gap: 3px;
+    padding: 10px 0;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+
+  .value-prop .price-package {
+    margin-top: 16px;
+    padding: 16px;
+  }
+
+  .value-prop .price-package p { font-size: 12.5px; line-height: 1.7; }
+
+  .section,
+  .page-section,
+  .cta-section,
+  .content-block,
+  .testimonial-section,
+  .category-intro,
+  .category-section,
+  .category-cta,
+  .wedding-intro,
+  .wedding-feature,
+  .wedding-moments,
+  .wedding-details,
+  .wedding-cta,
+  .faq-area,
+  .gallery-category,
+  .calendar-section,
+  .booking-section,
+  .priser-section,
+  .payment-result-section,
+  .dv-experience,
+  .dv-steps,
+  .dv-booking {
+    padding-left: var(--mobile-gutter);
+    padding-right: var(--mobile-gutter);
+  }
+
+  .location-wrap { gap: 26px; }
+
+  .location-image { aspect-ratio: 4 / 3; }
+
+  .location-title { font-size: 1.5rem; }
+
+  .location-desc { font-size: 14px; line-height: 1.8; }
+
+  .distance-list { gap: 2px; }
+
+  .distance-item { padding: 5px 0; font-size: 13px; }
+
+  .gallery-main { aspect-ratio: 4 / 3; padding: 8px; }
+
+  .gallery-thumbs {
+    gap: 10px;
+    margin-top: 14px;
+    padding: 4px 4px 2px;
+  }
+
+  .gallery-thumb { width: 44px; height: 44px; }
+
+  .gallery-nav {
+    gap: 14px;
+    margin-top: 18px;
+  }
+
+  .gallery-nav button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    font-size: 18px;
+  }
+
+  .gallery-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    margin-top: 18px;
+    padding: 4px 0;
+  }
+
+  .testimonial-section {
+    padding-top: 48px;
+    padding-bottom: 52px;
+  }
+
+  .testimonial-section h2 {
+    margin-bottom: 28px;
+    font-size: clamp(1.6rem, 7vw, 1.95rem);
+  }
+
+  .testimonial-grid { gap: 24px; }
+
+  .testimonial-card blockquote {
+    margin-bottom: 12px;
+    font-size: 13px;
+    line-height: 1.8;
+  }
+
+  .cta-section {
+    padding-top: 56px;
+    padding-bottom: 60px;
+  }
+
+  .cta-section h2 {
+    font-size: clamp(1.6rem, 6.8vw, 2rem);
+    line-height: 1.18;
+  }
+
+  .cta-section p { font-size: 13px; }
+
+  .page-section {
+    padding-top: 52px;
+    padding-bottom: 52px;
+  }
+
+  .page-section .sub { font-size: 1.3rem; line-height: 1.25; }
+
+  .page-section h2 { font-size: clamp(1.7rem, 7vw, 2rem); line-height: 1.2; }
+
+  .content-block {
+    padding-top: 48px;
+    padding-bottom: 52px;
+  }
+
+  .content-block h2 { font-size: clamp(1.7rem, 7vw, 2rem); }
+
+  .content-block h3 {
+    margin-top: 32px;
+    font-size: 1.3rem;
+  }
+
+  .content-block h4 { font-size: 1.05rem; }
+
+  .content-block p { font-size: 15px; line-height: 1.8; }
+
+  .content-block ul { padding-left: 20px; }
+
+  .category-hero { min-height: clamp(480px, 66svh, 600px); }
+
+  .category-hero-bg::after {
+    background:
+      linear-gradient(180deg, rgba(20, 19, 16, 0.38) 0%, rgba(20, 19, 16, 0.16) 34%, rgba(20, 19, 16, 0.78) 100%),
+      linear-gradient(90deg, rgba(20, 19, 16, 0.34), transparent 78%);
+  }
+
+  .category-hero-content { padding: 128px var(--mobile-gutter) 52px; }
+
+  .category-hero-content .eyebrow,
+  .category-hero-content h1,
+  .category-hero-content p { text-shadow: 0 2px 14px rgba(0, 0, 0, 0.55), 0 1px 2px rgba(0, 0, 0, 0.35); }
+
+  .category-hero-content h1 {
+    margin: 12px 0;
+    font-size: clamp(2.15rem, 10.5vw, 3rem);
+    line-height: 1.02;
+  }
+
+  .category-hero-content p {
+    max-width: 36ch;
+    font-size: 14px;
+    line-height: 1.7;
+  }
+
+  .category-hero-content .btn {
+    margin-top: 22px;
+    min-height: 48px;
+  }
+
+  .category-hero--vacation .category-hero-bg img { object-position: 62% 50%; }
+
+  .category-intro {
+    padding-top: 56px;
+    padding-bottom: 56px;
+  }
+
+  .category-intro .subtitle,
+  .category-section-heading .subtitle {
+    margin-bottom: 14px;
+    font-size: 1.35rem;
+    line-height: 1.2;
+  }
+
+  .category-intro h2,
+  .category-section-heading h2 {
+    margin-bottom: 18px;
+    font-size: clamp(1.8rem, 7.2vw, 2.05rem);
+    line-height: 1.15;
+  }
+
+  .category-intro p { font-size: 14.5px; line-height: 1.8; }
+
+  .category-facts { margin-top: 34px; }
+
+  .category-fact { padding: 18px 5px; }
+
+  .category-fact strong { font-size: clamp(1.2rem, 5vw, 1.4rem); }
+
+  .category-fact span {
+    font-size: 9px;
+    line-height: 1.35;
+    letter-spacing: 0.06em;
+  }
+
+  .category-section {
+    padding-top: 52px;
+    padding-bottom: 52px;
+  }
+
+  .category-section .location-wrap { gap: 26px; }
+
+  .category-copy h2 {
+    margin: 12px 0 16px;
+    font-size: clamp(1.7rem, 7vw, 2rem);
+  }
+
+  .category-copy > p { font-size: 14.5px; line-height: 1.8; }
+
+  .category-list { margin: 22px 0; }
+
+  .category-list li { padding: 10px 0 10px 24px; font-size: 13px; }
+
+  .category-section-heading { margin-bottom: 30px; }
+
+  .category-card-grid { max-width: none; gap: 18px; }
+
+  .category-card-body { padding: 20px 18px 22px; }
+
+  .category-card-body h3 { font-size: 1.25rem; }
+
+  .category-cta {
+    padding-top: 60px;
+    padding-bottom: 66px;
+  }
+
+  .category-cta h2 {
+    font-size: clamp(1.9rem, 8vw, 2.6rem);
+    line-height: 1.08;
+  }
+
+  .category-cta p { font-size: 13.5px; }
+
+  .gallery-page-hero { min-height: 240px; }
+
+  .gallery-category { padding-top: 48px; padding-bottom: 48px; }
+
+  .gallery-grid { gap: 8px; }
+
+  .page-hero {
+    min-height: 270px;
+    padding-top: 122px;
+    padding-bottom: 44px;
+  }
+
+  .page-hero-content { padding: 18px var(--mobile-gutter); }
+
+  .page-hero-content h1 { font-size: clamp(1.6rem, 6.5vw, 1.95rem); }
+
+  .page-hero-content p {
+    margin-top: 12px;
+    font-size: 13.5px;
+    line-height: 1.7;
+  }
+
+  .wedding-hero { min-height: 72svh; }
+
+  .wedding-hero-bg::after {
+    background:
+      linear-gradient(180deg, rgba(31, 28, 23, 0.3) 0%, rgba(31, 28, 23, 0.06) 36%, rgba(31, 28, 23, 0.72) 100%),
+      linear-gradient(90deg, rgba(31, 28, 23, 0.44), rgba(31, 28, 23, 0.05) 78%);
+  }
+
+  .wedding-hero-content { padding: 130px var(--mobile-gutter) 44px; }
+
+  .wedding-hero-content .eyebrow,
+  .wedding-hero h1,
+  .wedding-hero-content > p { text-shadow: 0 2px 14px rgba(0, 0, 0, 0.55), 0 1px 2px rgba(0, 0, 0, 0.35); }
+
+  .wedding-hero h1 {
+    margin: 12px 0 16px;
+    font-size: clamp(2.6rem, 12vw, 3.6rem);
+    line-height: 0.99;
+  }
+
+  .wedding-hero-content > p {
+    max-width: 310px;
+    margin-bottom: 26px;
+    font-size: 14px;
+    line-height: 1.7;
+  }
+
+  .wedding-hero-note {
+    right: var(--mobile-gutter);
+    bottom: 18px;
+    font-size: 8px;
+  }
+
+  .wedding-intro {
+    padding-top: 56px;
+    padding-bottom: 56px;
+  }
+
+  .wedding-intro .subtitle,
+  .wedding-section-heading .subtitle {
+    margin-bottom: 14px;
+    font-size: 1.4rem;
+    line-height: 1.2;
+  }
+
+  .wedding-intro h2,
+  .wedding-section-heading h2 {
+    margin-bottom: 18px;
+    font-size: clamp(1.8rem, 7.2vw, 2.05rem);
+    line-height: 1.16;
+  }
+
+  .wedding-intro .lead { font-size: 14px; line-height: 1.8; }
+
+  .wedding-stats { margin-top: 32px; }
+
+  .wedding-stat { padding: 16px 4px; }
+
+  .wedding-stat strong { font-size: clamp(1.15rem, 5.2vw, 1.4rem); }
+
+  .wedding-stat span {
+    font-size: 9px;
+    line-height: 1.35;
+    letter-spacing: 0.07em;
+  }
+
+  .wedding-feature {
+    padding-top: 56px;
+    padding-bottom: 58px;
+  }
+
+  .wedding-copy h2 { font-size: clamp(1.7rem, 7vw, 2rem); }
+
+  .wedding-copy > p { font-size: 14px; line-height: 1.8; }
+
+  .wedding-checklist li { font-size: 13px; }
+
+  .wedding-moments {
+    padding-top: 56px;
+    padding-bottom: 64px;
+  }
+
+  .wedding-section-heading { margin-bottom: 28px; }
+
+  .wedding-moment-grid { max-width: none; gap: 20px; }
+
+  .moment-content { padding: 20px 18px 22px; }
+
+  .wedding-details {
+    padding-top: 56px;
+    padding-bottom: 56px;
+  }
+
+  .wedding-details-inner { gap: 32px; }
+
+  .wedding-details-intro h2 { font-size: clamp(1.7rem, 7vw, 2rem); }
+
+  .detail-item { padding: 20px 0; }
+
+  .wedding-cta {
+    padding-top: 56px;
+    padding-bottom: 64px;
+  }
+
+  .wedding-cta h2 { font-size: clamp(1.9rem, 8vw, 2.5rem); }
+
+  .faq-area {
+    padding-top: 52px;
+    padding-bottom: 60px;
+  }
+
+  .faq-aside > a:not(.text-link) {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 8px 0;
+    font-size: 13px;
+  }
+
+  .faq-group { margin-bottom: 44px; }
+
+  .faq-content .faq-question { font-size: 14.5px; }
+
+  .faq-content .faq-answer p {
+    font-size: 13.5px;
+    line-height: 1.8;
+  }
+
+  .calendar-section { padding-bottom: 48px; }
+
+  .calendar-card { padding: 22px 16px 24px; }
+
+  .cal-notice { margin-bottom: 18px; font-size: 12.5px; line-height: 1.7; }
+
+  .cal-nav { gap: 8px; margin-bottom: 14px; }
+
+  .cal-nav-btn {
+    width: 44px;
+    height: 44px;
+    font-size: 18px;
+  }
+
+  .cal-months { gap: 26px; }
+
+  .cal-month h3 { margin-bottom: 12px; font-size: 1.15rem; }
+
+  .cal-weekdays { margin-bottom: 6px; }
+
+  .cal-weekdays span { font-size: 9px; letter-spacing: 0.04em; }
+
+  .cal-grid { gap: 3px; }
+
+  .cal-day {
+    border-radius: 2px;
+    font-size: 12px;
+  }
+
+  .cal-day.cal-blank { background: transparent; }
+
+  .cal-selection {
+    margin: 8px 0 14px;
+    font-size: 12.5px;
+    line-height: 1.6;
+  }
+
+  .cal-legend {
+    gap: 12px 20px;
+    margin-top: 20px;
+    padding-top: 16px;
+  }
+
+  .cal-legend-item { font-size: 10.5px; letter-spacing: 0.04em; }
+
+  .booking-section { padding-bottom: 48px; }
+
+  .booking-card { padding: 22px 18px 26px; }
+
+  .booking-card h2 { font-size: clamp(1.45rem, 6.5vw, 1.8rem); line-height: 1.2; }
+
+  .booking-intro {
+    margin: 10px 0 22px;
+    font-size: 13px;
+    line-height: 1.75;
+  }
+
+  .booking-summary {
+    margin-bottom: 22px;
+    padding: 16px;
+  }
+
+  .booking-summary h3 { font-size: 15px; }
+
+  .booking-summary-list { gap: 10px; }
+
+  .booking-summary-list div { min-width: 0; }
+
+  .booking-summary-list dt { font-size: 10px; }
+
+  .booking-summary-list dd { font-size: 13px; }
+
+  .booking-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    margin-top: 6px;
+    font-size: 11px;
+  }
+
+  .booking-form { gap: 16px; }
+
+  .booking-form label { font-size: 13px; line-height: 1.5; }
+
+  .booking-form input[type="text"],
+  .booking-form input[type="email"],
+  .booking-form input[type="tel"],
+  .booking-form input[type="number"],
+  .booking-form select,
+  .booking-form textarea {
+    min-height: 48px;
+    padding: 12px 13px;
+    font-size: 16px;
+  }
+
+  .booking-form textarea { min-height: 120px; }
+
+  .booking-addons,
+  .booking-payment-method,
+  .booking-prices { padding: 18px 14px; }
+
+  .booking-addon { gap: 6px 10px; padding: 12px 0; }
+
+  .booking-addon label { font-size: 14px; line-height: 1.5; }
+
+  .booking-addon-note {
+    flex: 1 0 calc(100% - 30px);
+    width: auto;
+    margin-left: 30px;
+    font-size: 12px;
+    line-height: 1.6;
+  }
+
+  .booking-addon-count {
+    flex: 1 0 calc(100% - 30px);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-left: 30px;
+    padding-top: 4px;
+  }
+
+  .booking-addon-count label {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    font-size: 12.5px;
+  }
+
+  .booking-form .booking-addon-count input[type="number"] {
+    flex: 0 0 86px;
+    width: 86px;
+    min-height: 44px;
+    padding: 8px 10px !important;
+  }
+
+  .booking-prices h3 { font-size: 15px; }
+
+  .price-line {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: baseline;
+    gap: 3px 12px;
+    padding: 8px 0;
+    font-size: 13px;
+    line-height: 1.55;
+  }
+
+  .price-line > span:last-child { white-space: normal; }
+
+  .price-line-sub { padding-left: 0; font-size: 11.5px; }
+
+  .price-line-total {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 10px;
+    padding-top: 12px;
+  }
+
+  .price-line-total > span:first-child {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 10px;
+    line-height: 1.5;
+    letter-spacing: 0.03em;
+  }
+
+  .price-line-total > span:last-child {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    font-size: 17px;
+    line-height: 1.2;
+  }
+
+  .booking-payment-option { gap: 12px; padding: 4px 0; }
+
+  .booking-payment-option label { font-size: 13.5px; line-height: 1.6; }
+
+  .booking-payment-option label span { font-size: 12.5px; }
+
+  .booking-consent label {
+    min-width: 0;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+
+  .booking-form button[type="submit"] {
+    width: 100%;
+    justify-self: stretch;
+    min-height: 52px;
+  }
+
+  .booking-submit-note { font-size: 11.5px; line-height: 1.65; }
+
+  .booking-rules-dialog { padding: 24px 20px; }
+
+  .section:has(.contact-grid) {
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
+  .contact-grid {
+    gap: 32px;
+    margin-top: 0 !important;
+    padding: 40px var(--mobile-gutter) 56px;
+  }
+
+  .contact-info h2 { font-size: clamp(1.6rem, 6.5vw, 2rem); }
+
+  .contact-info .lead { font-size: 14.5px; line-height: 1.8; }
+
+  .contact-detail { gap: 14px; margin-bottom: 22px; }
+
+  .contact-detail .icon {
+    font-size: 18px;
+    filter: grayscale(1);
+    opacity: 0.7;
+  }
+
+  .contact-detail div { font-size: 14px; line-height: 1.7; }
+
+  .contact-detail a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+
+  .priser-hero-bg img { object-position: 62% 50%; }
+
+  .priser-section {
+    padding-top: 56px;
+    padding-bottom: 64px;
+  }
+
+  .priser-heading { margin-bottom: 34px; }
+
+  .priser-heading h2 { font-size: clamp(1.8rem, 7.2vw, 2.1rem); }
+
+  .priser-heading p { font-size: 14px; line-height: 1.8; }
+
+  .priser-subtitle { font-size: 1.55rem; margin-bottom: 26px; }
+
+  .priser-grid { gap: 18px; max-width: 520px; }
+
+  .priser-card { padding: 28px 20px 26px; }
+
+  .priser-card-desc {
+    min-height: 0;
+    margin-top: 10px;
+    font-size: 13px;
+  }
+
+  .priser-price {
+    margin-top: 18px;
+    padding-bottom: 18px;
+    font-size: clamp(1.7rem, 6.8vw, 2.05rem);
+  }
+
+  .priser-list { margin: 18px 0 24px; }
+
+  .priser-list li { font-size: 13px; line-height: 1.6; padding: 9px 0 9px 24px; }
+
+  .priser-btn {
+    width: 100%;
+    max-width: none;
+    min-height: 52px;
+  }
+
+  .priser-note { font-size: 13px; line-height: 1.8; }
+
+  .priser-page .price-table {
+    table-layout: fixed;
+    font-size: 13px;
+  }
+
+  .priser-page .price-table th,
+  .priser-page .price-table td {
+    padding: 11px 10px;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  .priser-page .price-table th:first-child,
+  .priser-page .price-table td:first-child { width: 60%; }
+
+  .priser-page .price-table th:last-child,
+  .priser-page .price-table td:last-child {
+    width: 40%;
+    text-align: right;
+    white-space: normal;
+    font-size: 12.5px;
+  }
+
+  .priser-page .price-package-block { padding: 20px 16px; }
+
+  .dv-hero {
+    min-height: 600px;
+    padding: 130px var(--mobile-gutter) 52px;
+  }
+
+  .dv-hero-bg img { object-position: 62% 50%; }
+
+  .dv-hero h1 { font-size: clamp(2rem, 9vw, 2.7rem); }
+
+  .dv-hero-body { font-size: 14px; line-height: 1.8; }
+
+  .dv-hero-scroll {
+    min-height: 44px;
+    margin-top: 24px;
+    align-items: center;
+  }
+
+  .dv-experience {
+    padding-top: 56px;
+    padding-bottom: 52px;
+  }
+
+  .dv-experience-heading { margin-bottom: 30px; }
+
+  .dv-experience-heading h2 { font-size: clamp(1.75rem, 7vw, 2.1rem); }
+
+  .dv-experience-heading p { font-size: 14px; line-height: 1.8; }
+
+  .dv-stage { min-height: 480px; }
+
+  .dv-stage-content { padding: 34px 14px; }
+
+  .dv-start {
+    width: 100%;
+    max-width: 330px;
+    min-height: 56px;
+  }
+
+  .dv-stage-meta { font-size: 9px; }
+
+  .dv-steps {
+    padding-top: 52px;
+    padding-bottom: 56px;
+  }
+
+  .dv-steps h2 { font-size: clamp(1.7rem, 7vw, 2.05rem); }
+
+  .dv-step { padding: 28px 16px; }
+
+  .dv-step p { font-size: 13px; }
+
+  .dv-booking {
+    padding-top: 60px;
+    padding-bottom: 68px;
+  }
+
+  .dv-booking h2 { font-size: clamp(1.8rem, 7.2vw, 2.2rem); }
+
+  .dv-booking-btn {
+    width: 100%;
+    max-width: 330px;
+    min-height: 54px;
+  }
+
+  .payment-hero {
+    min-height: 540px;
+    padding: 120px var(--mobile-gutter) 64px;
+  }
+
+  .payment-hero-bg img { object-position: 62% 50%; }
+
+  .payment-hero h1 { font-size: clamp(1.9rem, 8vw, 2.4rem); }
+
+  .payment-result-section { padding-bottom: 56px; }
+
+  .payment-result-card {
+    margin-top: -52px;
+    padding: 28px 20px 32px;
+  }
+
+  .payment-result-card p { font-size: 14.5px; line-height: 1.8; }
+
+  .payment-contact { gap: 14px; }
+
+  .payment-contact a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+
+  .footer { padding: 44px var(--mobile-gutter) 24px; }
+
+  .footer-grid {
+    grid-template-columns: 1fr;
+    gap: 28px;
+  }
+
+  .footer-logo { margin-bottom: 16px; }
+
+  .footer-logo img { width: 128px; }
+
+  .footer-tagline {
+    max-width: 320px;
+    font-size: 13.5px;
+    line-height: 1.75;
+  }
+
+  .footer h3 {
+    margin-bottom: 10px;
+    font-size: 12px;
+    letter-spacing: 0.1em;
+  }
+
+  .footer h3::after { width: 26px; margin-top: 7px; }
+
+  .footer-links { gap: 0; }
+
+  .footer-links a {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    min-height: 44px;
+    padding: 7px 0;
+    font-size: 14px;
+  }
+
+  .footer-col-social h3,
+  .social-links {
+    text-align: left;
+    justify-content: flex-start;
+  }
+
+  .footer-social a { min-height: 44px; }
+
+  .footer-col-contact .footer-social a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+
+  .footer-col-contact p {
+    margin-bottom: 4px;
+    font-size: 13.5px;
+    line-height: 1.6;
+  }
+
+  .footer-col-contact a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+
+  .footer-bottom {
+    margin-top: 26px;
+    padding-top: 16px;
+    font-size: 11px;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 46px;
+    padding: 12px 24px;
+  }
+
+  .text-link,
+  .price-link {
+    min-height: 44px;
+    align-items: center;
+  }
+
+  a:focus-visible,
+  button:focus-visible,
+  [role="button"]:focus-visible {
+    outline: 2px solid var(--color-secondary);
+    outline-offset: 3px;
+  }
+
+  img,
+  video { max-width: 100%; }
+}
+
+@media (max-width: 360px) {
+  :root {
+    --mobile-gutter: 16px;
+    --header-clearance: 108px;
+  }
+
+  .header { padding-top: 6px; padding-bottom: 10px; }
+
+  .header-logo img { height: 70px; }
+
+  .header.scrolled .header-logo img { height: 48px; }
+
+  .hero { padding-top: 98px; }
+
+  .hero-content { padding-left: 10px; padding-right: 10px; }
+
+  .hero-content h1 { font-size: 1.5rem; }
+
+  .hero-content .hero-body { font-size: 11.5px; }
+
+  .strip-cards { gap: 10px; margin-top: 24px; }
+
+  .strip-card h2 { font-size: 9px; letter-spacing: 0.06em; }
+
+  .value-prop { padding-top: 118px; }
+
+  .category-hero-content { padding-top: 120px; padding-bottom: 46px; }
+
+  .category-hero-content h1 { font-size: 2.05rem; }
+
+  .category-hero-content p { font-size: 13.5px; }
+
+  .category-fact { padding: 16px 3px; }
+
+  .category-fact span { font-size: 8.5px; letter-spacing: 0.04em; }
+
+  .wedding-hero-content { padding-top: 120px; padding-bottom: 38px; }
+
+  .wedding-hero h1 { font-size: 2.45rem; }
+
+  .calendar-card,
+  .booking-card { padding-left: 12px; padding-right: 12px; }
+
+  .cal-grid { gap: 2px; }
+
+  .cal-day { font-size: 11.5px; }
+
+  .cal-weekdays span { font-size: 8px; }
+
+  .cal-legend { gap: 10px 14px; }
+
+  .cal-legend-item { font-size: 9.5px; }
+
+  .booking-addons,
+  .booking-payment-method,
+  .booking-prices { padding-left: 12px; padding-right: 12px; }
+
+  .booking-addon-note { margin-left: 0; flex-basis: 100%; }
+
+  .booking-addon-count { flex-basis: 100%; margin-left: 0; }
+
+  .priser-card { padding-left: 16px; padding-right: 16px; }
+
+  .priser-page .price-table th,
+  .priser-page .price-table td { padding: 10px 6px; font-size: 12px; }
+
+  .priser-page .price-table th:last-child,
+  .priser-page .price-table td:last-child { font-size: 11.5px; }
+
+  .payment-result-card { padding-left: 16px; padding-right: 16px; }
+
+  .dv-stage { min-height: 460px; }
+
+  .dv-stage-content { padding-left: 10px; padding-right: 10px; }
+
+  .btn { padding-left: 18px; padding-right: 18px; }
+}
+

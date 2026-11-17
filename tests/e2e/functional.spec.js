@@ -5,19 +5,19 @@ import { test, expect } from '@playwright/test';
 import { FIXED_NOW } from './helpers.js';
 
 const PAGES = [
-  { path: '/', title: 'Skadevi Gård — Hyr en hel privat herrgård nära Stockholm' },
-  { path: '/foretag', title: 'Företag — Konferens, kickoff & ledningsgrupp | Skadevi Gård' },
-  { path: '/fest', title: 'Fest & firande — Skadevi Gård' },
-  { path: '/brollop', title: 'Bröllop på Skadevi Gård — En helt egen bröllopshelg' },
-  { path: '/semester', title: 'Semester — Familjesemester på herrgård | Skadevi Gård' },
-  { path: '/boende', title: 'Boendet — Sovrum, kök & faciliteter | Skadevi Gård' },
-  { path: '/aktiviteter', title: 'Aktiviteter — Tennis, badtunna & utflykter | Skadevi Gård' },
-  { path: '/priser', title: 'Priser — Hyr herrgård från 9 000 kr/natt | Skadevi Gård' },
-  { path: '/mat-dryck', title: 'Mat & Dryck — Catering & självhushåll | Skadevi Gård' },
-  { path: '/om-oss', title: 'Om oss — Historia & ägare | Skadevi Gård' },
-  { path: '/vanliga-fragor', title: 'Vanliga frågor — FAQ | Skadevi Gård' },
-  { path: '/digital-visning', title: 'Digital visning — Upptäck Skadevi Herrgård i 3D | Skadevi Gård' },
-  { path: '/boka', title: 'Boka — Skadevi Gård' }
+  { path: '/', title: 'Hyr herrgård nära Stockholm | Skadevi Herrgård' },
+  { path: '/foretag', title: 'Konferens & kickoff med övernattning | Skadevi Herrgård' },
+  { path: '/fest', title: 'Festlokal med boende i Uppland | Skadevi Herrgård' },
+  { path: '/brollop', title: 'Bröllopslokal med övernattning i Uppland | Skadevi Herrgård' },
+  { path: '/semester', title: 'Hyr herrgård för familj och vänner | Skadevi Herrgård' },
+  { path: '/boende', title: 'Hyra privat herrgård i Skokloster | Skadevi Herrgård' },
+  { path: '/aktiviteter', title: 'Aktiviteter på Skadevi Herrgård – tennis & badtunna' },
+  { path: '/priser', title: 'Priser för att hyra herrgård | Skadevi Herrgård' },
+  { path: '/mat-dryck', title: 'Catering & mat i herrgårdsköket | Skadevi Herrgård' },
+  { path: '/om-oss', title: 'Om Skadevi Herrgård – herrgården från 1927' },
+  { path: '/vanliga-fragor', title: 'Vanliga frågor om att hyra herrgården | Skadevi Herrgård' },
+  { path: '/digital-visning', title: 'Digital visning av Skadevi Herrgård i 3D' },
+  { path: '/boka', title: 'Boka Skadevi Herrgård – se lediga datum' }
 ];
 
 test.beforeEach(async ({ page }) => {

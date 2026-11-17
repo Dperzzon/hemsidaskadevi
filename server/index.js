@@ -23,6 +23,7 @@ const {
 const { validateRange } = require('./calendar/availability');
 const { loadRules, publicRules } = require('./booking/rules');
 const { createStore, isConfigured } = require('./booking/store');
+const { legacyRedirect } = require('./seo/legacy-redirects');
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -623,6 +624,18 @@ function createRequestListener(options = {}) {
 
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       sendJson(res, 405, { error: 'Metod tillåts inte.' }, { Allow: 'GET, HEAD, POST' });
+      return;
+    }
+
+    // Gamla Wix-adresser: 301 till närmaste aktiva sida eller 410 om ingen
+    // rimlig ersättning finns. Query-parametrar bevaras vid 301.
+    const legacy = legacyRedirect(url.pathname);
+    if (legacy) {
+      if (legacy.status === 301) {
+        redirect(res, `${legacy.location}${url.search}`);
+      } else {
+        await sendErrorPage(res, root, legacy.status);
+      }
       return;
     }
 
