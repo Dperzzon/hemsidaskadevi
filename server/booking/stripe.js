@@ -170,6 +170,11 @@ function createStripeClient(options = {}) {
       const params = [
         ['mode', 'payment'],
         ['locale', 'sv'],
+        ['billing_address_collection', 'auto'],
+        ['phone_number_collection[enabled]', 'false'],
+        ['automatic_tax[enabled]', 'false'],
+        ['allow_promotion_codes', 'false'],
+        ['submit_type', 'auto'],
         ...paymentMethods.map((method, index) => [`allowed_payment_method_types[${index}]`, method]),
         ['line_items[0][quantity]', '1'],
         ['line_items[0][price_data][currency]', currency],
