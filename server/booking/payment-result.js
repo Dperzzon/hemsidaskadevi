@@ -7,6 +7,7 @@ const {
 } = require('./payment-ledger');
 const { createStripeClient } = require('./stripe');
 const { renderFooter } = require('../../shared/footer.js');
+const { renderAnalyticsHead, renderPurchaseEvent } = require('../../shared/analytics.js');
 
 const REFERENCE_PATTERN = /^[A-Za-z0-9-]{4,80}$/;
 const SESSION_ID_PATTERN = /^cs_[A-Za-z0-9_]+$/;
@@ -100,11 +101,12 @@ const HEADER = `<header class="header" role="banner">
 
 const FOOTER = renderFooter();
 
-function layout({ title, kind, icon, kicker, heading, subheading, card }) {
+function layout({ title, kind, icon, kicker, heading, subheading, card, purchase }) {
   return `<!DOCTYPE html>
 <html lang="sv">
 <head>
   <meta charset="UTF-8">
+${renderAnalyticsHead()}
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex, nofollow">
   <meta name="referrer" content="no-referrer">
@@ -136,6 +138,7 @@ ${HEADER}
   </section>
 </main>
 ${FOOTER}
+${purchase ? renderPurchaseEvent(purchase) : ''}
 <script type="module" src="/js/main.js"></script>
 </body>
 </html>`;
@@ -208,6 +211,10 @@ function renderCancelUnknown() {
 
 function renderSuccess(record, session) {
   const heading = 'Tack för din bokning';
+  const verifiedOre = Number(session?.amount_total);
+  const purchase = Number.isSafeInteger(verifiedOre) && verifiedOre > 0
+    ? { transaction_id: record.reference, value: verifiedOre / 100, currency: 'SEK' }
+    : null;
   const card = `<span class="payment-card-eyebrow">Betalningsstatus</span>
     <h2>Din betalning är genomförd</h2>
     <p>Betalningen har verifierats och din bokning är bekräftad. Vi ser fram emot att välkomna dig till Skadevi Herrgård.</p>
@@ -224,7 +231,8 @@ function renderSuccess(record, session) {
     kicker: 'Betalning genomförd',
     heading,
     subheading: 'Din betalning är genomförd',
-    card
+    card,
+    purchase
   }));
 }
 

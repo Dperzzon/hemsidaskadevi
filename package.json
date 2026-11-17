@@ -26,6 +26,7 @@
     "lint": "eslint .",
     "sync:header": "node scripts/sync-header.mjs",
     "sync:footer": "node scripts/sync-footer.mjs",
+    "sync:analytics": "node scripts/sync-analytics.mjs",
     "optimize-images": "node scripts/optimize-images.mjs",
     "thumbs": "node scripts/generate-gallery-thumbs.mjs",
     "fetch-fonts": "node scripts/fetch-fonts.mjs"

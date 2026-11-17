@@ -784,8 +784,8 @@ async function handleDirectBooking(request, context = {}, options = {}) {
 
 // --- Bekräftelsesida -------------------------------------------------------
 
-function confirmationLayout(title, content) {
-  return layout(title, content);
+function confirmationLayout(title, content, options) {
+  return layout(title, content, options);
 }
 
 function renderConfirmationError(status, message) {
@@ -808,7 +808,11 @@ function addonList(record) {
 }
 
 function renderConfirmedPage(record, session) {
-  const paidOre = Number(session.amount_total) || Math.round(Number(record.total) * 100);
+  const verifiedOre = Number(session.amount_total);
+  const paidOre = verifiedOre || Math.round(Number(record.total) * 100);
+  const purchase = Number.isSafeInteger(verifiedOre) && verifiedOre > 0
+    ? { transaction_id: record.reference, value: verifiedOre / 100, currency: 'SEK' }
+    : null;
   return {
     status: 200,
     headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
@@ -825,7 +829,7 @@ function renderConfirmedPage(record, session) {
       <h2>Tillval</h2>
       <ul>${addonList(record)}</ul>
       <p class="payment-note">Betalningen är genomförd med kort via Stripe. Skadevi Herrgård kontaktar dig om något behöver kompletteras.</p>
-      <p><a class="btn btn-primary" href="/">Till startsidan</a></p>`)
+      <p><a class="btn btn-primary" href="/">Till startsidan</a></p>`, { purchase })
   };
 }
 

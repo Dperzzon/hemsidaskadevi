@@ -32,8 +32,23 @@ export default [
     }
   },
   {
-    files: ['server/**/*.js', 'tests/unit/**/*.js', 'playwright.config.js'],
+    files: ['server/**/*.js', 'shared/**/*.js', 'tests/unit/**/*.js', 'playwright.config.js'],
     languageOptions: { sourceType: 'commonjs', globals: nodeGlobals },
+    rules: {
+      'no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+      'no-undef': 'error'
+    }
+  },
+  {
+    files: ['public/js/**/*.js'],
+    languageOptions: {
+      sourceType: 'script',
+      globals: {
+        ...browserGlobals, Element: 'readonly', FormData: 'readonly', HTMLFormElement: 'readonly',
+        encodeURIComponent: 'readonly', Date: 'readonly', JSON: 'readonly', Object: 'readonly',
+        String: 'readonly', Boolean: 'readonly', RegExp: 'readonly', Error: 'readonly'
+      }
+    },
     rules: {
       'no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
       'no-undef': 'error'

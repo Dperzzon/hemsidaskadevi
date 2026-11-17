@@ -42,6 +42,19 @@ export function mockBlocked(start, end) {
  */
 export async function prepare(page, options = {}) {
   await page.clock.setFixedTime(FIXED_NOW);
+  // Cookiepanelen ska inte påverka visuella referensbilder eller bokningstester.
+  // Ett sparat "nej" är ett giltigt besökarläge: ingen GTM/GA laddas.
+  await page.addInitScript(() => {
+    try {
+      window.localStorage.setItem('skadevi-consent-v1', JSON.stringify({
+        analytics: false,
+        version: 1,
+        updatedAt: '2026-11-09T09:00:00.000Z'
+      }));
+    } catch {
+      /* localStorage kan vara otillgängligt */
+    }
+  });
   const requests = [];
   await page.route('**/api/availability?*', async (route) => {
     const url = new URL(route.request().url());

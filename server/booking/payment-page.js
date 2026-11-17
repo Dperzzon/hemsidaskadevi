@@ -20,6 +20,7 @@ const {
 } = require('./invoice-requests');
 const { MAIL } = require('./mail');
 const { renderFooter } = require('../../shared/footer.js');
+const { renderAnalyticsHead, renderPurchaseEvent } = require('../../shared/analytics.js');
 
 const PAGE_HEADERS = {
   'Content-Type': 'text/html; charset=utf-8',
@@ -64,19 +65,25 @@ function pageResponse(html, status = 200) {
   return { status, headers: PAGE_HEADERS, html };
 }
 
-function redirectResponse(location) {
+function redirectResponse(location, analytics) {
+  const headers = { ...PAGE_HEADERS, Location: location };
+  if (analytics && Number.isSafeInteger(analytics.valueOre) && analytics.valueOre > 0) {
+    headers['X-Payment-Value-Ore'] = String(analytics.valueOre);
+    headers['X-Payment-Currency'] = 'SEK';
+  }
   return {
     status: 303,
-    headers: { ...PAGE_HEADERS, Location: location },
+    headers,
     html: ''
   };
 }
 
-function layout(title, content) {
+function layout(title, content, options = {}) {
   return `<!DOCTYPE html>
 <html lang="sv">
 <head>
   <meta charset="UTF-8">
+${renderAnalyticsHead()}
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex, nofollow">
   <meta name="referrer" content="no-referrer">
@@ -113,6 +120,7 @@ function layout(title, content) {
   <div class="payment-page">${content}</div>
 </main>
 ${renderFooter()}
+${options.purchase ? renderPurchaseEvent(options.purchase) : ''}
 </body>
 </html>`;
 }
@@ -147,7 +155,7 @@ function cardBox(token, options) {
   return `<div class="payment-box">
     <h2>Betala med kort</h2>
     <p>Betalningen genomförs i Stripes säkra kortbetalning. Skadevi ser aldrig dina kortuppgifter.</p>
-    <form method="post" action="/api/payments/${encodeURIComponent(token)}/card">
+    <form method="post" action="/api/payments/${encodeURIComponent(token)}/card" data-analytics-checkout="card">
       <button class="btn btn-primary" type="submit">Betala med kort</button>
     </form>
     ${options.cardError ? `<p class="payment-error">${escapeHtml(options.cardError)}</p>` : ''}
@@ -159,7 +167,7 @@ function swishBox(token, options) {
   return `<div class="payment-box">
     <h2>Betala med Swish</h2>
     <p>Betalningen genomförs i Stripes säkra betalningsflöde och godkänns i Swish-appen. Skadevi ser aldrig dina bankuppgifter.</p>
-    <form method="post" action="/api/payments/${encodeURIComponent(token)}/swish">
+    <form method="post" action="/api/payments/${encodeURIComponent(token)}/swish" data-analytics-checkout="swish">
       <button class="btn btn-primary" type="submit">Betala med Swish</button>
     </form>
     ${options.swishError ? `<p class="payment-error">${escapeHtml(options.swishError)}</p>` : ''}
@@ -381,7 +389,7 @@ async function startCheckout(result, token, method, options, context) {
     request.url &&
     (!request.expiresAt || Date.parse(request.expiresAt) > now.getTime())
   );
-  if (active) return redirectResponse(active.url);
+  if (active) return redirectResponse(active.url, { valueOre: result.summary.remainingOre });
 
   const base = options.publicBaseUrl ?? process.env.PUBLIC_BASE_URL ?? 'https://www.skadeviherrgard.com';
   const referenceParam = encodeURIComponent(record.reference);
@@ -477,7 +485,7 @@ async function startCheckout(result, token, method, options, context) {
       const existing = reloaded.ok
         ? normalizePaymentRequests(reloaded.record).find((request) => request.sessionId === session.id)
         : null;
-      if (existing?.url) return redirectResponse(existing.url);
+      if (existing?.url) return redirectResponse(existing.url, { valueOre: result.summary.remainingOre });
     }
     context.warn?.(`${methodLabel}-session kunde inte sparas för ${record.reference}.`);
     return pageResponse(layout(`${methodLabel} kunde inte startas`, `<h1>${methodLabel} kunde inte startas</h1>
@@ -503,7 +511,7 @@ async function startCheckout(result, token, method, options, context) {
     context.warn?.(`${methodLabel}-historik kunde inte sparas för ${record.reference}.`);
   }
 
-  return redirectResponse(session.url);
+  return redirectResponse(session.url, { valueOre: result.summary.remainingOre });
 }
 
 function buildInvoiceNotifications(record, request) {

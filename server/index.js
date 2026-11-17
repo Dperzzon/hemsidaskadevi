@@ -53,7 +53,8 @@ const ALLOWED_DIRS = new Set(['pages', 'assets', 'images', 'fonts', 'css', 'js']
 const PAGE_ROUTES = new Set([
   'foretag', 'fest', 'brollop', 'semester', 'boende', 'aktiviteter',
   'priser', 'mat-dryck', 'om-oss', 'vanliga-fragor', 'kontakt',
-  'digital-visning', 'boka', 'lediga-datum', 'betalning-klar', 'betalning-avbruten'
+  'digital-visning', 'boka', 'lediga-datum', 'betalning-klar', 'betalning-avbruten',
+  'integritet'
 ]);
 
 const SECURITY_HEADERS = {
@@ -62,7 +63,7 @@ const SECURITY_HEADERS = {
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
   'X-Frame-Options': 'DENY',
   'Strict-Transport-Security': 'max-age=31536000',
-  'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+  'Content-Security-Policy': "default-src 'self'; script-src 'self' https://www.googletagmanager.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://www.googletagmanager.com https://*.google-analytics.com https://*.analytics.google.com; font-src 'self'; connect-src 'self' https://www.googletagmanager.com https://*.google-analytics.com https://*.analytics.google.com; frame-src https://www.googletagmanager.com; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
 };
 
 const API_HEADERS = {
@@ -562,6 +563,20 @@ function createRequestListener(options = {}) {
           { warn },
           {}
         );
+        // Klienten kan be om JSON för att kunna registrera begin_checkout först
+        // när servern har skapat/återanvänt en verifierad Stripe-session. Vid
+        // alla andra svar används den vanliga HTML-redirecten oförändrat.
+        const wantsJson = String(req.headers.accept || '').includes('application/json');
+        const isCheckoutAction = paymentActionMatch[2] === 'card' || paymentActionMatch[2] === 'swish';
+        if (wantsJson && isCheckoutAction && result.status === 303 && result.headers?.Location) {
+          const valueOre = Number(result.headers['X-Payment-Value-Ore']);
+          sendJson(res, 200, {
+            checkoutUrl: result.headers.Location,
+            valueOre: Number.isSafeInteger(valueOre) && valueOre > 0 ? valueOre : null,
+            currency: 'SEK'
+          });
+          return;
+        }
         sendHtmlResult(res, result);
       } catch {
         sendJson(res, 503, { error: 'Betalningssidan är tillfälligt otillgänglig.' });

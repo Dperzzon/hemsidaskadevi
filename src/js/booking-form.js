@@ -9,6 +9,16 @@ const els = {};
 
 const q = (id) => document.getElementById(id);
 
+// Analys är sekundär: ett fel här får aldrig påverka bokningen.
+let bookingStartedTracked = false;
+function trackAnalytics(name, params) {
+  try {
+    window.SkadeviAnalytics?.track?.(name, params);
+  } catch {
+    /* ignoreras */
+  }
+}
+
 function formatDay(key) {
   return new Intl.DateTimeFormat('sv-SE', {
     timeZone: 'Europe/Stockholm', day: 'numeric', month: 'long', year: 'numeric'
@@ -478,6 +488,10 @@ async function submitRequest(payload) {
     });
     const data = await response.json().catch(() => ({}));
     if (response.ok && data.reference) {
+      trackAnalytics('booking_request_submitted', {
+        booking_nights: Number(els.nights?.value) || undefined,
+        booking_type: 'request'
+      });
       showConfirmation(data);
       resetIdempotencyKey();
       return;
@@ -511,6 +525,11 @@ async function submitDirectBooking(payload) {
     });
     const data = await response.json().catch(() => ({}));
     if (response.ok && data.checkoutUrl) {
+      trackAnalytics('begin_checkout', {
+        value: Number(data.totalOre) > 0 ? Number(data.totalOre) / 100 : undefined,
+        currency: 'SEK',
+        payment_method: 'card'
+      });
       window.location.assign(data.checkoutUrl);
       return;
     }
@@ -568,6 +587,10 @@ function handleSelection(detail) {
   if (els.manualReview) els.manualReview.hidden = true;
   if (complete && (arrival !== previousArrival || departure !== previousDeparture)) {
     resetIdempotencyKey();
+    if (!bookingStartedTracked) {
+      bookingStartedTracked = true;
+      trackAnalytics('booking_started', { booking_nights: nights });
+    }
   }
 
   if (!complete) {

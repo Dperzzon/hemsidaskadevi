@@ -32,7 +32,7 @@ const ALLOWED_DIRS = new Set(['css', 'js', 'images', 'pages']);
 const PAGE_ROUTES = new Set([
   'foretag', 'fest', 'brollop', 'semester', 'boende', 'aktiviteter',
   'priser', 'mat-dryck', 'om-oss', 'vanliga-fragor', 'kontakt',
-  'digital-visning', 'boka', 'lediga-datum'
+  'digital-visning', 'boka', 'lediga-datum', 'integritet'
 ]);
 
 const SECURITY_HEADERS = {
