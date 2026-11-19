@@ -38,6 +38,9 @@ param adminTrustEasyAuth string = '1'
 @description('Förberedd aktiveringsbrytare. false = Reader och skrivspärrar. true = Contributor, Key Vault Secrets User på airbnb-ical-url, AIRBNB_ICAL_URL som Key Vault-referens samt ADMIN_WRITES_ENABLED=1. Deployas inte i detta steg.')
 param enableBookingWrites bool = false
 
+@description('Köar adminutlösta bekräftelse- och avbokningsmejl till utkorgen. Kräver att Logic App är aktiverad för leverans.')
+param enableMailOutbox bool = false
+
 @description('Key Vault som innehåller Airbnb-kalenderns hemliga adress.')
 param keyVaultName string = 'kv-skadevi-prod'
 
@@ -145,10 +148,10 @@ resource adminApp 'Microsoft.Web/sites@2024-11-01' = {
           name: 'ADMIN_WRITES_ENABLED'
           value: enableBookingWrites ? '1' : '0'
         }
-        {
-          name: 'ADMIN_MAIL_OUTBOX_ENABLED'
-          value: '0'
-        }
+  {
+    name: 'ADMIN_MAIL_OUTBOX_ENABLED'
+    value: enableMailOutbox ? '1' : '0'
+  }
         {
           name: 'ADMIN_REQUIRE_AIRBNB_CHECK'
           value: '1'

@@ -37,15 +37,36 @@ function emailRow(label, level) {
   const review = level.needsReview
     ? `<p class="inline-warning">Kräver manuell kontroll</p>`
     : '';
+  const type = level.mailTypeLabel
+    ? `<p class="muted">${escapeHtml(level.mailTypeLabel)}</p>`
+    : '';
+  const queued = level.queued
+    ? '<p class="price-note">Köat. Skickas först när utkorgen är aktiverad.</p>'
+    : '';
   return `<div class="email-row">
     <div><p class="card-kicker">${escapeHtml(label)}</p>
+      ${type}
       <div class="badge-row">${emailBadge(level)}${deliveryBadge(level)}</div>
-      ${review}
+      ${review}${queued}
     </div>
     <div class="email-id">${level.resendId
       ? `<span>Resend-ID</span><code>${escapeHtml(level.resendId)}</code>`
       : '<span class="muted">Inget Resend-ID</span>'}</div>
   </div>`;
+}
+
+function mailEventsTable(booking) {
+  const events = Array.isArray(booking.mailEvents) ? booking.mailEvents : [];
+  if (!events.length) return '<p class="muted">Inga utkorgsposter finns ännu.</p>';
+  return `<div class="table-wrap"><table class="data-table compact">
+    <thead><tr><th>Mejl</th><th>Köstatus</th><th>Leverans</th><th>Skapat</th></tr></thead>
+    <tbody>${events.map((event) => `<tr>
+      <td data-label="Mejl">${escapeHtml(event.mailTypeLabel)}</td>
+      <td data-label="Köstatus">${escapeHtml(event.apiLabel)}</td>
+      <td data-label="Leverans">${escapeHtml(event.deliveryLabel)}</td>
+      <td data-label="Skapat">${escapeHtml(event.createdAt ? formatDateTime(event.createdAt) : '–')}</td>
+    </tr>`).join('')}</tbody>
+  </table></div>`;
 }
 
 function addonTable(booking) {
@@ -235,7 +256,7 @@ function documentActions(booking) {
   </section>`;
 }
 
-function statusActions(booking) {
+function statusActions(booking, outboxEnabled = false) {
   if (booking.isBlock) {
     return `<div class="button-stack">
       <button type="button" class="btn btn-danger" data-block-remove="${escapeHtml(booking.reference)}" data-etag="${escapeHtml(booking.etag)}">Avblockera datum</button>
@@ -263,9 +284,13 @@ function statusActions(booking) {
     }));
   }
   if (!buttons.length) return '<p class="muted">Ingen statusåtgärd tillgänglig för nuvarande status.</p>';
+  const disabled = outboxEnabled ? '' : ' disabled';
+  const notice = outboxEnabled
+    ? 'Bekräftelsemejl köas till utkorgen. Status Skickad i mejlpanelen betyder att Resend accepterat mejlet, inte att det levererats.'
+    : 'Mejlutskick är inte aktiverat i denna miljö. Bokningen kan bekräftas utan att något mejl köas.';
   return `<div class="button-stack">${buttons.join('')}</div>
-    <label class="check-row muted"><input type="checkbox" id="send-confirmation-email" disabled> Skicka bekräftelsemejl till gästen</label>
-    <p class="notice">E-postutskick är avstängt i detta steg. En bekräftelse skiljs från kvittensen på mottagen förfrågan.</p>`;
+    <label class="check-row${outboxEnabled ? '' : ' muted'}"><input type="checkbox" id="send-confirmation-email"${disabled}> Skicka bekräftelsemejl till gästen</label>
+    <p class="notice">${notice}</p>`;
 }
 
 function paymentMethodOptions() {
@@ -452,7 +477,7 @@ function paymentPanel(booking, isOwner, writesEnabled, today, stripeEnabled, str
 }
 
 function renderBookingDetail(options) {
-  const { booking, principal, demo, csrfToken, writesEnabled, history = [], today, stripeEnabled = false, stripeMode = 'disabled', stripeSwishEnabled = false } = options;
+  const { booking, principal, demo, csrfToken, writesEnabled, history = [], today, stripeEnabled = false, stripeMode = 'disabled', stripeSwishEnabled = false, outboxEnabled = false } = options;
   const isOwner = principal.roles?.includes('Owner');
   const content = `
     <div class="detail-header">
@@ -552,7 +577,7 @@ function renderBookingDetail(options) {
         <section class="panel action-panel">
           <div class="panel-heading"><div><p class="eyebrow">Bokning</p><h2>Åtgärder</h2></div></div>
           ${isOwner
-            ? statusActions(booking)
+            ? statusActions(booking, outboxEnabled)
             : '<p class="notice">Endast Owner kan ändra status, pris, betalning och blockeringar i denna version.</p>'}
         </section>
 
@@ -564,7 +589,8 @@ function renderBookingDetail(options) {
           <div class="panel-heading"><div><p class="eyebrow">Kommunikation</p><h2>Mejlstatus</h2></div></div>
           ${emailRow('Värdmejl', booking.mailStatus.host)}
           ${emailRow('Gästmejl', booking.mailStatus.guest)}
-          <p class="price-note">”Accepterat av Resend” är API-acceptans, inte samma sak som leverans. Inga mejl skickas i detta utvecklingssteg.</p>
+          ${mailEventsTable(booking)}
+          <p class="price-note">”Accepterat av Resend” betyder att API:et tog emot mejlet, inte att det levererats till mottagaren. Köade mejl skickas först när utkorgen och Logic App är aktiverade. Leveransbekräftelse från Resend är inte aktiverad ännu.</p>
         </section>
 
         <section class="panel">

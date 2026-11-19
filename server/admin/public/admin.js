@@ -153,17 +153,23 @@
         return;
       }
       button.disabled = true;
-      const submit = (extra = {}) => api(
-        `/api/admin/bookings/${encodeURIComponent(button.dataset.reference)}/status`,
-        {
-          body: {
-            action,
-            reason,
-            expectedEtag: button.dataset.etag || undefined,
-            ...extra
+      const submit = async (extra = {}) => {
+        const data = await api(
+          `/api/admin/bookings/${encodeURIComponent(button.dataset.reference)}/status`,
+          {
+            body: {
+              action,
+              reason,
+              sendGuestEmail: action === 'confirm' &&
+                document.getElementById('send-confirmation-email')?.checked === true,
+              expectedEtag: button.dataset.etag || undefined,
+              ...extra
+            }
           }
-        }
-      );
+        );
+        if (data?.emailWarning) window.alert(data.emailWarning);
+        return data;
+      };
       try {
         try {
           await submit();
@@ -577,6 +583,7 @@
             priceAdjustmentReason: formValue(form, 'priceAdjustmentReason'),
             paymentStatus: formValue(form, 'paymentStatus'),
             amountPaid: Number(formValue(form, 'amountPaid') || 0),
+            sendGuestEmail: checked(form, 'sendGuestEmail'),
             latestNote: formValue(form, 'latestNote')
           };
           const post = (extra = {}) => api('/api/admin/bookings', {
@@ -611,6 +618,7 @@
               airbnbOverrideReason: overrideReason.trim()
             });
           }
+          if (data?.emailWarning) window.alert(data.emailWarning);
           window.location.href = `/admin/bookings/${encodeURIComponent(data.reference)}`;
         }
       } catch (error) {

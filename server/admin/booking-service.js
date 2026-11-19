@@ -16,7 +16,8 @@
 const crypto = require('node:crypto');
 const { quote, PRICE_VERSION, LINEN_MAX, EXTRAHUS_MAX_GUESTS } = require('../booking/pricing');
 const { handleAvailability } = require('../calendar/availability');
-const { MAIL } = require('../booking/mail');
+const { buildBookingConfirmation, buildCancellationNotification } = require('../booking/booking-mail');
+const { queueNotification } = require('../booking/outbox');
 const { revokePaymentAccess } = require('../booking/payment-access');
 const { cancelOpenInvoiceRequests } = require('../booking/invoice-requests');
 const {
@@ -917,8 +918,9 @@ async function createManualBooking(repo, principal, body, options = {}, context 
         context
       });
     }
+    let email = { queued: false };
     if (validated.mode === 'booking' && body.sendGuestEmail === true) {
-      await queueGuestConfirmation(repo, record, options, context);
+      email = await queueGuestConfirmation(repo, record, options, context);
     }
     return {
       status: 201,
@@ -927,7 +929,14 @@ async function createManualBooking(repo, principal, body, options = {}, context 
         statusCode: record.statusCode,
         total: record.total,
         arrival: record.arrival,
-        departure: record.departure
+        departure: record.departure,
+        emailQueued: email.queued === true,
+        emailDisabled: email.disabled === true,
+        emailDuplicate: email.duplicate === true,
+        emailSkipped: email.skipped ?? '',
+        emailWarning: email.ok === false && !email.skipped
+          ? 'Mejlet kunde inte köas. Kontrollera historiken.'
+          : ''
       }
     };
   } catch (cause) {
@@ -1038,8 +1047,23 @@ async function changeStatus(repo, principal, reference, action, body = {}, optio
         context
       });
     }
+    let email = { queued: false };
+    let cancelledPending = 0;
+    if (nextStatus !== 'CONFIRMED') {
+      cancelledPending = await cancelPendingOutbox(
+        repo,
+        record,
+        ['GUEST_BOOKING_CONFIRMED', 'GUEST_CONFIRMATION', 'GUEST_PAYMENT_LINK'],
+        `Status ändrad till ${nextStatus}`,
+        context,
+        now
+      );
+    }
     if (nextStatus === 'CONFIRMED' && body.sendGuestEmail === true) {
-      await queueGuestConfirmation(repo, record, options, context);
+      email = await queueGuestConfirmation(repo, record, options, context);
+    }
+    if (nextStatus === 'CANCELLED') {
+      email = await queueCancellation(repo, record, options, context);
     }
     return {
       status: 200,
@@ -1048,7 +1072,15 @@ async function changeStatus(repo, principal, reference, action, body = {}, optio
         statusCode: nextStatus,
         status: record.status,
         etag: updated.etag,
-        version: record.version
+        version: record.version,
+        emailQueued: email.queued === true,
+        emailDisabled: email.disabled === true,
+        emailDuplicate: email.duplicate === true,
+        emailSkipped: email.skipped ?? '',
+        emailWarning: email.ok === false && !email.skipped
+          ? 'Mejlet kunde inte köas. Kontrollera historiken.'
+          : '',
+        cancelledPendingMail: cancelledPending
       }
     };
   } catch (cause) {
@@ -1494,6 +1526,16 @@ async function updateAddons(repo, principal, reference, body = {}, options = {},
       changes: { addons, total, totalAddons: pricing.addonsTotal },
       context
     });
+    const cancelledPendingMail = addonsChanged || Number(record.total) !== Number(total)
+      ? await cancelPendingOutbox(
+        repo,
+        updatedRecord,
+        ['GUEST_PAYMENT_LINK', 'GUEST_BOOKING_CONFIRMED'],
+        'Tillval eller pris ändrades',
+        context,
+        now
+      )
+      : 0;
     return {
       status: 200,
       jsonBody: {
@@ -1502,7 +1544,8 @@ async function updateAddons(repo, principal, reference, body = {}, options = {},
         totalAddons: pricing.addonsTotal,
         total,
         calculatedTotal: pricing.total,
-        etag: updated.etag
+        etag: updated.etag,
+        cancelledPendingMail
       }
     };
   } catch (cause) {
@@ -1540,47 +1583,66 @@ async function removeBlock(repo, principal, reference, body = {}, options = {}, 
 }
 
 function buildGuestConfirmation(record) {
-  const lines = [
-    `Referens: ${record.reference}`,
-    `Vistelse: ${record.arrival} → ${record.departure} (${record.nights} nätter)`,
-    `Gäster: ${record.guests}`,
-    `Totalpris: ${record.total} kr`
-  ];
-  return {
-    mailType: 'GUEST_CONFIRMATION',
-    to: record.email,
-    replyTo: MAIL.replyTo,
-    subject: `Din bokning är bekräftad (${record.reference})`,
-    body: `Din bokning är nu bekräftad.\n\n${lines.join('\n')}`,
-    html: `<h2>Din bokning är bekräftad</h2><ul>${lines
-      .map((line) => `<li>${line.replaceAll('&', '&amp;').replaceAll('<', '&lt;')}</li>`)
-      .join('')}</ul>`
-  };
+  return buildBookingConfirmation(record, { mailType: 'GUEST_CONFIRMATION' });
 }
 
 async function queueGuestConfirmation(repo, record, options, context) {
-  if (options.outboxEnabled !== true) return false;
-  const notification = buildGuestConfirmation(record);
-  try {
-    await repo.saveOutbox({
-      partition: 'outbox',
-      idempotencyKey: `outbox-${record.idempotencyKey}-confirmation`,
-      reference: record.reference,
-      mailType: notification.mailType,
-      status: 'Utkorg',
-      mailTo: notification.to,
-      mailReplyTo: notification.replyTo,
-      mailSubject: notification.subject,
-      mailHtml: notification.html,
-      mailText: notification.body,
-      attemptCount: 0,
-      createdAt: new Date().toISOString()
-    });
-    return true;
-  } catch {
-    context.warn?.(`Bekräftelsemejl kunde inte köas för ${record.reference}.`);
-    return false;
+  if (record?.statusCode !== 'CONFIRMED') {
+    return { ok: false, queued: false, skipped: 'not_confirmed' };
   }
+  if (options.outboxEnabled !== true) return { ok: true, queued: false, disabled: true };
+  const notification = buildGuestConfirmation(record);
+  const outboxContext = {
+    ...context,
+    appendHistory: typeof repo.appendHistory === 'function'
+      ? (entry) => repo.appendHistory(entry)
+      : undefined
+  };
+  const result = await queueNotification(
+    (entry) => repo.saveOutbox(entry),
+    {
+      idempotencyKey: `outbox-confirmation-${record.reference}-v${Number(record.version || 1)}`,
+      reference: record.reference,
+      notification,
+      createdAt: (options.now ?? new Date()).toISOString(),
+      context: outboxContext
+    }
+  );
+  return { ...result, queued: result.ok === true && result.duplicate !== true };
+}
+
+async function cancelPendingOutbox(repo, record, mailTypes, reason, context, now = new Date()) {
+  if (typeof repo.cancelPendingOutbox !== 'function') return 0;
+  try {
+    return await repo.cancelPendingOutbox(record.reference, { mailTypes, reason, now });
+  } catch {
+    context.warn?.(`Väntande utkorgsposter kunde inte makuleras för ${record.reference}.`);
+    return 0;
+  }
+}
+
+async function queueCancellation(repo, record, options, context) {
+  if (record?.statusCode !== 'CANCELLED') {
+    return { ok: false, queued: false, skipped: 'not_cancelled' };
+  }
+  if (options.outboxEnabled !== true) return { ok: true, queued: false, disabled: true };
+  const outboxContext = {
+    ...context,
+    appendHistory: typeof repo.appendHistory === 'function'
+      ? (entry) => repo.appendHistory(entry)
+      : undefined
+  };
+  const result = await queueNotification(
+    (entry) => repo.saveOutbox(entry),
+    {
+      idempotencyKey: `outbox-cancellation-${record.reference}-v${Number(record.version || 1)}`,
+      reference: record.reference,
+      notification: buildCancellationNotification(record),
+      createdAt: (options.now ?? new Date()).toISOString(),
+      context: outboxContext
+    }
+  );
+  return { ...result, queued: result.ok === true && result.duplicate !== true };
 }
 
 async function calendarRange(repo, from, to, now = new Date()) {
@@ -1611,6 +1673,7 @@ module.exports = {
   calendarRange,
   buildGuestConfirmation,
   queueGuestConfirmation,
+  queueCancellation,
   makeReference,
   makeIdempotencyKey,
   actorOf,

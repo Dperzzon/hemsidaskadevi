@@ -72,6 +72,12 @@ param bookingStorageAccountName string = ''
 @description('Aktiverar Stripe-webhooken på den publika appen. Standard false: endpointen svarar 503 och ingen betalning registreras.')
 param enableStripeWebhook bool = false
 
+@description('Aktiverar bokningsförfrågningar i formuläret. Sätts uttryckligen per miljö så att en infra-deployment inte ändrar driftsläget av misstag.')
+param enableBookingRequests bool = false
+
+@description('Köar betalnings-, faktura- och betalningslänksmejl till utkorgen. Logic App måste också vara aktiverad för leverans.')
+param enableStripeOutbox bool = false
+
 @description('Aktiverar kortbetalningar på gästens betalningssida. Standard false: endast faktura.')
 param enableCardCheckout bool = false
 
@@ -134,6 +140,8 @@ module webapp 'modules/webapp.bicep' = {
     secretAdminPrincipalId: secretAdminPrincipalId
     bookingStorageAccountName: bookingStorageAccountName
     enableStripeWebhook: enableStripeWebhook
+    enableBookingRequests: enableBookingRequests
+    enableStripeOutbox: enableStripeOutbox
     enableCardCheckout: enableCardCheckout
     enableSwishCheckout: enableSwishCheckout
     enableDirectBooking: enableDirectBooking

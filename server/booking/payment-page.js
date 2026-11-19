@@ -18,7 +18,8 @@ const {
   activeInvoiceRequest,
   normalizeInvoiceRequests
 } = require('./invoice-requests');
-const { MAIL } = require('./mail');
+const { buildInvoiceNotifications: buildSharedInvoiceNotifications } = require('./booking-mail');
+const { queueNotifications } = require('./outbox');
 const { renderFooter } = require('../../shared/footer.js');
 const { renderAnalyticsHead, renderPurchaseEvent } = require('../../shared/analytics.js');
 
@@ -515,61 +516,31 @@ async function startCheckout(result, token, method, options, context) {
 }
 
 function buildInvoiceNotifications(record, request) {
-  const details = [
-    `Referens: ${record.reference}`,
-    `Belopp: ${formatOre(request.amountOre)}`,
-    `Faktureras till: ${request.invoiceName}`,
-    request.invoiceOrgNumber ? `Organisationsnummer: ${request.invoiceOrgNumber}` : '',
-    `Adress: ${request.invoiceAddress}, ${request.invoicePostalCode} ${request.invoiceCity}`,
-    `E-post: ${request.invoiceEmail}`,
-    request.invoiceReference ? `Er referens: ${request.invoiceReference}` : '',
-    request.invoiceNotes ? `Övrigt: ${request.invoiceNotes}` : ''
-  ].filter(Boolean);
-  return {
-    host: {
-      mailType: 'HOST_INVOICE_REQUEST',
-      to: MAIL.hostRecipient,
-      replyTo: MAIL.replyTo,
-      subject: `Fakturabegäran ${record.reference}`,
-      body: details.join('\n'),
-      html: `<h2>Fakturabegäran ${escapeHtml(record.reference)}</h2><ul>${details
-        .map((line) => `<li>${escapeHtml(line)}</li>`).join('')}</ul>`
-    },
-    guest: {
-      mailType: 'GUEST_INVOICE_REQUEST_RECEIVED',
-      to: request.invoiceEmail,
-      replyTo: MAIL.replyTo,
-      subject: `Fakturabegäran mottagen (${record.reference})`,
-      body: `Vi har tagit emot din fakturabegäran för ${record.reference}. Skadevi hanterar den manuellt. Ingen faktura skickas automatiskt.`,
-      html: `<p>Vi har tagit emot din fakturabegäran för ${escapeHtml(record.reference)}.</p><p>Skadevi hanterar den manuellt. Ingen faktura skickas automatiskt.</p>`
-    }
-  };
+  return buildSharedInvoiceNotifications(record, request);
 }
 
 async function queueInvoiceOutbox(store, record, request, options, context) {
-  if (options.outboxEnabled !== true) return false;
-  const notifications = buildInvoiceNotifications(record, request);
-  for (const [key, notification] of Object.entries(notifications)) {
-    try {
-      await store.save({
-        partition: 'outbox',
-        idempotencyKey: `outbox-invoice-${request.id}-${key}`,
-        reference: record.reference,
-        mailType: notification.mailType,
-        status: 'Utkorg',
-        mailTo: notification.to,
-        mailReplyTo: notification.replyTo,
-        mailSubject: notification.subject,
-        mailHtml: notification.html,
-        mailText: notification.body,
-        attemptCount: 0,
-        createdAt: new Date().toISOString()
-      }, context);
-    } catch {
-      context.warn?.(`Fakturabegäran kunde inte köas för ${record.reference}.`);
+  if (options.outboxEnabled !== true) return { ok: true, queued: false, disabled: true };
+  const outboxContext = {
+    ...context,
+    appendHistory: typeof store.appendHistory === 'function'
+      ? (entry) => store.appendHistory(entry)
+      : undefined
+  };
+  const results = await queueNotifications(
+    (entry) => store.save(entry, context),
+    buildInvoiceNotifications(record, request),
+    {
+      idempotencyKeyPrefix: `outbox-invoice-${request.id}`,
+      reference: record.reference,
+      createdAt: (options.now ?? new Date()).toISOString(),
+      context: outboxContext
     }
-  }
-  return true;
+  );
+  return {
+    ok: results.every((result) => result.ok),
+    queued: results.some((result) => result.ok && result.duplicate !== true)
+  };
 }
 
 async function submitInvoice(result, token, form, options, context) {

@@ -16,8 +16,8 @@
 //   innan registrering; överlappande väntande förfrågningar tillåts men
 //   flaggas — Airbnb-iCal ger ingen atomär låsning, Skadevi avgör.
 // - E-post: notiser skrivs som utkorgsposter i lagringen; Logic Apps
-//   (recurrence-pollning, se infra/logicapp/) skickar dem via den befintliga
-//   Gmail-anslutningen. Ingen publikt oskyddad webhook används.
+//   (recurrence-pollning, se infra/logicapp/) skickar dem via Resend.
+//   Ingen publikt oskyddad webhook används.
 
 const crypto = require('node:crypto');
 const { handleAvailability } = require('../calendar/availability');
@@ -25,6 +25,8 @@ const { loadRules } = require('./rules');
 const { createStore } = require('./store');
 const { quote, PRICE_VERSION, LINEN_MAX, EXTRAHUS_MAX_GUESTS } = require('./pricing');
 const { MAIL } = require('./mail');
+const { MAIL_BRAND, escapeHtml, emailShell, mailList } = require('./mail-templates');
+const { queueNotifications } = require('./outbox');
 
 const MAX_GUESTS = 24;
 const MAX_NIGHTS = 93;
@@ -235,48 +237,6 @@ function makeReference(now = new Date()) {
   return `SK-${now.getFullYear()}-${suffix}`;
 }
 
-// HTML-escapar gästuppgifter så att Logic Apps-flödet aldrig tolkar dem som
-// HTML-kod — skyddar mot infogad HTML/skript i mejlen.
-function escapeHtml(value) {
-  if (value === undefined || value === null) return '';
-  return String(value)
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
-}
-
-const MAIL_BRAND = {
-  gold: '#c9a96e',
-  dark: '#333333',
-  background: '#f7f5f0',
-  border: '#e0dcd3',
-  muted: '#6b665d'
-};
-
-// Gemensam, e-postvänlig ram (inline-stilar, tabellayout) med Skadevis
-// visuella identitet. Allt användarinnehåll escapeas innan det läggs in.
-function emailShell(title, contentHtml) {
-  return `<!doctype html><html lang="sv"><body style="margin:0;padding:0;background:${MAIL_BRAND.background};">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${MAIL_BRAND.background};">
-<tr><td align="center" style="padding:24px 12px;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:640px;background:#ffffff;border:1px solid ${MAIL_BRAND.border};border-top:4px solid ${MAIL_BRAND.gold};">
-<tr><td style="padding:26px 28px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.65;color:${MAIL_BRAND.dark};">
-<div style="font-family:Georgia,'Times New Roman',serif;font-size:23px;letter-spacing:1px;color:${MAIL_BRAND.dark};">Skadevi Herrgård</div>
-<div style="height:2px;width:56px;background:${MAIL_BRAND.gold};margin:12px 0 22px;"></div>
-<h1 style="font-family:Georgia,'Times New Roman',serif;font-size:20px;font-weight:normal;color:${MAIL_BRAND.dark};margin:0 0 18px;">${escapeHtml(title)}</h1>
-${contentHtml}
-<p style="margin:26px 0 0;padding-top:16px;border-top:1px solid ${MAIL_BRAND.border};font-size:12px;color:${MAIL_BRAND.muted};">Detta mejl skickades av Skadevi Herrgårds bokningssystem.</p>
-</td></tr></table>
-</td></tr></table>
-</body></html>`;
-}
-
-function mailList(rows) {
-  return `<ul style="margin:10px 0 18px;padding-left:20px;">${rows.map((row) => `<li style="margin:5px 0;">${row}</li>`).join('')}</ul>`;
-}
-
 // Bygger notiserna (värd + gäst) som läggs i utkorgen i lagringen. Den
 // verkliga e-postleveransen sker i Logic Apps (recurrence-pollning av
 // utkorgspartitionen, se infra/logicapp/). Varje mejl märker tydligt att
@@ -378,29 +338,22 @@ ${mailList(guestLines.map(escapeHtml))}
 }
 
 async function saveOutbox(store, record, context) {
-  for (const [key, notification] of Object.entries(buildNotifications(record))) {
-    try {
-      await store.save({
-        partition: 'outbox',
-        idempotencyKey: `outbox-${record.idempotencyKey}-${key}`,
-        reference: record.reference,
-        mailType: notification.mailType,
-        status: 'Utkorg',
-        mailTo: notification.to,
-        mailReplyTo: notification.replyTo ?? '',
-        mailSubject: notification.subject,
-        mailHtml: notification.html,
-        mailText: notification.body,
-        dispatchEligible: 'true',
-        outboxVersion: '1',
-        deliveryStatus: 'Ej skickad',
-        attemptCount: 0,
-        createdAt: record.createdAt
-      }, context);
-    } catch {
-      context.warn?.(`Utkorgspost kunde inte sparas för ${record.reference}.`);
+  const outboxContext = {
+    ...context,
+    appendHistory: typeof store.appendHistory === 'function'
+      ? (entry) => store.appendHistory(entry)
+      : undefined
+  };
+  await queueNotifications(
+    (entry) => store.save(entry, context),
+    buildNotifications(record),
+    {
+      idempotencyKeyPrefix: `outbox-${record.idempotencyKey}`,
+      reference: record.reference,
+      createdAt: record.createdAt,
+      context: outboxContext
     }
-  }
+  );
 }
 
 // Huvudhanteraren: handleBookingRequest({ body, idempotencyKey, ip }, context, options).

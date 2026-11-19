@@ -261,6 +261,22 @@ function createDemoRepository(options = {}) {
     async saveOutbox(entry) {
       outbox.push(clone(entry));
     },
+    async cancelPendingOutbox(reference, options = {}) {
+      const mailTypes = Array.isArray(options.mailTypes) ? options.mailTypes : [];
+      const now = options.now ?? new Date();
+      let cancelled = 0;
+      for (const entry of outbox) {
+        if (entry.reference !== reference) continue;
+        if (!['Utkorg', 'Misslyckad', 'Skickar'].includes(entry.status)) continue;
+        if (mailTypes.length && !mailTypes.includes(entry.mailType)) continue;
+        entry.status = 'Makulerad';
+        entry.deliveryStatus = 'Makulerad – bokningen ändrades';
+        entry.cancelledAt = now.toISOString();
+        entry.cancelledReason = String(options.reason ?? '');
+        cancelled += 1;
+      }
+      return cancelled;
+    },
     async dashboard(now = initialNow) {
       return dashboardData(allBookings(now), now);
     },

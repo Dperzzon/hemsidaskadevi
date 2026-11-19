@@ -508,6 +508,31 @@ function createTableAdminRepository(options = {}) {
         throw new Error(`Utkorgsposten kunde inte sparas (${result.status})`);
       }
     },
+    async cancelPendingOutbox(reference, options = {}) {
+      const mailTypes = Array.isArray(options.mailTypes) ? options.mailTypes : [];
+      const now = options.now ?? new Date();
+      const rows = await query(
+        `PartitionKey eq 'outbox' and reference eq '${escapeOData(reference)}'`
+      );
+      let cancelled = 0;
+      for (const row of rows) {
+        if (!['Utkorg', 'Misslyckad', 'Skickar'].includes(String(row.status ?? ''))) continue;
+        if (mailTypes.length && !mailTypes.includes(row.mailType)) continue;
+        const result = await request({
+          method: 'PATCH',
+          target: rowTarget('outbox', row.RowKey),
+          ifMatch: row['odata.etag'] ?? row.etag ?? '*',
+          body: {
+            status: 'Makulerad',
+            deliveryStatus: 'Makulerad – bokningen ändrades',
+            cancelledAt: now.toISOString(),
+            cancelledReason: String(options.reason ?? '')
+          }
+        });
+        if ([200, 204].includes(result.status)) cancelled += 1;
+      }
+      return cancelled;
+    },
     async dashboard(now = new Date()) {
       const bookings = await loadAllBookings();
       return dashboardData(bookings, now);

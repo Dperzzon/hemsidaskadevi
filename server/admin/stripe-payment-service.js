@@ -4,8 +4,7 @@ const crypto = require('node:crypto');
 const {
   computePaymentSummary,
   normalizePaymentRequests,
-  latestPaymentRequest,
-  formatOre
+  latestPaymentRequest
 } = require('../booking/payment-ledger');
 const {
   createPaymentAccess,
@@ -16,7 +15,8 @@ const {
   updateInvoiceRequestStatus,
   normalizeInvoiceRequests
 } = require('../booking/invoice-requests');
-const { MAIL } = require('../booking/mail');
+const { buildPaymentLinkNotification } = require('../booking/booking-mail');
+const { queueNotification } = require('../booking/outbox');
 
 const REFERENCE_PATTERN = /^[A-Za-z0-9-]{4,80}$/;
 const MAX_PAYMENT_REQUESTS = 20;
@@ -28,16 +28,6 @@ function error(status, message, extra = {}) {
 function cleanString(value, limit = 500) {
   if (value === undefined || value === null) return '';
   return String(value).replace(/[\u0000-\u001F\u007F]/g, '').trim().slice(0, limit);
-}
-
-function escapeHtml(value) {
-  if (value === undefined || value === null) return '';
-  return String(value)
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
 }
 
 function actorOf(principal) {
@@ -96,52 +86,33 @@ async function appendAudit(repo, principal, action, record, details = {}, contex
   }
 }
 
-function buildPaymentLinkEmail(record, url, amountOre, expiresAt, options = {}) {
-  const methods = options.swishEnabled ? 'kort eller Swish' : 'kort';
-  const lines = [
-    `Referens: ${record.reference}`,
-    `Belopp: ${formatOre(amountOre)}`,
-    `Betalningssida: ${url}`,
-    expiresAt
-      ? `Länken gäller till: ${new Date(expiresAt).toLocaleString('sv-SE', { timeZone: 'Europe/Stockholm' })}`
-      : '',
-    `På sidan kan du betala med ${methods} eller begära faktura.`,
-    'Skadevi Herrgård hanterar aldrig dina kortuppgifter.'
-  ].filter(Boolean);
-  return {
-    mailType: 'GUEST_PAYMENT_LINK',
-    to: record.email,
-    replyTo: MAIL.replyTo,
-    subject: `Betalningssida för din bokning (${record.reference})`,
-    body: `Din bokning är bekräftad. Du kan betala via länken nedan.\n\n${lines.join('\n')}`,
-    html: `<p>Din bokning är bekräftad. Du kan betala via länken nedan.</p><ul>${lines
-      .map((line) => `<li>${escapeHtml(line)}</li>`).join('')}</ul>`
-  };
+function buildPaymentLinkEmail(record, url, amountOre, expiresAt) {
+  return buildPaymentLinkNotification(record, url, amountOre, expiresAt);
 }
 
 async function queuePaymentLink(repo, record, url, amountOre, expiresAt, options, context) {
-  if (options.outboxEnabled !== true) return false;
-  const notification = buildPaymentLinkEmail(record, url, amountOre, expiresAt, options);
-  try {
-    await repo.saveOutbox({
-      partition: 'outbox',
-      idempotencyKey: `outbox-payment-link-${crypto.createHash('sha256').update(url).digest('hex').slice(0, 24)}`,
-      reference: record.reference,
-      mailType: notification.mailType,
-      status: 'Utkorg',
-      mailTo: notification.to,
-      mailReplyTo: notification.replyTo,
-      mailSubject: notification.subject,
-      mailHtml: notification.html,
-      mailText: notification.body,
-      attemptCount: 0,
-      createdAt: new Date().toISOString()
-    });
-    return true;
-  } catch {
-    context.warn?.(`Betalningslänk kunde inte köas för ${record.reference}.`);
-    return false;
+  if (record?.statusCode !== 'CONFIRMED') {
+    return { ok: false, queued: false, skipped: 'not_confirmed' };
   }
+  if (options.outboxEnabled !== true) return { ok: true, queued: false, disabled: true };
+  const notification = buildPaymentLinkEmail(record, url, amountOre, expiresAt);
+  const outboxContext = {
+    ...context,
+    appendHistory: typeof repo.appendHistory === 'function'
+      ? (entry) => repo.appendHistory(entry)
+      : undefined
+  };
+  const result = await queueNotification(
+    (entry) => repo.saveOutbox(entry),
+    {
+      idempotencyKey: `outbox-payment-link-${crypto.createHash('sha256').update(url).digest('hex').slice(0, 32)}`,
+      reference: record.reference,
+      notification,
+      createdAt: (options.now ?? new Date()).toISOString(),
+      context: outboxContext
+    }
+  );
+  return { ...result, queued: result.ok === true && result.duplicate !== true };
 }
 
 async function calendarRowsFor(repo, reference) {
@@ -265,7 +236,18 @@ async function createPaymentLink(repo, principal, reference, body = {}, options 
       mode: stripeModeOf(options)
     }
   }, context);
-  const emailQueued = await queuePaymentLink(
+  if (typeof repo.cancelPendingOutbox === 'function') {
+    try {
+      await repo.cancelPendingOutbox(reference, {
+        mailTypes: ['GUEST_PAYMENT_LINK'],
+        reason: 'Ersatt av ny betalningslänk',
+        now
+      });
+    } catch {
+      context.warn?.(`Tidigare betalningslänksmejl kunde inte makuleras för ${reference}.`);
+    }
+  }
+  const emailResult = await queuePaymentLink(
     repo,
     updatedRecord,
     url,
@@ -279,7 +261,7 @@ async function createPaymentLink(repo, principal, reference, body = {}, options 
     status: 201,
     jsonBody: {
       reference,
-      emailQueued,
+      emailQueued: emailResult.queued === true,
       paymentLink: {
         url,
         status: 'OPEN',

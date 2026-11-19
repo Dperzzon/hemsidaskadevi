@@ -8,7 +8,7 @@ const {
 const {
   applyStripePayment,
   markPaymentRequestStatus,
-  formatOre
+  computePaymentSummary
 } = require('./payment-ledger');
 const {
   RESERVATION_STATUS,
@@ -16,7 +16,12 @@ const {
   convertReservationToBooking,
   releaseReservation
 } = require('./reservations');
-const { MAIL } = require('./mail');
+const {
+  buildPaymentNotifications,
+  buildBookingConfirmation,
+  buildPaymentFailedNotification
+} = require('./booking-mail');
+const { queueNotification, queueNotifications } = require('./outbox');
 
 const API_HEADERS = {
   'Cache-Control': 'no-store',
@@ -30,91 +35,91 @@ const HANDLED_EVENTS = new Set([
   'checkout.session.async_payment_failed'
 ]);
 
-function escapeHtml(value) {
-  if (value === undefined || value === null) return '';
-  return String(value)
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
-}
-
 function result(status, jsonBody) {
   return { status, headers: API_HEADERS, jsonBody };
 }
 
-function buildPaymentNotifications(record, payment, summary, options = {}) {
-  const review = options.reviewRequired
-    ? `VARNING: ${options.reviewRequired}`
-    : '';
-  const methodText = payment.method === 'SWISH' ? 'Swish' : payment.method === 'CARD' ? 'kort' : 'betalning';
-  const guestMethodText = payment.method === 'SWISH' ? 'Swish-betalning' : payment.method === 'CARD' ? 'kortbetalning' : 'betalning';
-  const hostLines = [
-    `Referens: ${record.reference}`,
-    `Betalning mottagen via ${methodText} (Stripe Checkout).`,
-    `Belopp: ${formatOre(payment.amountOre)}`,
-    `Totalt betalt: ${formatOre(summary.paidOre)}`,
-    `Återstår: ${formatOre(Math.max(0, summary.remainingOre))}`,
-    `Betalstatus: ${summary.paymentLabel}`,
-    `Stripe-session: ${payment.stripeSessionId}`,
-    review
-  ].filter(Boolean);
-  const guestLines = [
-    `Referens: ${record.reference}`,
-    `Vi har tagit emot din ${guestMethodText} på ${formatOre(payment.amountOre)}.`,
-    `Totalt betalt: ${formatOre(summary.paidOre)}`,
-    `Återstår: ${formatOre(Math.max(0, summary.remainingOre))}`,
-    'Betalningen är registrerad på din bokning.'
-  ];
+function outboxContextFor(store, context) {
   return {
-    host: {
-      mailType: 'HOST_PAYMENT_RECEIVED',
-      to: MAIL.hostRecipient,
-      replyTo: MAIL.replyTo,
-      subject: `Betalning mottagen ${record.reference}`,
-      body: hostLines.join('\n'),
-      html: `<h2>Betalning mottagen ${escapeHtml(record.reference)}</h2><ul>${hostLines
-        .map((line) => `<li>${escapeHtml(line)}</li>`).join('')}</ul>`
-    },
-    guest: {
-      mailType: 'GUEST_PAYMENT_RECEIPT',
-      to: record.email,
-      replyTo: MAIL.replyTo,
-      subject: `Betalning mottagen (${record.reference})`,
-      body: guestLines.join('\n'),
-      html: `<p>Tack! Vi har registrerat din betalning.</p><ul>${guestLines
-        .map((line) => `<li>${escapeHtml(line)}</li>`).join('')}</ul>`
-    }
+    ...context,
+    appendHistory: typeof store.appendHistory === 'function'
+      ? (entry) => store.appendHistory(entry)
+      : undefined
   };
 }
 
 async function queueOutbox(store, record, payment, summary, event, options, context) {
-  if (options.outboxEnabled !== true) return false;
+  if (options.outboxEnabled !== true) return { ok: true, queued: false, disabled: true };
   const notifications = buildPaymentNotifications(record, payment, summary, {
     reviewRequired: options.reviewRequired
   });
-  for (const [key, notification] of Object.entries(notifications)) {
-    try {
-      await store.save({
-        partition: 'outbox',
-        idempotencyKey: `outbox-stripe-${payment.stripeSessionId}-${key}`,
-        reference: record.reference,
-        mailType: notification.mailType,
-        status: 'Utkorg',
-        mailTo: notification.to,
-        mailReplyTo: notification.replyTo ?? '',
-        mailSubject: notification.subject,
-        mailHtml: notification.html,
-        mailText: notification.body,
-        attemptCount: 0,
-        createdAt: (options.now ?? new Date()).toISOString()
-      }, context);
-    } catch {
-      context.warn?.(`Stripe-kvittomejl kunde inte köas för ${record.reference}.`);
+  const outboxContext = {
+    ...context,
+    appendHistory: typeof store.appendHistory === 'function'
+      ? (entry) => store.appendHistory(entry)
+      : undefined
+  };
+  const results = await queueNotifications(
+    (entry) => store.save(entry, context),
+    notifications,
+    {
+      idempotencyKeyPrefix: `outbox-stripe-${payment.stripeSessionId}`,
+      reference: record.reference,
+      createdAt: (options.now ?? new Date()).toISOString(),
+      context: outboxContext
     }
+  );
+  return {
+    ok: results.every((item) => item.ok),
+    queued: results.some((item) => item.ok && item.duplicate !== true),
+    duplicate: results.every((item) => item.duplicate === true)
+  };
+}
+
+async function queueConfirmation(store, record, options, context) {
+  if (record?.statusCode !== 'CONFIRMED') {
+    return { ok: false, queued: false, skipped: 'not_confirmed' };
   }
-  return true;
+  if (options.outboxEnabled !== true) return { ok: true, queued: false, disabled: true };
+  const outboxContext = {
+    ...context,
+    appendHistory: typeof store.appendHistory === 'function'
+      ? (entry) => store.appendHistory(entry)
+      : undefined
+  };
+  return queueNotification(
+    (entry) => store.save(entry, context),
+    {
+      idempotencyKey: `outbox-confirmation-${record.reference}-v${Number(record.version || 1)}`,
+      reference: record.reference,
+      notification: buildBookingConfirmation(record),
+      createdAt: (options.now ?? new Date()).toISOString(),
+      context: outboxContext
+    }
+  );
+}
+
+async function queuePaymentFailed(store, record, options, context) {
+  if (record?.statusCode === 'CONFIRMED') {
+    return { ok: false, queued: false, skipped: 'confirmed' };
+  }
+  if (options.outboxEnabled !== true) return { ok: true, queued: false, disabled: true };
+  const outboxContext = {
+    ...context,
+    appendHistory: typeof store.appendHistory === 'function'
+      ? (entry) => store.appendHistory(entry)
+      : undefined
+  };
+  return queueNotification(
+    (entry) => store.save(entry, context),
+    {
+      idempotencyKey: `outbox-payment-failed-${options.sessionId}`,
+      reference: record.reference,
+      notification: buildPaymentFailedNotification(record),
+      createdAt: (options.now ?? new Date()).toISOString(),
+      context: outboxContext
+    }
+  );
 }
 
 async function appendPaymentHistory(store, record, payment, summary, event, options, context) {
@@ -508,6 +513,20 @@ async function handleStripeWebhook(request, context = {}, options = {}) {
     if (marked.changed) {
       await appendStatusHistory(store, marked.record, session, action, event, eventOptions, { warn });
     }
+    const finalRecord = released.record ?? marked.record;
+    const isDirectBooking = finalRecord &&
+      (finalRecord.bookingSource === 'DIRECT' || Boolean(finalRecord.reservation));
+    if (
+      marked.changed &&
+      isDirectBooking &&
+      finalRecord.statusCode !== 'CONFIRMED' &&
+      released.released === true
+    ) {
+      await queuePaymentFailed(store, finalRecord, {
+        ...eventOptions,
+        sessionId: String(session.id)
+      }, outboxContextFor(store, { warn }));
+    }
     return result(200, { received: true, released: released.released === true });
   }
 
@@ -530,15 +549,44 @@ async function handleStripeWebhook(request, context = {}, options = {}) {
     ...eventOptions,
     reviewRequired: applied.reviewRequired
   }, { warn });
-  await queueOutbox(store, applied.record, applied.payment, applied.summary, event, {
-    ...eventOptions,
-    reviewRequired: applied.reviewRequired
-  }, { warn });
 
   const direct = await confirmDirectBooking(store, applied, session, event, eventOptions, { warn });
   if (direct?.retryable) {
     return result(503, { error: 'Betalningen kunde inte registreras just nu.' });
   }
+
+  const finalRecord = direct?.record ?? applied.record;
+  const finalSummary = computePaymentSummary(finalRecord);
+  const outboxContext = outboxContextFor(store, { warn });
+  const directConfirmed = direct?.ok === true &&
+    direct?.skipped !== true &&
+    finalRecord.statusCode === 'CONFIRMED';
+
+  if (directConfirmed) {
+    await queueConfirmation(store, finalRecord, eventOptions, outboxContext);
+    const hostNotification = buildPaymentNotifications(
+      finalRecord,
+      applied.payment,
+      finalSummary,
+      { reviewRequired: applied.reviewRequired }
+    ).host;
+    await queueNotification(
+      (entry) => store.save(entry, { warn }),
+      {
+        idempotencyKey: `outbox-stripe-${String(session.id)}-host`,
+        reference: finalRecord.reference,
+        notification: hostNotification,
+        createdAt: now.toISOString(),
+        context: outboxContext
+      }
+    );
+  } else {
+    await queueOutbox(store, finalRecord, applied.payment, finalSummary, event, {
+      ...eventOptions,
+      reviewRequired: applied.reviewRequired
+    }, { warn });
+  }
+
   if (direct?.reconciliation) {
     return result(200, { received: true, reconciliation: true });
   }

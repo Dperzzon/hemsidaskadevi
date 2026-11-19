@@ -17,13 +17,16 @@ const STATUS_ORDER = [
 const PAYMENT_ORDER = ['UNPAID', 'DEPOSIT_PAID', 'PARTIALLY_PAID', 'PAID', 'REFUNDED', 'VOID'];
 
 function renderNewBooking(options) {
-  const { principal, demo, csrfToken, writesEnabled } = options;
+  const { principal, demo, csrfToken, writesEnabled, outboxEnabled = false } = options;
   const today = formatDateKey(new Date().toISOString().slice(0, 10), { long: true });
   const content = `
     ${pageHeader('Ny bokning', 'Registrera en manuell bokning eller blockera datum utan gästuppgifter')}
     <div class="notice-banner">
       <strong>Endast Owner.</strong> Manuella bokningar och datumblockeringar kräver ägarbehörighet.
-      Inga mejl skickas till gästen i detta steg. Bekräftade bokningar låser datum direkt.
+      ${outboxEnabled
+        ? 'Bekräftelsemejl köas till utkorgen när du markerar rutan nedan. Mejlet skickas först när utkorgen är aktiverad.'
+        : 'Mejlutskick är inte aktiverat i denna miljö. Bokningen kan skapas utan att något mejl köas.'}
+      Bekräftade bokningar låser datum direkt.
     </div>
 
     <form class="panel admin-booking-form" data-admin-form="manual-booking">
@@ -94,7 +97,7 @@ function renderNewBooking(options) {
       <section class="form-section">
         <div class="panel-heading"><div><p class="eyebrow">Internt</p><h2>Anteckning</h2></div></div>
         <label class="field"><span>Intern anteckning / orsak till blockering</span><textarea name="latestNote" rows="3" maxlength="2000"></textarea></label>
-        <label class="check-row" data-booking-only><input type="checkbox" name="sendGuestEmail" disabled> <span>Skicka bekräftelsemejl till gästen (avstängt i detta steg)</span></label>
+        <label class="check-row${outboxEnabled ? '' : ' muted'}" data-booking-only><input type="checkbox" name="sendGuestEmail"${outboxEnabled ? '' : ' disabled'}> <span>Skicka bekräftelsemejl till gästen (endast bekräftade bokningar)${outboxEnabled ? '' : ' – ej aktiverat'}</span></label>
       </section>
 
       <div class="form-actions">

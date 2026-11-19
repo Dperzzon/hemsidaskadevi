@@ -353,12 +353,17 @@ test('Logic App-modulen: systemidentitet, Disabled-läge och tabellroll; KV-roll
   assert.ok(!raw.includes('connectionString'), 'ingen anslutningssträng i Bicep-modulerna');
 });
 
-test('Main-mallen: BOOKING_REQUESTS_ENABLED hålls avstängt och Logic App är villkorligt kopplad', () => {
+test('Main-mallen: BOOKING_REQUESTS_ENABLED är parameteriserad och Logic App är villkorligt kopplad', () => {
   const mainBicep = fs.readFileSync(path.join(__dirname, '../../infra/main.bicep'), 'utf8');
   assert.ok(mainBicep.includes("module logicAppNotify 'modules/logic-app-notify.bicep'"));
   assert.ok(mainBicep.includes("if (!empty(bookingStorageAccountName))"));
   const webappBicep = fs.readFileSync(path.join(__dirname, '../../infra/modules/webapp.bicep'), 'utf8');
-  const killSwitch = webappBicep.match(/BOOKING_REQUESTS_ENABLED'[^}]*value: '(\d)'/);
-  assert.ok(killSwitch, 'kill switch saknas i webapp-modulen');
-  assert.equal(killSwitch[1], '0', 'BOOKING_REQUESTS_ENABLED måste vara 0');
+  assert.match(webappBicep, /param enableBookingRequests bool = false/);
+  assert.match(
+    webappBicep,
+    /BOOKING_REQUESTS_ENABLED'[\s\S]*?value: enableBookingRequests \? '1' : '0'/
+  );
+  const params = fs.readFileSync(path.join(__dirname, '../../infra/main.bicepparam'), 'utf8');
+  assert.match(params, /param enableBookingRequests = true/, 'produktionsparametern ska matcha verifierat driftläge');
+  assert.match(params, /param enableStripeOutbox = false/, 'utkorgen ska vara avstängd tills aktivering');
 });

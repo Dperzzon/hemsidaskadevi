@@ -888,7 +888,7 @@ let calendarParserReady = false;
           return;
         }
         sendHtml(req, res, 200, renderNewBooking({
-          principal, demo, csrfToken, writesEnabled
+          principal, demo, csrfToken, writesEnabled, outboxEnabled
         }));
         return;
       }
@@ -929,7 +929,7 @@ let calendarParserReady = false;
         sendHtml(req, res, 200, renderBookingDetail({
           booking: redactPaymentLinks(booking, principal),
           principal, demo, csrfToken, writesEnabled, history, today: todayKey(now),
-          stripeEnabled, stripeMode, stripeSwishEnabled
+          stripeEnabled, stripeMode, stripeSwishEnabled, outboxEnabled
         }));
         return;
       }

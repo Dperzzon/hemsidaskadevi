@@ -100,7 +100,22 @@ const MAIL_STATUS_LABELS = {
   Skickar: { api: 'Skickar', tone: 'preliminary' },
   Skickad: { api: 'Accepterat av Resend', tone: 'confirmed' },
   Misslyckad: { api: 'Misslyckat', tone: 'danger' },
-  'Kräver manuell kontroll': { api: 'Kräver manuell kontroll', tone: 'warning' }
+  'Kräver manuell kontroll': { api: 'Kräver manuell kontroll', tone: 'warning' },
+  Makulerad: { api: 'Makulerad', tone: 'neutral' }
+};
+
+const MAIL_TYPE_LABELS = {
+  HOST_NEW_REQUEST: 'Värd: ny bokningsförfrågan',
+  GUEST_REQUEST_ACK: 'Gäst: mottagningskvitto',
+  HOST_PAYMENT_RECEIVED: 'Värd: betalning mottagen',
+  GUEST_PAYMENT_RECEIPT: 'Gäst: betalningskvitto',
+  GUEST_BOOKING_CONFIRMED: 'Gäst: bokningsbekräftelse',
+  GUEST_CONFIRMATION: 'Gäst: bokningsbekräftelse (manuell)',
+  GUEST_PAYMENT_LINK: 'Gäst: betalningslänk',
+  HOST_INVOICE_REQUEST: 'Värd: fakturabegäran',
+  GUEST_INVOICE_REQUEST_RECEIVED: 'Gäst: fakturabegäran mottagen',
+  GUEST_BOOKING_CANCELLED: 'Gäst: avbokning',
+  GUEST_PAYMENT_FAILED: 'Gäst: betalning ej genomförd'
 };
 
 const DELIVERY_LABELS = {
@@ -112,7 +127,8 @@ const DELIVERY_LABELS = {
   failed: { label: 'Misslyckat', tone: 'danger' },
   complained: { label: 'Klagomål', tone: 'danger' },
   suppressed: { label: 'Undertryckt', tone: 'warning' },
-  manual_review: { label: 'Manuell kontroll', tone: 'warning' }
+  manual_review: { label: 'Manuell kontroll', tone: 'warning' },
+  'Makulerad – bokningen ändrades': { label: 'Makulerad', tone: 'neutral' }
 };
 
 function pad(value) {
@@ -235,8 +251,17 @@ function normalizeMailLevel(entry = {}) {
     resendId: entry.resendId ?? '',
     needsReview: api.tone === 'warning' || api.tone === 'danger' ||
       deliveryInfo.tone === 'danger' || deliveryInfo.tone === 'warning',
-    updatedAt: entry.updatedAt ?? entry.sentAt ?? ''
+    updatedAt: entry.updatedAt ?? entry.sentAt ?? '',
+    mailType: String(entry.mailType ?? ''),
+    mailTypeLabel: mailTypeLabel(entry.mailType),
+    createdAt: String(entry.createdAt ?? ''),
+    queued: status === 'Utkorg'
   };
+}
+
+function mailTypeLabel(mailType) {
+  const type = String(mailType ?? '');
+  return MAIL_TYPE_LABELS[type] ?? (type || 'Okänd mejltyp');
 }
 
 function emptyMailLevel() {
@@ -259,8 +284,11 @@ function normalizeEmailStatus(record = {}, outbox = []) {
     };
   }
   const rows = Array.isArray(outbox) ? outbox : [];
-  const host = rows.find((row) => row.mailType === 'HOST_NEW_REQUEST');
-  const guest = rows.find((row) => row.mailType === 'GUEST_ACK');
+  const sorted = [...rows].sort((a, b) =>
+    String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? ''))
+  );
+  const host = sorted.find((row) => String(row.mailType ?? '').startsWith('HOST_'));
+  const guest = sorted.find((row) => String(row.mailType ?? '').startsWith('GUEST_'));
   return {
     host: host ? normalizeMailLevel(host) : emptyMailLevel(),
     guest: guest ? normalizeMailLevel(guest) : emptyMailLevel()
@@ -467,6 +495,9 @@ function normalizeBooking(record = {}, options = {}) {
     isDemo: record.isDemo === true || String(record.reference ?? '').startsWith('DEMO-')
   };
   booking.mailStatus = normalizeEmailStatus(record, options.outbox);
+  booking.mailEvents = (Array.isArray(options.outbox) ? [...options.outbox] : [])
+    .sort((a, b) => String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')))
+    .map((row) => normalizeMailLevel(row));
   applyWarnings(booking, { now });
   booking.searchText = [
     booking.reference,

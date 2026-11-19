@@ -64,6 +64,12 @@ param bookingStorageAccountName string = ''
 @description('Aktiverar Stripe-webhooken. false = /api/stripe/webhook svarar 503 och inga betalningar registreras.')
 param enableStripeWebhook bool = false
 
+@description('Aktiverar bokningsförfrågningar i formuläret. Sätts uttryckligen per miljö så att en infra-deployment inte ändrar driftsläget av misstag.')
+param enableBookingRequests bool = false
+
+@description('Köar betalnings-, faktura- och betalningslänksmejl till utkorgen. Logic App måste också vara aktiverad för leverans.')
+param enableStripeOutbox bool = false
+
 @description('Aktiverar kortbetalningar på gästens betalningssida. false = endast faktura.')
 param enableCardCheckout bool = false
 
@@ -127,7 +133,7 @@ var baseAppSettings = [
   }
   {
     name: 'BOOKING_REQUESTS_ENABLED'
-    value: '0'
+    value: enableBookingRequests ? '1' : '0'
   }
   {
     name: 'PUBLIC_BASE_URL'
@@ -159,7 +165,7 @@ var baseAppSettings = [
   }
   {
     name: 'STRIPE_OUTBOX_ENABLED'
-    value: '0'
+    value: enableStripeOutbox ? '1' : '0'
   }
   {
     name: 'DIRECT_BOOKING_ENABLED'

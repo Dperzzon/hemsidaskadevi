@@ -59,6 +59,14 @@ param bookingStorageAccountName = 'stskadevibokningprod'
 // Hemligheterna ligger i Key Vault och refereras utan versionsnummer.
 param enableStripeWebhook = true
 
+// Matchar det verifierade produktionsläget 2026-11-19. Värdet ska ändras
+// medvetet, inte som bieffekt av en infra-deployment.
+param enableBookingRequests = true
+
+// Utkorgen för betalningsmejl är fortsatt avstängd. Aktiveras först efter
+// kontrollerad test och separat godkännande.
+param enableStripeOutbox = false
+
 param enableCardCheckout = true
 
 param enableSwishCheckout = false
