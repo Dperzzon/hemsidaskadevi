@@ -39,6 +39,7 @@ const {
   verifyReservation
 } = require('./reservations');
 const { layout } = require('./payment-page');
+const { buildPurchaseEvent } = require('../../shared/analytics.js');
 
 const API_HEADERS = {
   'Cache-Control': 'no-store',
@@ -810,9 +811,8 @@ function addonList(record) {
 function renderConfirmedPage(record, session) {
   const verifiedOre = Number(session.amount_total);
   const paidOre = verifiedOre || Math.round(Number(record.total) * 100);
-  const purchase = Number.isSafeInteger(verifiedOre) && verifiedOre > 0
-    ? { transaction_id: record.reference, value: verifiedOre / 100, currency: 'SEK' }
-    : null;
+  // purchase skapas endast för CONFIRMED + verifierad betald Stripe-session.
+  const purchase = buildPurchaseEvent(record, session);
   return {
     status: 200,
     headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
@@ -881,12 +881,24 @@ async function handleDirectBookingConfirmation(request, _context = {}, options =
   const record = raw.record;
 
   const requests = normalizePaymentRequests(record);
-  const matches = requests.some((paymentRequest) => paymentRequest.sessionId === sessionId);
+  const requestRow = requests.find((paymentRequest) => paymentRequest.sessionId === sessionId);
   const amountOre = Math.round(Number(record.total) * 100);
   const sessionAmount = Number(session.amount_total);
   const currency = String(session.currency ?? '').toLowerCase();
-  if (!matches || sessionAmount !== amountOre || currency !== 'sek') {
+  if (!requestRow || sessionAmount !== amountOre || currency !== 'sek') {
     return renderConfirmationError(409, 'Betalningen kunde inte verifieras mot bokningen.');
+  }
+  if (session.mode && session.mode !== 'payment') {
+    return renderConfirmationError(409, 'Betalningen kunde inte verifieras mot bokningen.');
+  }
+  if (typeof session.livemode === 'boolean' && stripe.mode && session.livemode !== (stripe.mode === 'live')) {
+    return renderConfirmationError(409, 'Betalningen kunde inte verifieras mot bokningen.');
+  }
+  if (Array.isArray(session.payment_method_types) && session.payment_method_types.length === 1) {
+    const sessionMethod = String(session.payment_method_types[0]).toLowerCase();
+    if (requestRow.paymentMethod && sessionMethod !== requestRow.paymentMethod) {
+      return renderConfirmationError(409, 'Betalningen kunde inte verifieras mot bokningen.');
+    }
   }
 
   const paid = session.payment_status === 'paid';

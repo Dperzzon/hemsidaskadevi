@@ -14,6 +14,7 @@ const {
 } = require('../../server/booking/direct-booking');
 const { handleStripeWebhook } = require('../../server/booking/stripe-webhook');
 const { signStripePayload } = require('../../server/booking/stripe');
+const { createAnalyticsTransactionId } = require('../../shared/analytics');
 
 const NOW = new Date('2026-11-10T12:00:00.000Z');
 const NOW_SECONDS = Math.floor(NOW.getTime() / 1000);
@@ -596,6 +597,61 @@ test('bekräftelsesidan visar inte bekräftat enbart från Stripe-redirect', asy
   assert.equal(confirmed.status, 200);
   assert.match(confirmed.html, /Bokningen är bekräftad/);
   assert.match(confirmed.html, new RegExp(reference));
+});
+
+test('bekräftelsesidan skickar purchase först när bokningen är CONFIRMED', async () => {
+  const { options, context, memory, stripe } = setup();
+  const created = await handleDirectBooking(request(), context, options);
+  const reference = created.jsonBody.reference;
+  const session = [...stripe.sessions.values()][0];
+  session.payment_status = 'paid';
+  session.status = 'complete';
+
+  const pending = await handleDirectBookingConfirmation(
+    { query: { session_id: session.id } },
+    context,
+    { ...options, store: memory.store }
+  );
+  assert.doesNotMatch(pending.html, /data-analytics-purchase/);
+
+  const record = await memory.store.findByReference(reference);
+  record.statusCode = 'CONFIRMED';
+  record.status = 'Bekräftad';
+  await memory.store.updateRequest(record, { ifMatch: '*' });
+
+  const confirmed = await handleDirectBookingConfirmation(
+    { query: { session_id: session.id } },
+    context,
+    { ...options, store: memory.store }
+  );
+  assert.match(confirmed.html, /data-analytics-purchase/);
+  const transactionId = createAnalyticsTransactionId(reference);
+  assert.match(confirmed.html, new RegExp(`"transaction_id":"${transactionId}"`));
+  assert.doesNotMatch(confirmed.html, new RegExp(`"transaction_id":"${reference}"`));
+  assert.match(confirmed.html, /"currency":"SEK"/);
+});
+
+test('bekräftelsesidan ger ingen purchase i fel Stripe-miljö', async () => {
+  const { options, context, memory, stripe } = setup();
+  const created = await handleDirectBooking(request(), context, options);
+  const reference = created.jsonBody.reference;
+  const session = [...stripe.sessions.values()][0];
+  session.payment_status = 'paid';
+  session.status = 'complete';
+  session.livemode = true;
+
+  const record = await memory.store.findByReference(reference);
+  record.statusCode = 'CONFIRMED';
+  record.status = 'Bekräftad';
+  await memory.store.updateRequest(record, { ifMatch: '*' });
+
+  const confirmed = await handleDirectBookingConfirmation(
+    { query: { session_id: session.id } },
+    context,
+    { ...options, store: memory.store }
+  );
+  assert.equal(confirmed.status, 409);
+  assert.doesNotMatch(confirmed.html, /data-analytics-purchase/);
 });
 
 test('extrahus stoppar direktbetalning och hänvisar till manuell förfrågan', async () => {

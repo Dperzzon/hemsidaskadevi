@@ -7,7 +7,7 @@ const {
 } = require('./payment-ledger');
 const { createStripeClient } = require('./stripe');
 const { renderFooter } = require('../../shared/footer.js');
-const { renderAnalyticsHead, renderPurchaseEvent } = require('../../shared/analytics.js');
+const { renderAnalyticsHead, renderPurchaseEvent, buildPurchaseEvent } = require('../../shared/analytics.js');
 
 const REFERENCE_PATTERN = /^[A-Za-z0-9-]{4,80}$/;
 const SESSION_ID_PATTERN = /^cs_[A-Za-z0-9_]+$/;
@@ -211,10 +211,10 @@ function renderCancelUnknown() {
 
 function renderSuccess(record, session) {
   const heading = 'Tack för din bokning';
-  const verifiedOre = Number(session?.amount_total);
-  const purchase = Number.isSafeInteger(verifiedOre) && verifiedOre > 0
-    ? { transaction_id: record.reference, value: verifiedOre / 100, currency: 'SEK' }
-    : null;
+  // purchase skapas endast för en verifierad, betald Stripe-session på en
+  // CONFIRMED-bokning. buildPurchaseEvent kontrollerar status, läge, valuta,
+  // referens och belopp och returnerar annars null.
+  const purchase = buildPurchaseEvent(record, session);
   const card = `<span class="payment-card-eyebrow">Betalningsstatus</span>
     <h2>Din betalning är genomförd</h2>
     <p>Betalningen har verifierats och din bokning är bekräftad. Vi ser fram emot att välkomna dig till Skadevi Herrgård.</p>
@@ -451,6 +451,17 @@ async function handleSuccessResult(request, options = {}) {
       return renderSuccessUnknown();
     }
     if (String(session?.currency ?? '').toLowerCase() !== 'sek') return renderSuccessUnknown();
+    if (session?.mode && session.mode !== 'payment') return renderSuccessUnknown();
+    if (requestRow.mode && typeof session?.livemode === 'boolean') {
+      const sessionMode = session.livemode ? 'live' : 'test';
+      if (requestRow.mode !== sessionMode) return renderSuccessUnknown();
+    }
+    if (Array.isArray(session?.payment_method_types) && session.payment_method_types.length === 1) {
+      const sessionMethod = String(session.payment_method_types[0]).toLowerCase();
+      if (requestRow.paymentMethod && sessionMethod !== requestRow.paymentMethod) {
+        return renderSuccessUnknown();
+      }
+    }
     if (record.statusCode === 'CONFIRMED' && isPaid(session)) {
       return renderSuccess(record, session);
     }

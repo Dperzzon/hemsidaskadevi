@@ -93,12 +93,25 @@
     });
   }
 
+  function markPurchaseDelivered(payload) {
+    // Dedupliceringsnyckeln sätts först när händelsen faktiskt har skickats
+    // till dataLayer efter samtycke. Om besökaren nekar (eller lämnar sidan
+    // utan att välja) får nyckeln inte blockera ett senare, samtyckt köp.
+    if (!payload || payload.event !== 'purchase') return;
+    var transactionId = String(payload.transaction_id || '');
+    if (!transactionId) return;
+    safeStorageSet('skadevi-purchase-' + transactionId, new Date().toISOString());
+  }
+
   function flushQueue() {
     if (!api.gtmReady) return;
     window.dataLayer = window.dataLayer || [];
     while (api.queue.length) {
       var payload = api.queue.shift();
-      try { window.dataLayer.push(payload); } catch { /* ignoreras */ }
+      try {
+        window.dataLayer.push(payload);
+        markPurchaseDelivered(payload);
+      } catch { /* ignoreras */ }
     }
   }
 
@@ -179,13 +192,15 @@
     var value = Number(purchase.value);
     if (!/^[A-Za-z0-9-]{4,80}$/.test(transactionId)) return;
     if (!Number.isFinite(value) || value <= 0) return;
-    var storageKey = 'skadevi-purchase-' + transactionId;
-    if (safeStorageGet(storageKey)) return;
-    safeStorageSet(storageKey, new Date().toISOString());
+    var currency = String(purchase.currency || 'SEK').toUpperCase();
+    if (currency !== 'SEK') return;
+    // Redan levererat köp i den här webbläsaren. Nyckeln sätts först vid
+    // leverans till dataLayer, aldrig innan samtycke har getts.
+    if (safeStorageGet('skadevi-purchase-' + transactionId)) return;
     track('purchase', {
       transaction_id: transactionId,
       value: value,
-      currency: String(purchase.currency || 'SEK')
+      currency: currency
     });
   }
 

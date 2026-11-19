@@ -3,6 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { handlePaymentResult } = require('../../server/booking/payment-result');
+const { createAnalyticsTransactionId } = require('../../shared/analytics');
 
 const REFERENCE = 'SK-2026-ABC234';
 
@@ -286,4 +287,173 @@ test('betalningsresultatet sätter no-store och no-referrer', async () => {
   assert.equal(response.headers['Cache-Control'], 'no-store');
   assert.equal(response.headers['Referrer-Policy'], 'no-referrer');
   assert.match(response.headers['X-Robots-Tag'], /noindex/);
+});
+
+function confirmedRecord(overrides = {}) {
+  return makeRecord({
+    statusCode: 'CONFIRMED',
+    status: 'Bekräftad',
+    paymentStatus: 'PAID',
+    amountPaid: 20000,
+    balance: 0,
+    total: 20000,
+    paymentRequests: [{
+      provider: 'stripe',
+      mode: 'test',
+      paymentMethod: 'card',
+      status: 'PAID',
+      sessionId: 'cs_test_card1',
+      amountOre: 2000000,
+      currency: 'sek',
+      createdAt: '2026-11-10T10:00:00.000Z'
+    }],
+    ...overrides
+  });
+}
+
+test('A: lyckad betalning ger exakt en purchase med säkert ID, bokningsvärde och SEK', async () => {
+  const record = confirmedRecord();
+  const store = makeStore(record);
+  const stripe = makeStripe({
+    cs_test_card1: makeSession({ status: 'complete', payment_status: 'paid' })
+  });
+  const response = await handlePaymentResult(
+    { page: 'success', query: { session_id: 'cs_test_card1' } },
+    {},
+    options(store, stripe)
+  );
+  assert.equal(response.status, 200);
+  const matches = response.html.match(/data-analytics-purchase/g) || [];
+  assert.equal(matches.length, 1);
+  const transactionId = createAnalyticsTransactionId(REFERENCE);
+  assert.match(response.html, new RegExp(`"transaction_id":"${transactionId}"`));
+  assert.doesNotMatch(response.html, new RegExp(`"transaction_id":"${REFERENCE}"`));
+  assert.match(response.html, /"value":20000/);
+  assert.match(response.html, /"currency":"SEK"/);
+  assert.doesNotMatch(response.html, /hemlig\.gast@example\.se|0701234567/);
+});
+
+test('B/C/D: avbruten, misslyckad och pågående betalning ger ingen purchase', async () => {
+  const record = makeRecord();
+  const store = makeStore(record);
+  for (const session of [
+    makeSession({ status: 'open', payment_status: 'unpaid' }),
+    makeSession({ status: 'expired', payment_status: 'unpaid' }),
+    makeSession({ status: 'complete', payment_status: 'unpaid' })
+  ]) {
+    const stripe = makeStripe({ cs_test_card1: session });
+    const cancel = await handlePaymentResult(
+      { page: 'cancel', query: { ref: REFERENCE } },
+      {},
+      options(store, stripe)
+    );
+    assert.doesNotMatch(cancel.html, /data-analytics-purchase/);
+    const success = await handlePaymentResult(
+      { page: 'success', query: { ref: REFERENCE } },
+      {},
+      options(store, stripe)
+    );
+    assert.doesNotMatch(success.html, /data-analytics-purchase/);
+  }
+});
+
+test('E: betald men icke-bekräftad bokning ger ingen purchase', async () => {
+  for (const statusCode of ['RECONCILIATION', 'PENDING_PAYMENT', 'CANCELLED']) {
+    const record = makeRecord({ statusCode });
+    const store = makeStore(record);
+    const stripe = makeStripe({
+      cs_test_card1: makeSession({ status: 'complete', payment_status: 'paid' })
+    });
+    const response = await handlePaymentResult(
+      { page: 'success', query: { ref: REFERENCE } },
+      {},
+      options(store, stripe)
+    );
+    assert.doesNotMatch(response.html, /data-analytics-purchase/, statusCode);
+  }
+});
+
+test('F: Stripe-belopp som inte matchar bokningen ger ingen purchase', async () => {
+  const record = confirmedRecord();
+  const store = makeStore(record);
+  const stripe = makeStripe({
+    cs_test_card1: makeSession({ status: 'complete', payment_status: 'paid', amount_total: 1999900 })
+  });
+  const response = await handlePaymentResult(
+    { page: 'success', query: { ref: REFERENCE } },
+    {},
+    options(store, stripe)
+  );
+  assert.doesNotMatch(response.html, /data-analytics-purchase/);
+});
+
+test('F: Stripe-session i fel miljö eller betalmetod ger ingen purchase', async () => {
+  const record = confirmedRecord();
+  const store = makeStore(record);
+  const live = makeStripe({
+    cs_test_card1: makeSession({ status: 'complete', payment_status: 'paid', livemode: true })
+  });
+  const liveResponse = await handlePaymentResult(
+    { page: 'success', query: { ref: REFERENCE } },
+    {},
+    options(store, live)
+  );
+  assert.doesNotMatch(liveResponse.html, /data-analytics-purchase/);
+
+  const wrongMethod = makeStripe({
+    cs_test_card1: makeSession({
+      status: 'complete',
+      payment_status: 'paid',
+      payment_method_types: ['swish']
+    })
+  });
+  const methodResponse = await handlePaymentResult(
+    { page: 'success', query: { session_id: 'cs_test_card1' } },
+    {},
+    options(store, wrongMethod)
+  );
+  assert.doesNotMatch(methodResponse.html, /data-analytics-purchase/);
+});
+
+test('G: upprepad laddning ger samma stabila transaction_id (deduplicering)', async () => {
+  const record = confirmedRecord();
+  const store = makeStore(record);
+  const stripe = makeStripe({
+    cs_test_card1: makeSession({ status: 'complete', payment_status: 'paid' })
+  });
+  const first = await handlePaymentResult(
+    { page: 'success', query: { ref: REFERENCE } },
+    {},
+    options(store, stripe)
+  );
+  const second = await handlePaymentResult(
+    { page: 'success', query: { ref: REFERENCE } },
+    {},
+    options(store, stripe)
+  );
+  const transactionId = createAnalyticsTransactionId(REFERENCE);
+  const pattern = new RegExp(`"transaction_id":"${transactionId}"`, 'g');
+  assert.equal((first.html.match(pattern) || []).length, 1);
+  assert.equal((second.html.match(pattern) || []).length, 1);
+});
+
+test('I: dubbel webhook påverkar inte purchase-payloaden', async () => {
+  // Purchase skickas aldrig från webhooken. Två identiska resultatsidor ska
+  // fortfarande ge samma enda transaction_id.
+  const record = confirmedRecord();
+  const store = makeStore(record);
+  const stripe = makeStripe({
+    cs_test_card1: makeSession({ status: 'complete', payment_status: 'paid' })
+  });
+  const first = await handlePaymentResult(
+    { page: 'success', query: { session_id: 'cs_test_card1' } },
+    {},
+    options(store, stripe)
+  );
+  const second = await handlePaymentResult(
+    { page: 'success', query: { session_id: 'cs_test_card1' } },
+    {},
+    options(store, stripe)
+  );
+  assert.equal(first.html, second.html);
 });

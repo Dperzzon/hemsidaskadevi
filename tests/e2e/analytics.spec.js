@@ -110,3 +110,97 @@ test('dataLayer-händelser skickar aldrig personuppgifter', async ({ page }) => 
   expect(started).toMatchObject({ booking_nights: 2 });
   expect(started).not.toHaveProperty('email');
 });
+
+test('purchase levereras först efter samtycke och aldrig två gånger', async ({ page }) => {
+  const hits = await trackGtm(page);
+  await page.goto('/', { waitUntil: 'load' });
+
+  await page.evaluate(() => {
+    window.SkadeviAnalytics.trackPurchase({
+      transaction_id: 'skd-0123456789abcdef0123456789abcdef01234567',
+      value: '16000',
+      currency: 'SEK'
+    });
+  });
+  expect(await page.evaluate(() => window.dataLayer.filter((item) => item && item.event === 'purchase'))).toEqual([]);
+  expect(await page.evaluate(() => window.localStorage.getItem('skadevi-purchase-skd-0123456789abcdef0123456789abcdef01234567'))).toBeNull();
+  expect(hits).toEqual([]);
+
+  await page.locator('[data-consent-accept]').click();
+  await page.waitForFunction(() => window.SkadeviAnalytics && window.SkadeviAnalytics.gtmReady);
+
+  const events = await page.evaluate(() => window.dataLayer.filter((item) => item && item.event === 'purchase'));
+  expect(events).toHaveLength(1);
+  expect(events[0]).toMatchObject({
+    transaction_id: 'skd-0123456789abcdef0123456789abcdef01234567',
+    value: 16000,
+    currency: 'SEK'
+  });
+  expect(typeof events[0].value).toBe('number');
+  expect(await page.evaluate(() => window.localStorage.getItem('skadevi-purchase-skd-0123456789abcdef0123456789abcdef01234567'))).toBeTruthy();
+  expect(hits.length).toBe(1);
+
+  await page.evaluate(() => {
+    window.SkadeviAnalytics.trackPurchase({
+      transaction_id: 'skd-0123456789abcdef0123456789abcdef01234567',
+      value: 16000,
+      currency: 'SEK'
+    });
+  });
+  const afterRepeat = await page.evaluate(() => window.dataLayer.filter((item) => item && item.event === 'purchase'));
+  expect(afterRepeat).toHaveLength(1);
+});
+
+test('nekat samtycke blockerar inte ett senare samtyckt köp', async ({ page }) => {
+  const hits = await trackGtm(page);
+  await page.goto('/', { waitUntil: 'load' });
+  await page.locator('[data-consent-deny]').click();
+
+  await page.evaluate(() => {
+    window.SkadeviAnalytics.trackPurchase({
+      transaction_id: 'skd-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      value: 1250,
+      currency: 'SEK'
+    });
+  });
+  expect(await page.evaluate(() => window.localStorage.getItem('skadevi-purchase-skd-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'))).toBeNull();
+  expect(hits).toEqual([]);
+
+  await page.evaluate(() => {
+    window.localStorage.setItem('skadevi-consent-v1', JSON.stringify({
+      analytics: true, version: 1, updatedAt: new Date().toISOString()
+    }));
+  });
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForFunction(() => window.SkadeviAnalytics && window.SkadeviAnalytics.gtmReady);
+
+  await page.evaluate(() => {
+    window.SkadeviAnalytics.trackPurchase({
+      transaction_id: 'skd-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      value: 1250,
+      currency: 'SEK'
+    });
+  });
+  const events = await page.evaluate(() => window.dataLayer.filter((item) => item && item.event === 'purchase'));
+  expect(events).toHaveLength(1);
+  expect(events[0]).toMatchObject({ value: 1250, currency: 'SEK' });
+  expect(hits.length).toBe(1);
+});
+
+test('purchase med fel valuta eller ogiltigt ID ignoreras', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.localStorage.setItem('skadevi-consent-v1', JSON.stringify({
+      analytics: true, version: 1, updatedAt: new Date().toISOString()
+    }));
+  });
+  await trackGtm(page);
+  await page.goto('/', { waitUntil: 'load' });
+  await page.waitForFunction(() => window.SkadeviAnalytics && window.SkadeviAnalytics.gtmReady);
+
+  await page.evaluate(() => {
+    window.SkadeviAnalytics.trackPurchase({ transaction_id: 'skd-valid1234', value: 10, currency: 'EUR' });
+    window.SkadeviAnalytics.trackPurchase({ transaction_id: 'x', value: 10, currency: 'SEK' });
+    window.SkadeviAnalytics.trackPurchase({ transaction_id: 'skd-valid1234', value: 0, currency: 'SEK' });
+  });
+  expect(await page.evaluate(() => window.dataLayer.filter((item) => item && item.event === 'purchase'))).toEqual([]);
+});
