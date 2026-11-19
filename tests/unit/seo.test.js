@@ -37,7 +37,7 @@ const NOINDEX = {
   'src/404.html': 'noindex, follow'
 };
 
-const LEGACY_PREFIXES = ['/service-page', '/product-page', '/about-1', '/team-4', '/services-7', '/historia', '/event', '/firande', '/bilder', '/book-online'];
+const LEGACY_PREFIXES = ['/service-page', '/product-page', '/about-1', '/team-4', '/services-7', '/historia', '/event', '/firande', '/bilder', '/book-online', '/kopla-pa-hem', '/kopia-pa-hem', '/kopia-på-hem'];
 
 function read(file) {
   return fs.readFileSync(path.join(root, file), 'utf8');

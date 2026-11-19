@@ -58,7 +58,12 @@ test('Wix-mappningen pekar bara på aktiva sidor och skapar inga loopar', () => 
     // Endast den gamla dubbletten av startsidan och den gamla bildsidan får
     // gå till /. Startsidan innehåller det aktuella bildgalleriet. Övriga
     // gamla sidor ska till en innehållsmässigt relevant sida.
-    if (to === '/') assert.ok(['/kopia-på-hem', '/bilder'].includes(from), from);
+    if (to === '/') {
+      assert.ok(
+        ['/kopia-på-hem', '/kopia-pa-hem', '/kopla-pa-hem', '/bilder'].includes(from),
+        from
+      );
+    }
   }
 });
 
@@ -86,11 +91,20 @@ test('kända Wix-adresser ger 301 och bevarar query', async () => {
       ['/bilder.html', '/'],
       ['/book-online', '/boka'],
       ['/book-online/', '/boka'],
+      ['/kopla-pa-hem', '/'],
+      ['/kopla-pa-hem/', '/'],
+      ['/kopla-pa-hem.html', '/'],
+      ['/kopia-pa-hem', '/'],
+      ['/kopia-pa-hem/', '/'],
       ['/kopia-på-hem', '/'],
+      ['/kopia-på-hem/', '/'],
       ['/kopia-på-utrustning-service', '/digital-visning'],
       ['/service-page/konferens', '/foretag'],
       ['/service-page/bröllop', '/brollop'],
-      ['/product-page/brudklänning', '/brollop']
+      ['/product-page/brudklänning', '/brollop'],
+      // Exakt adress som Search Console rapporterat som dubblett.
+      ['/product-page/foretagsevent-upp-till-24-pers-2', '/foretag'],
+      ['/product-page/foretagsevent-upp-till-24-pers-2/', '/foretag']
     ];
     for (const [from, to] of cases) {
       const res = await request(port, from);
@@ -101,6 +115,13 @@ test('kända Wix-adresser ger 301 och bevarar query', async () => {
     const query = await request(port, '/historia?utm_source=google');
     assert.equal(query.status, 301);
     assert.equal(query.headers.location, '/om-oss?utm_source=google');
+
+    const duplicate = await request(
+      port,
+      '/product-page/foretagsevent-upp-till-24-pers-2?utm_source=google'
+    );
+    assert.equal(duplicate.status, 301);
+    assert.equal(duplicate.headers.location, '/foretag?utm_source=google');
   } finally { close(server); }
 });
 

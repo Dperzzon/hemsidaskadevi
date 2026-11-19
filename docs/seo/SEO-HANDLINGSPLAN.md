@@ -146,6 +146,8 @@ Källa: `server/seo/legacy-redirects.js`. Statuskoder verifierade med serveranro
 | `/the-suite` | `/boende` | 301 |
 | `/bilder` | `/` (aktuellt bildgalleri på startsidan) | 301 |
 | `/book-online` | `/boka` | 301 |
+| `/kopla-pa-hem` | `/` (Search Console-dubblett av startsidan) | 301 |
+| `/kopia-pa-hem` | `/` (ASCII-variant av samma dubblett) | 301 |
 | `/kopia-på-hem` | `/` | 301 |
 | `/kopia-på-utrustning-service` | `/digital-visning` | 301 |
 
@@ -153,6 +155,7 @@ Källa: `server/seo/legacy-redirects.js`. Statuskoder verifierade med serveranro
 - `/service-page/...` och `/product-page/...` matchas mot nyckelord i sluggen (brollop, konferens, fest, boende, mat, aktivitet, pris, kontakt, boka, historia, faq, visning).
 - Känd ämnesmässig matchning → **301** till närmast relevanta sida.
 - Okänd slug utan rimlig ersättare → **410 Gone** (inte omdirigerad till startsidan, för att undvika felaktiga signaler).
+- Search Console-rapporterade `/product-page/foretagsevent-upp-till-24-pers-2` → **301** till `/foretag` (företagsevent har sin motsvarighet där).
 
 ### Principer
 - Inga massredirects till startsidan eller `/boka`.

@@ -23,6 +23,12 @@ const LEGACY_REDIRECTS = new Map([
   ['/the-suite', '/boende'],
   ['/bilder', '/'],
   ['/book-online', '/boka'],
+  // Wix-dubbletten av startsidan förekommer i flera stavningsvarianter:
+  // /kopia-på-hem (dokumenterad i strategy-audit), /kopia-pa-hem (ASCII) och
+  // /kopla-pa-hem (rapporterad som dubblett i Search Console). Alla tre är
+  // samma gamla kopia av startsidan och ska därför gå till /.
+  ['/kopla-pa-hem', '/'],
+  ['/kopia-pa-hem', '/'],
   ['/kopia-på-hem', '/'],
   ['/kopia-på-utrustning-service', '/digital-visning']
 ]);
