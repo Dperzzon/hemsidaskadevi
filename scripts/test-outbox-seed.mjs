@@ -27,6 +27,9 @@ export const TEST_REFERENCE = 'TEST-SKADEVI-001';
 const DEFAULT_HOST_TO = 'skadevigard@gmail.com';
 const DEFAULT_GUEST_TO = 'skadevigard@gmail.com';
 const DEFAULT_REPLY_TO = 'skadevigard@gmail.com';
+const TEST_DISPATCH_ELIGIBLE = 'true';
+const TEST_OUTBOX_VERSION = '1';
+const TEST_DELIVERY_STATUS = 'Ej skickad';
 
 export function assertTestTable(table) {
   if (table !== TEST_TABLE) {
@@ -69,35 +72,42 @@ export function buildTestOutboxRows(options = {}) {
     'Beräknat totalpris: 4 200 kr'
   ].join('\n');
   const html = `<h2>[TEST] Bokningsförfrågan ${TEST_REFERENCE}</h2><p>Detta är ett syntetiskt testmeddelande.</p><ul><li>Referens: ${TEST_REFERENCE}</li><li>Status: Inväntar godkännande</li><li>Testperson, 2 gäster</li></ul><p>Ingen riktig bokning har skapats.</p>`;
+  const common = {
+    partition: 'outbox',
+    reference: TEST_REFERENCE,
+    status: 'Utkorg',
+    dispatchEligible: TEST_DISPATCH_ELIGIBLE,
+    outboxVersion: TEST_OUTBOX_VERSION,
+    deliveryStatus: TEST_DELIVERY_STATUS,
+    attemptCount: 0,
+    attemptedAt: '',
+    sentAt: '',
+    createdAt: now
+  };
+
+  const host = {
+    ...common,
+    idempotencyKey: `outbox-${TEST_REFERENCE}-host`,
+    mailType: 'HOST_NEW_REQUEST',
+    mailTo: hostTo,
+    mailReplyTo: replyTo,
+    mailSubject: `[TEST] Ny bokningsförfrågan ${TEST_REFERENCE}`,
+    mailHtml: html,
+    mailText: `[TEST] Ny bokningsförfrågan\n\n${summary}`
+  };
+  if (options.single) return [host];
 
   return [
+    host,
     {
-      partition: 'outbox',
-      idempotencyKey: `outbox-${TEST_REFERENCE}-host`,
-      status: 'Utkorg',
-      mailTo: hostTo,
-      mailReplyTo: replyTo,
-      mailSubject: `[TEST] Ny bokningsförfrågan ${TEST_REFERENCE}`,
-      mailHtml: html,
-      mailText: `[TEST] Ny bokningsförfrågan\n\n${summary}`,
-      attemptCount: 0,
-      attemptedAt: '',
-      sentAt: '',
-      createdAt: now
-    },
-    {
-      partition: 'outbox',
+      ...common,
       idempotencyKey: `outbox-${TEST_REFERENCE}-guest`,
-      status: 'Utkorg',
+      mailType: 'GUEST_REQUEST_ACK',
       mailTo: guestTo,
       mailReplyTo: replyTo,
       mailSubject: `[TEST] Mottagningsbekräftelse ${TEST_REFERENCE}`,
       mailHtml: html,
-      mailText: `[TEST] Mottagningsbekräftelse\n\n${summary}`,
-      attemptCount: 0,
-      attemptedAt: '',
-      sentAt: '',
-      createdAt: now
+      mailText: `[TEST] Mottagningsbekräftelse\n\n${summary}`
     }
   ];
 }
@@ -148,10 +158,12 @@ export async function seedTestOutbox(options = {}) {
 }
 
 function parseArgs(argv) {
-  const args = { commit: false };
+  const args = { commit: false, single: false };
   for (const arg of argv) {
     if (arg === '--commit') args.commit = true;
+    else if (arg === '--single') args.single = true;
     else if (arg.startsWith('--host-to=')) args.hostTo = arg.slice('--host-to='.length);
+    else if (arg.startsWith('--to=')) args.hostTo = arg.slice('--to='.length);
     else if (arg.startsWith('--guest-to=')) args.guestTo = arg.slice('--guest-to='.length);
     else if (arg.startsWith('--reply-to=')) args.replyTo = arg.slice('--reply-to='.length);
     else throw new Error(`Okänt argument: ${arg}`);
@@ -165,7 +177,7 @@ async function main() {
   if (!result.committed) {
     console.log(`DRY-RUN: skulle skriva ${result.rows.length} testposter till ${result.accountName}/${result.table}`);
     for (const row of result.rows) {
-      console.log(`  ${row.idempotencyKey} -> ${row.mailTo} (${row.status})`);
+      console.log(`  ${row.idempotencyKey} -> ${row.mailTo} (${row.status}, ${row.mailType})`);
     }
     console.log('Kör med --commit för att skriva. Inga mejl skickas av harnesket.');
     return;

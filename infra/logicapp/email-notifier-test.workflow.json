@@ -7,7 +7,7 @@
       "type": "String"
     },
     "tableName": {
-      "defaultValue": "bookingrequests",
+      "defaultValue": "bookingrequeststest",
       "type": "String"
     },
     "maxAttempts": {
@@ -15,11 +15,11 @@
       "type": "Int"
     },
     "resendApiUrl": {
-      "defaultValue": "https://api.resend.com/emails",
+      "defaultValue": "https://mock-resend.invalid/emails",
       "type": "String"
     },
     "mailFrom": {
-      "defaultValue": "bokning@skadeviherrgard.com",
+      "defaultValue": "onboarding@resend.dev",
       "type": "String"
     },
     "mailReplyTo": {
@@ -31,7 +31,7 @@
       "type": "String"
     },
     "keyVaultSecretUri": {
-      "defaultValue": "https://SKADEVI-KEYVAULT.vault.azure.net/secrets/resend-api-key?api-version=7.4",
+      "defaultValue": "https://SKADEVI-KEYVAULT.vault.azure.net/secrets/resend-api-key-test?api-version=7.4",
       "type": "String"
     },
     "outboxActivationSince": {

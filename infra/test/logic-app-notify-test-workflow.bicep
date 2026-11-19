@@ -20,17 +20,29 @@ param storageAccountName string = 'stskadevibokningprod'
 @description('Tabellslutpunkt för lagringskontot.')
 param storageEndpoint string = 'https://stskadevibokningprod.table.${environment().suffixes.storage}'
 
-@description('Befintlig testtabell (endast referens).')
+@description('Befintlig testtabell (endast referens). Får aldrig vara bookingrequests.')
+@allowed([
+  'bookingrequeststest'
+])
 param testTableName string = 'bookingrequeststest'
 
 @description('Befintligt Key Vault (endast referens).')
 param keyVaultName string = 'kv-skadevi-prod'
 
-@description('Testsekretets namn. Sekretet skapas inte här.')
+@description('Testsekretets namn. Sekretet skapas inte här. Får aldrig vara resend-api-key.')
+@allowed([
+  'resend-api-key-test'
+])
 param testSecretName string = 'resend-api-key-test'
 
-@description('Icke-routbar mock-URL. Ska inte ändras till Resend i denna mall.')
+@description('Resend-slutpunkt. Används endast när allowRealResend=true; annars tvingas icke-routbar mock-URL.')
 param resendApiUrl string = 'https://mock-resend.invalid/emails'
+
+@description('Sätt endast till true i en separat, uttryckligen godkänd real-testparametrering. Standard är false.')
+param allowRealResend bool = false
+
+@description('Säker startgräns för testutkorgen. Framtida värde = ingen sändning.')
+param outboxActivationSince string = '9999-12-31T23:59:59Z'
 
 @description('Testavsändare.')
 param mailFrom string = 'onboarding@resend.dev'
@@ -48,6 +60,10 @@ param environmentName string = 'test'
 param owner string = 'Skadevi Herrgård'
 
 var testWorkflowName = 'logic-skadevi-bokningsnotis-test'
+
+// Extra skyddsräcke: även om en riktig URL anges av misstag används mock-URL
+// ända tills allowRealResend uttryckligen sätts till true.
+var effectiveResendApiUrl = allowRealResend ? resendApiUrl : 'https://mock-resend.invalid/emails'
 
 resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' existing = {
   name: storageAccountName
@@ -71,7 +87,8 @@ module testLogicApp '../modules/logic-app-notify.bicep' = {
     storageEndpoint: storageEndpoint
     storageAccountName: storageAccountName
     tableName: testTableName
-    resendApiUrl: resendApiUrl
+    resendApiUrl: effectiveResendApiUrl
+    outboxActivationSince: outboxActivationSince
     bookingTableResourceId: existingTestTable.id
     keyVaultName: keyVaultName
     keyVaultSecretName: testSecretName

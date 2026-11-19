@@ -73,6 +73,15 @@ skicka till syntetiska mottagare som `delivered@resend.dev`.
 
 ## Aktivering i produktion
 
+> **Viktigt (Steg 11F):** Använd aldrig produktionsworkflowet som
+> testworkflow. Nya riktiga bokningsförfrågningar köar `HOST_NEW_REQUEST` och
+> `GUEST_REQUEST_ACK` så snart `BOOKING_REQUESTS_ENABLED=1`, oberoende av
+> `ADMIN_MAIL_OUTBOX_ENABLED` och `STRIPE_OUTBOX_ENABLED`. En tillfällig
+> aktivering kan därför skicka mejl till riktiga kunder. Det isolerade testet
+> ska göras i `logic-skadevi-bokningsnotis-test` och `bookingrequeststest`.
+> Produktionsworkflowet aktiveras först vid go-live, efter uttryckligt
+> godkännande och med kontrollerat bokningsintag.
+
 1. Deploya kodändringarna. Ändra inga produktionsflaggor i detta moment.
 2. Sätt `outboxActivationSince` till den valda `T0` i
    `logic-skadevi-bokningsnotis`. Logic App är fortfarande **Disabled**.

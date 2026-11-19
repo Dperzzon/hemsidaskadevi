@@ -45,6 +45,12 @@ param testSecretName string = 'resend-api-key-test'
 @description('Resend-slutpunkt. Default är en icke-routbar mock-URL. Riktig Resend-URL får endast användas i ett separat, godkänt realt test med giltig testnyckel.')
 param resendApiUrl string = 'https://mock-resend.invalid/emails'
 
+@description('Sätt endast till true i den separata, uttryckligen godkända real-testparametern. Standard är false och tvingar mock-URL.')
+param allowRealResend bool = false
+
+@description('Säker startgräns för testutkorgen. Framtida värde = ingen sändning.')
+param outboxActivationSince string = '9999-12-31T23:59:59Z'
+
 @description('Testavsändare. onboarding@resend.dev får endast skicka till Resend-kontots ägarmejl före domänverifiering.')
 param mailFrom string = 'onboarding@resend.dev'
 
@@ -70,6 +76,10 @@ param environmentName string = 'test'
 param owner string = 'Skadevi Herrgård'
 
 var testWorkflowName = 'logic-skadevi-bokningsnotis-test'
+
+// Extra skyddsräcke: även om en riktig URL anges av misstag används mock-URL
+// ända tills allowRealResend uttryckligen sätts till true.
+var effectiveResendApiUrl = allowRealResend ? resendApiUrl : 'https://mock-resend.invalid/emails'
 
 // Skyddsräcken: parametrarna är låsta till testvärden ovan. Produktions-
 // tabellen och produktionssekretet kan därför inte väljas av misstag.
@@ -100,7 +110,8 @@ module testLogicApp '../modules/logic-app-notify.bicep' = {
     storageEndpoint: storageEndpoint
     storageAccountName: storageAccountName
     tableName: testTableName
-    resendApiUrl: resendApiUrl
+    resendApiUrl: effectiveResendApiUrl
+    outboxActivationSince: outboxActivationSince
     bookingTableResourceId: testTable.id
     keyVaultName: keyVaultName
     keyVaultSecretName: testSecretName

@@ -60,7 +60,12 @@ test('två syntetiska, unika outbox-poster med TEST-SKADEVI-001 skapas', async (
   ]);
   for (const row of rows) {
     assert.equal(row.partition, 'outbox');
+    assert.equal(row.reference, 'TEST-SKADEVI-001');
     assert.equal(row.status, 'Utkorg');
+    assert.equal(row.dispatchEligible, 'true');
+    assert.equal(row.outboxVersion, '1');
+    assert.equal(row.deliveryStatus, 'Ej skickad');
+    assert.ok(['HOST_NEW_REQUEST', 'GUEST_REQUEST_ACK'].includes(row.mailType));
     assert.equal(row.attemptCount, 0);
     assert.equal(row.attemptedAt, '');
     assert.equal(row.sentAt, '');
@@ -70,6 +75,21 @@ test('två syntetiska, unika outbox-poster med TEST-SKADEVI-001 skapas', async (
     assert.doesNotThrow(() => h.assertTestRecipient(row.mailTo));
     assert.ok(!row.mailHtml.includes('anna@example.com'));
   }
+});
+
+test('--single skapar exakt en sändningsbar testpost till godkänd intern mottagare', async () => {
+  const h = await harness();
+  const rows = h.buildTestOutboxRows({ now: '2026-11-11T15:00:00.000Z', single: true, hostTo: 'skadevigard@gmail.com' });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].idempotencyKey, 'outbox-TEST-SKADEVI-001-host');
+  assert.equal(rows[0].mailType, 'HOST_NEW_REQUEST');
+  assert.equal(rows[0].mailTo, 'skadevigard@gmail.com');
+  assert.equal(rows[0].dispatchEligible, 'true');
+  assert.equal(rows[0].outboxVersion, '1');
+  assert.throws(
+    () => h.buildTestOutboxRows({ single: true, hostTo: 'gast@hotmail.com' }),
+    /Vägrar/
+  );
 });
 
 test('dry-run skriver ingenting och --commit skriver endast outbox-poster', async () => {
@@ -90,6 +110,7 @@ test('dry-run skriver ingenting och --commit skriver endast outbox-poster', asyn
   assert.equal(saved.length, 2);
   assert.ok(saved.every((row) => row.partition === 'outbox'));
   assert.ok(saved.every((row) => row.partition !== 'request'));
+  assert.ok(saved.every((row) => row.dispatchEligible === 'true' && row.outboxVersion === '1'));
   assert.equal(new Set(saved.map((row) => row.idempotencyKey)).size, 2);
 });
 

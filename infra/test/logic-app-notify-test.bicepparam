@@ -28,6 +28,8 @@ param testSecretName = 'resend-api-key-test'
 // utan riktigt Resend-konto. Riktig Resend-URL får endast användas via
 // infra/test/logic-app-notify-test-real.bicepparam efter uttryckligt godkännande.
 param resendApiUrl = 'https://mock-resend.invalid/emails'
+param allowRealResend = false
+param outboxActivationSince = '9999-12-31T23:59:59Z'
 param mailFrom = 'onboarding@resend.dev'
 param mailReplyTo = 'skadevigard@gmail.com'
 param hostRecipient = 'skadevigard@gmail.com'

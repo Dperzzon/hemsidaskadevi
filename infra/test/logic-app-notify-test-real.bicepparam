@@ -22,6 +22,10 @@ param testTableName = 'bookingrequeststest'
 param keyVaultName = 'kv-skadevi-prod'
 param testSecretName = 'resend-api-key-test'
 param resendApiUrl = 'https://api.resend.com/emails'
+param allowRealResend = true
+// Ändra INTE detta värde förrän ett uttryckligen godkänt testfönster (T0)
+// har valts. Framtida värde = ingen sändning.
+param outboxActivationSince = '9999-12-31T23:59:59Z'
 param mailFrom = 'bokning@skadeviherrgard.com'
 param mailReplyTo = 'delivered@resend.dev'
 param hostRecipient = 'delivered@resend.dev'

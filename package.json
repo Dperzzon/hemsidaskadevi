@@ -17,6 +17,8 @@
     "package:admin": "node scripts/package-admin.mjs",
     "smoke:admin": "node scripts/smoke-admin-package.mjs",
     "test": "node --test \"tests/unit/*.test.js\" \"tests/unit/*.test.mjs\"",
+    "test:resend-mock": "node --test tests/unit/mock-resend.test.js tests/unit/resend-flow-integration.test.js tests/unit/resend-test-env.test.js",
+    "verify:resend-test": "node scripts/verify-test-workflow.mjs",
     "test:smoke": "node scripts/smoke-test.mjs",
     "stripe:test-mode": "node scripts/stripe-test-mode-check.mjs",
     "seed:test-outbox": "node scripts/test-outbox-seed.mjs",

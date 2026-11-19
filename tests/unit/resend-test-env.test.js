@@ -73,7 +73,7 @@ test('testworkflowet pekar på testtabellen, testsekretet och mockbar Resend-URL
   assert.ok(String(nested.properties.parameters.tableName.value).includes("parameters('testTableName')"));
   assert.ok(String(nested.properties.parameters.keyVaultSecretName.value).includes("parameters('testSecretName')"));
   assert.ok(String(nested.properties.parameters.workflowName.value).includes('testWorkflowName'));
-  assert.ok(String(nested.properties.parameters.resendApiUrl.value).includes("parameters('resendApiUrl')"));
+  assert.ok(String(nested.properties.parameters.resendApiUrl.value).includes('effectiveResendApiUrl'));
   assert.ok(String(nested.properties.parameters.mailFrom.value).includes("parameters('mailFrom')"));
   assert.ok(String(nested.properties.parameters.hostRecipient.value).includes("parameters('hostRecipient')"));
   assert.equal(nestedWorkflow.properties.state, 'Disabled');
@@ -136,7 +136,7 @@ test('workflow-only-mallen uppdaterar endast testworkflowet', () => {
   assert.equal(nestedOnly.type, 'Microsoft.Resources/deployments');
   assert.equal(nestedOnly.properties.parameters.assignTableRole.value, false);
   assert.ok(String(nestedOnly.properties.parameters.tableName.value).includes("parameters('testTableName')"));
-  assert.ok(String(nestedOnly.properties.parameters.resendApiUrl.value).includes("parameters('resendApiUrl')"));
+  assert.ok(String(nestedOnly.properties.parameters.resendApiUrl.value).includes('effectiveResendApiUrl'));
   const nestedResources = nestedOnly.properties.template.resources;
   assert.deepEqual(nestedResources.map((resource) => resource.type).sort(), [
     'Microsoft.Authorization/roleAssignments',
@@ -146,10 +146,63 @@ test('workflow-only-mallen uppdaterar endast testworkflowet', () => {
   assert.equal(conditionalRole.condition, "[parameters('assignTableRole')]");
   assert.ok(String(conditionalRole.scope).includes("parameters('tableName')"));
   assert.ok(!nestedResources.some((resource) => resource.type === 'Microsoft.Storage/storageAccounts/tableServices/tables'));
-  assert.equal(nestedResources[0].properties.state, 'Disabled');
+  const workflow = nestedResources.find((resource) => resource.type === 'Microsoft.Logic/workflows');
+  assert.equal(workflow.properties.state, 'Disabled');
   const fxvKey = Object.keys(workflowOnlyTemplate.variables).find((key) => key.includes('fxv'));
   assert.ok(fxvKey, 'inbäddad testdefinition saknas');
   const embeddedDefinition = workflowOnlyTemplate.variables[fxvKey];
   assert.ok(embeddedDefinition.includes('Tillaten_mottagare'), 'workflow-only-mallen måste använda testdefinitionen');
   assert.ok(embeddedDefinition.includes('testmottagarspärr'));
+});
+
+test('workflow-only-mallen är låst till testtabell, testnyckel, mock och T0', () => {
+  assert.deepEqual(workflowOnlyTemplate.parameters.testTableName.allowedValues, ['bookingrequeststest']);
+  assert.deepEqual(workflowOnlyTemplate.parameters.testSecretName.allowedValues, ['resend-api-key-test']);
+  assert.equal(workflowOnlyTemplate.parameters.allowRealResend.defaultValue, false);
+  assert.equal(workflowOnlyTemplate.parameters.outboxActivationSince.defaultValue, '9999-12-31T23:59:59Z');
+  const nestedOnly = workflowOnlyTemplate.resources[0];
+  assert.ok(String(nestedOnly.properties.parameters.outboxActivationSince.value).includes("parameters('outboxActivationSince')"));
+  assert.ok(String(nestedOnly.properties.parameters.resendApiUrl.value).includes('effectiveResendApiUrl'));
+  const effective = String(workflowOnlyTemplate.variables.effectiveResendApiUrl);
+  assert.ok(effective.includes("parameters('allowRealResend')"), 'allowRealResend måste styra URL:en');
+  assert.ok(effective.includes('https://mock-resend.invalid/emails'), 'mock-URL måste vara reserv');
+  const fxvKey = Object.keys(workflowOnlyTemplate.variables).find((key) => key.includes('fxv'));
+  const embedded = JSON.parse(workflowOnlyTemplate.variables[fxvKey]);
+  assert.equal(embedded.parameters.tableName.defaultValue, 'bookingrequeststest');
+  assert.equal(embedded.parameters.keyVaultSecretUri.defaultValue.includes('/secrets/resend-api-key-test'), true);
+  assert.equal(embedded.parameters.resendApiUrl.defaultValue, 'https://mock-resend.invalid/emails');
+  const filter = embedded.actions.Haemta_utkorg.inputs.uri;
+  for (const fragment of [
+    "PartitionKey%20eq%20%27outbox%27",
+    "dispatchEligible%20eq%20%27true%27",
+    "outboxVersion%20eq%20%271%27",
+    "outboxActivationSince"
+  ]) {
+    assert.ok(filter.includes(fragment), `filtret saknar ${fragment}`);
+  }
+});
+
+test('test- och produktionsdefinitionen har samma idempotens- och felskydd', () => {
+  const prodAmbiguous = prodWorkflowDefinition.actions.Om_det_finns_poster.actions.Behandla_varje_post.actions.Osaker_dubbelutskick;
+  const testAmbiguous = testWorkflowDefinition.actions.Om_det_finns_poster.actions.Behandla_varje_post.actions
+    .Tillaten_mottagare.actions.Osaker_dubbelutskick;
+  assert.ok(prodAmbiguous.actions.Markera_kraever_manuell_kontroll, 'produktionen saknar manuell kontroll');
+  assert.ok(testAmbiguous.actions.Markera_kraever_manuell_kontroll, 'testet saknar manuell kontroll');
+  const prodActions = prodAmbiguous.else.actions;
+  const testActions = testAmbiguous.else.actions;
+  for (const name of ['Hamta_api_nyckel', 'Markera_som_under_skickning',
+    'Skicka_mejl_resend', 'Markera_som_skickad', 'Resend_konflikt']) {
+    assert.ok(prodActions[name], `produktionen saknar ${name}`);
+    assert.ok(testActions[name], `testet saknar ${name}`);
+  }
+  assert.equal(testActions.Skicka_mejl_resend.inputs.headers['Idempotency-Key'],
+    prodActions.Skicka_mejl_resend.inputs.headers['Idempotency-Key']);
+  assert.equal(testActions.Skicka_mejl_resend.inputs.retryPolicy.type,
+    prodActions.Skicka_mejl_resend.inputs.retryPolicy.type);
+  assert.equal(testActions.Skicka_mejl_resend.inputs.retryPolicy.count,
+    prodActions.Skicka_mejl_resend.inputs.retryPolicy.count);
+  assert.equal(testWorkflowDefinition.parameters.tableName.defaultValue, 'bookingrequeststest');
+  assert.equal(prodWorkflowDefinition.parameters.tableName.defaultValue, 'bookingrequests');
+  assert.ok(!JSON.stringify(testWorkflowDefinition).includes("'bookingrequests'"));
+  assert.ok(String(testWorkflowDefinition.parameters.keyVaultSecretUri.defaultValue).includes('resend-api-key-test'));
 });
