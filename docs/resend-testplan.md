@@ -362,7 +362,7 @@ blockerade mottagare och 24-timmarsgränsen utan att nå Resend.
 # Endast plan, skriver ingenting
 node scripts/test-outbox-seed.mjs --single --to=skadevigard@gmail.com
 
-# Ett enda syntetiskt mejl till godkänd intern mottagare
+# Ett enda testmejl till godkänd intern mottagare
 node scripts/test-outbox-seed.mjs --single --to=skadevigard@gmail.com --commit
 ```
 
@@ -376,3 +376,8 @@ Därefter, först efter uttryckligt godkännande:
 5. Stäng av testworkflowet och sätt `outboxActivationSince` tillbaka till
    `9999-12-31T23:59:59Z`.
 6. Städa testposterna. Produktionsworkflowet ska aldrig användas för testet.
+
+Real-parametern använder `skadevigard@gmail.com` som intern mottagare och
+`bokning@skadeviherrgard.com` som avsändare. `delivered@resend.dev` är endast
+en syntetisk Resend-adress för leveranssimulering; den landar inte i en vanlig
+inkorg och används därför inte som det kontrollerade interna testmejlet.

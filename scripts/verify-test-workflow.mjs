@@ -130,6 +130,10 @@ export function verifyParamFiles() {
   assert(real.includes('param allowRealResend = true'), 'real: allowRealResend måste vara explicit true');
   assert(real.includes("param resendApiUrl = 'https://api.resend.com/emails'"), 'real: Resend-URL saknas');
   assert(real.includes("param mailFrom = 'bokning@skadeviherrgard.com'"), 'real: korrekt avsändare saknas');
+  assert(real.includes("param mailReplyTo = 'skadevigard@gmail.com'"), 'real: intern reply-to saknas');
+  assert(real.includes("param hostRecipient = 'skadevigard@gmail.com'"), 'real: intern mottagare saknas');
+  assert(!real.includes("param hostRecipient = 'delivered@resend.dev'"),
+    'real: syntetisk Resend-adress får inte vara kontrollerad intern mottagare');
   assert(!real.includes("param testSecretName = 'resend-api-key'"), 'real: produktionsnyckeln får inte användas');
   assert(real.includes("param outboxActivationSince = '9999-12-31T23:59:59Z'"),
     'real: T0 måste vara 9999 tills ett godkänt testfönster väljs');

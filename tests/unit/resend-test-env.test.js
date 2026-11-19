@@ -63,8 +63,8 @@ test('den separata real-testfilen är explicit och använder testadresser', () =
   assert.ok(realTestParams.includes("param resendApiUrl = 'https://api.resend.com/emails'"));
   assert.ok(realTestParams.includes("param testSecretName = 'resend-api-key-test'"));
   assert.ok(realTestParams.includes("param mailFrom = 'bokning@skadeviherrgard.com'"));
-  assert.ok(realTestParams.includes("param mailReplyTo = 'delivered@resend.dev'"));
-  assert.ok(realTestParams.includes("param hostRecipient = 'delivered@resend.dev'"));
+  assert.ok(realTestParams.includes("param mailReplyTo = 'skadevigard@gmail.com'"));
+  assert.ok(realTestParams.includes("param hostRecipient = 'skadevigard@gmail.com'"));
   assert.ok(!realTestParams.includes("param testSecretName = 'resend-api-key'"));
 });
 

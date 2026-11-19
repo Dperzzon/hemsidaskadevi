@@ -27,8 +27,10 @@ param allowRealResend = true
 // har valts. Framtida värde = ingen sändning.
 param outboxActivationSince = '9999-12-31T23:59:59Z'
 param mailFrom = 'bokning@skadeviherrgard.com'
-param mailReplyTo = 'delivered@resend.dev'
-param hostRecipient = 'delivered@resend.dev'
+// Verkligt kontrollerat test ska gå till en uttryckligen godkänd intern
+// mottagare – inte till en kund och inte till en syntetisk Resend-adress.
+param mailReplyTo = 'skadevigard@gmail.com'
+param hostRecipient = 'skadevigard@gmail.com'
 param testOperatorPrincipalId = ''
 param testOperatorPrincipalType = 'User'
 param environmentName = 'test'
