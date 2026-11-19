@@ -6,6 +6,7 @@ import { readdir, mkdir, copyFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { applyPricingTokens } from './scripts/pricing-page.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -137,6 +138,22 @@ async function pageInputs() {
   ];
 }
 
+// Prissidans ordinarie priser hämtas vid bygget från samma konfiguration som
+// bokningsmotorn använder. Bröllopskonceptets priser är separata och lämnas
+// orörda (de innehåller inga {{pris.*}}-tokens).
+function pricingTokens() {
+  return {
+    name: 'skadevi-pricing-tokens',
+    transformIndexHtml: {
+      order: 'pre',
+      handler(html, ctx) {
+        if (!ctx.filename || !ctx.filename.endsWith('priser.html')) return html;
+        return applyPricingTokens(html);
+      }
+    }
+  };
+}
+
 // Server-renderade sidor (t.ex. betalningsresultat) kan inte använda Vites
 // hashade resursnamn. Kopiera därför bas-CSS och meny-JS till stabila URL:er
 // som /css/style.css och /js/main.js. Filerna komprimeras av scripts/compress.mjs.
@@ -157,7 +174,7 @@ export default defineConfig(async () => ({
   root: path.join(root, 'src'),
   publicDir: path.join(root, 'public'),
   appType: 'mpa',
-  plugins: [cleanUrlsAndApi(), copyRuntimeAssets()],
+  plugins: [cleanUrlsAndApi(), pricingTokens(), copyRuntimeAssets()],
   build: {
     outDir: path.join(root, 'dist'),
     emptyOutDir: true,

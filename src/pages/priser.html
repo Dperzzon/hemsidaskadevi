@@ -91,15 +91,81 @@
 <section class="priser-section" aria-labelledby="paket-title">
   <div class="priser-wrap">
     <header class="priser-heading">
-      <span class="priser-eyebrow">Välj ert paket</span>
-      <h2 id="paket-title">Priser per natt för hela gården</h2>
-      <p>Alla priser gäller exklusiv uthyrning av hela Skadevi Gård. Ni är de enda gästerna.</p>
+      <span class="priser-eyebrow">Grundpriser</span>
+      <h2 id="paket-title">Pris per natt för hela gården</h2>
+      <p>Alla priser gäller exklusiv uthyrning av hela Skadevi Gård och anges inklusive moms. Ni är de enda gästerna. Det slutliga priset beror på valda datum, vistelsens längd och era tillval — den exakta summan ser ni alltid i <a href="/boka">bokningen</a>.</p>
+    </header>
+    <div class="priser-grid">
+      <article class="priser-card">
+        <h3 class="priser-card-title">Vardag &amp; söndag</h3>
+        <p class="priser-card-desc">Nätter söndag till torsdag — för en lugn vistelse mitt i veckan.</p>
+        <div class="priser-price">{{pris.vardag}}<small>/natt</small></div>
+        <ul class="priser-list">
+          <li>Hela gården exklusivt</li>
+          <li>23 bäddar i 7 sovrum</li>
+          <li>Fullt utrustat kök</li>
+          <li>Tennisbana &amp; badtunna</li>
+          <li>Lekplats, biljard &amp; sällskapsspel</li>
+        </ul>
+        <a href="/boka" class="priser-btn">BOKA</a>
+      </article>
+      <article class="priser-card priser-card--featured">
+        <h3 class="priser-card-title">Fredag &amp; lördag</h3>
+        <p class="priser-card-desc">Helgens nätter — för firanden, släktmiddagar och företagets kick-off.</p>
+        <div class="priser-price">{{pris.fredag}}<small>/natt</small></div>
+        <ul class="priser-list">
+          <li>Hela gården exklusivt</li>
+          <li>23 bäddar i 7 sovrum</li>
+          <li>Fullt utrustat kök</li>
+          <li>Tennisbana &amp; badtunna</li>
+          <li>Projektor, bioduk &amp; whiteboard</li>
+        </ul>
+        <a href="/boka" class="priser-btn">BOKA</a>
+      </article>
+      <article class="priser-card">
+        <h3 class="priser-card-title">Högpris</h3>
+        <p class="priser-card-desc">Under godkända högtidsperioder: jul &amp; nyår, påsk, midsommar, valborg, Kristi himmelsfärd, nationaldag och höstlov.</p>
+        <div class="priser-price">{{pris.peak}}<small>/natt</small></div>
+        <ul class="priser-list">
+          <li>Hela gården exklusivt</li>
+          <li>23 bäddar i 7 sovrum</li>
+          <li>Fullt utrustat kök</li>
+          <li>Tennisbana &amp; badtunna</li>
+          <li>Extra tid för firande &amp; samvaro</li>
+        </ul>
+        <a href="/boka" class="priser-btn">BOKA</a>
+      </article>
+    </div>
+    <p class="priser-note"><em>Priset sätts efter nattens startdatum och avresedagen debiteras inte. Under en högtidsperiod gäller högpriset alla nätter i perioden, även fredag och lördag.</em></p>
+
+    <h3 class="priser-subtitle priser-subtitle--spaced">Rabatter för längre vistelser</h3>
+    <div class="price-details-block">
+      <table class="price-table">
+        <thead>
+          <tr><th>Rabatt</th><th>Gäller från</th><th>Rabatt</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Veckorabatt</td><td>{{rabatt.vecka.natter}} nätter eller fler</td><td>{{rabatt.vecka.procent}} %</td></tr>
+          <tr><td>Månadsrabatt</td><td>{{rabatt.manad.natter}} nätter eller fler</td><td>{{rabatt.manad.procent}} %</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="priser-note"><em>Rabatten dras automatiskt på boendepriset och gäller inte tillval. Rabatterna ersätter varandra — den största rabatten används och de staplas aldrig.</em></p>
+  </div>
+</section>
+
+<section class="priser-section" aria-labelledby="vistelser-title">
+  <div class="priser-wrap">
+    <header class="priser-heading">
+      <span class="priser-eyebrow">För alla tillfällen</span>
+      <h2 id="vistelser-title">Semester, företag och firanden</h2>
+      <p>Samma ordinarie nattpriser gäller oavsett om ni reser som familj, företag eller vänner. Specialarrangemang som event och bröllop offereras separat efter era önskemål.</p>
     </header>
     <div class="priser-grid">
       <article class="priser-card">
         <h3 class="priser-card-title">Semester</h3>
         <p class="priser-card-desc">Samla familj, släkt och vänner för att spendera tid tillsammans.</p>
-        <div class="priser-price">9 000 kr<small>/natt</small></div>
+        <div class="priser-price priser-price--sum">Ordinarie nattpriser</div>
         <ul class="priser-list">
           <li>Hela gården exklusivt</li>
           <li>23 bäddar (7 sovrum)</li>
@@ -109,12 +175,12 @@
           <li>Lekplats</li>
           <li>Biljard &amp; sällskapsspel</li>
         </ul>
-        <a href="/boka" class="priser-btn">BOKA</a>
+        <a href="/semester" class="priser-btn">Läs mer</a>
       </article>
       <article class="priser-card priser-card--featured">
         <h3 class="priser-card-title">Företag</h3>
         <p class="priser-card-desc">Kick-off, ledningsgruppsdagar eller teamträff.</p>
-        <div class="priser-price">12 000 kr<small>/natt</small></div>
+        <div class="priser-price priser-price--sum">Ordinarie nattpriser</div>
         <ul class="priser-list">
           <li>Allt i Semester-paketet</li>
           <li>Projektor &amp; bioduk</li>
@@ -124,22 +190,22 @@
           <li>Femkamp i trädgården</li>
           <li>Skrivbordsytor</li>
         </ul>
-        <a href="/boka" class="priser-btn">BOKA</a>
+        <a href="/foretag" class="priser-btn">Läs mer</a>
       </article>
       <article class="priser-card">
-        <h3 class="priser-card-title">Event</h3>
-        <p class="priser-card-desc">Bröllop, möhippa, svensexa, dop eller jubileum.</p>
-        <div class="priser-price">15 000 kr<small>/natt</small></div>
+        <h3 class="priser-card-title">Fest &amp; event</h3>
+        <p class="priser-card-desc">Bröllop, möhippa, svensexa, dop eller jubileum. Specialarrangemang offereras efter era önskemål.</p>
+        <div class="priser-price priser-price--sum">Offert</div>
         <ul class="priser-list">
           <li>Allt i Företag-paketet</li>
           <li>Dekoration &amp; dukning</li>
-          <li>Bröllopsbåge</li>
           <li>Ljud &amp; ljus</li>
           <li>Långbord för 60 gäster</li>
+          <li>Bröllopsbåge</li>
           <li>Bröllopssvit</li>
-          <li>Bokningsavgift: 5 000 kr</li>
+          <li>Bokningsavgift för event: 5 000 kr</li>
         </ul>
-        <a href="/boka" class="priser-btn">BOKA</a>
+        <a href="/boka" class="priser-btn">Begär offert</a>
       </article>
     </div>
   </div>
@@ -152,11 +218,14 @@
       <article class="priser-card priser-card--info">
         <h3 class="priser-card-title">Komfort</h3>
         <ul class="priser-list priser-list--plain">
-          <li>Lakan &amp; handdukar — kontakta oss för pris</li>
-          <li>Städning — kontakta oss för pris</li>
-          <li>Ved (för badtunna) — 350 kr/vistelse</li>
-          <li>Flexibel in-/utcheckning — kontakta oss</li>
+          <li>Slutstädning (exklusive kök) — {{tillval.slutstad}} per vistelse</li>
+          <li>Lakan &amp; handdukar — {{tillval.lakan}} per person (högst {{tillval.lakanMax}} personer)</li>
+          <li>Ved — {{tillval.ved}} per beställning</li>
+          <li>Tidig incheckning — {{tillval.tidig}} (från kl. 09.00, bekräftas av oss)</li>
+          <li>Sen utcheckning — {{tillval.sen}} (till kl. 16.00, bekräftas av oss)</li>
+          <li>Extrahus — {{tillval.extrahus}} per natt, upp till {{tillval.extrahusMax}} personer</li>
         </ul>
+        <p class="priser-card-note">Städning, lakan, ved och flexibla tider väljs som tillval i bokningen. Extrahuset bokas via bokningsförfrågan — vi bekräftar tillgängligheten manuellt innan bokningen blir giltig.</p>
       </article>
       <article class="priser-card priser-card--info">
         <h3 class="priser-card-title">Upplevelser</h3>
@@ -201,19 +270,18 @@
           <tr><th>Tillägg</th><th>Pris</th></tr>
         </thead>
         <tbody>
-          <tr><td>200 kr per person och natt vid mer än 16 gäster</td><td>200 kr</td></tr>
-          <tr><td>Helg</td><td>5000 kr / natt</td></tr>
-          <tr><td>Ved för hela vistelsen (Badtunna, bastu och öppna spisar)</td><td>350 kr</td></tr>
-          <tr><td>Städ (Exklusive kök)</td><td>2500 kr</td></tr>
-          <tr><td>Lakanspaket per person</td><td>250 kr</td></tr>
-          <tr><td>Bröllopsporslin i engelsk stil per person</td><td>25 kr</td></tr>
-          <tr><td>Frukostpaket för 16 personer</td><td>1500 kr</td></tr>
-          <tr><td>Glampingtält</td><td>500 kr</td></tr>
-          <tr><td>Tennishuset 60 kvm</td><td>2500 kr / natt</td></tr>
-          <tr><td>Senare eller tidigare utcheckning / Incheckning</td><td>500 kr</td></tr>
-          <tr><td>5-kamp per person</td><td>50 kr</td></tr>
+          <tr><td>Boende vardag &amp; söndag</td><td>{{pris.vardag}} / natt</td></tr>
+          <tr><td>Boende fredag &amp; lördag</td><td>{{pris.fredag}} / natt</td></tr>
+          <tr><td>Boende högpris (godkända högtidsperioder)</td><td>{{pris.peak}} / natt</td></tr>
+          <tr><td>Slutstädning (exklusive kök)</td><td>{{tillval.slutstad}} per vistelse</td></tr>
+          <tr><td>Lakan &amp; handdukar</td><td>{{tillval.lakan}} per person</td></tr>
+          <tr><td>Ved för hela vistelsen (badtunna, bastu och öppna spisar)</td><td>{{tillval.ved}} per beställning</td></tr>
+          <tr><td>Extrahus (upp till {{tillval.extrahusMax}} personer, bokas via förfrågan)</td><td>{{tillval.extrahus}} / natt</td></tr>
+          <tr><td>Tidig incheckning (från kl. 09.00, bekräftas av oss)</td><td>{{tillval.tidig}}</td></tr>
+          <tr><td>Sen utcheckning (till kl. 16.00, bekräftas av oss)</td><td>{{tillval.sen}}</td></tr>
         </tbody>
       </table>
+      <p class="priser-note"><em>Alla priser anges inklusive moms. Tillvalen är frivilliga och prissätts per vistelse, per person eller per natt enligt ovan. Rabatter gäller endast boendepriset.</em></p>
     </div>
 
     <h3 class="priser-subtitle priser-subtitle--spaced">Bröllopspaket</h3>
