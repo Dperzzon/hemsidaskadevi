@@ -55,9 +55,10 @@ test('Wix-mappningen pekar bara på aktiva sidor och skapar inga loopar', () => 
   for (const [from, to] of LEGACY_REDIRECTS) {
     assert.ok(ACTIVE_ROUTES.has(to), `${from} pekar på okänd sida ${to}`);
     assert.ok(!LEGACY_REDIRECTS.has(to), `${from} skapar en redirect-kedja via ${to}`);
-    // Endast den gamla dubbletten av startsidan får gå till /. Övriga
+    // Endast den gamla dubbletten av startsidan och den gamla bildsidan får
+    // gå till /. Startsidan innehåller det aktuella bildgalleriet. Övriga
     // gamla sidor ska till en innehållsmässigt relevant sida.
-    if (to === '/') assert.equal(from, '/kopia-på-hem');
+    if (to === '/') assert.ok(['/kopia-på-hem', '/bilder'].includes(from), from);
   }
 });
 
@@ -80,6 +81,11 @@ test('kända Wix-adresser ger 301 och bevarar query', async () => {
       ['/faciliteter', '/boende'],
       ['/matochdryck', '/mat-dryck'],
       ['/the-suite', '/boende'],
+      ['/bilder', '/'],
+      ['/bilder/', '/'],
+      ['/bilder.html', '/'],
+      ['/book-online', '/boka'],
+      ['/book-online/', '/boka'],
       ['/kopia-på-hem', '/'],
       ['/kopia-på-utrustning-service', '/digital-visning'],
       ['/service-page/konferens', '/foretag'],

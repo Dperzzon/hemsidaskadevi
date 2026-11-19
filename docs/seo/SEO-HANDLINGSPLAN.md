@@ -144,6 +144,8 @@ Källa: `server/seo/legacy-redirects.js`. Statuskoder verifierade med serveranro
 | `/faciliteter` | `/boende` | 301 |
 | `/matochdryck` | `/mat-dryck` | 301 |
 | `/the-suite` | `/boende` | 301 |
+| `/bilder` | `/` (aktuellt bildgalleri på startsidan) | 301 |
+| `/book-online` | `/boka` | 301 |
 | `/kopia-på-hem` | `/` | 301 |
 | `/kopia-på-utrustning-service` | `/digital-visning` | 301 |
 

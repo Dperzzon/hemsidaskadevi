@@ -21,6 +21,8 @@ const LEGACY_REDIRECTS = new Map([
   ['/faciliteter', '/boende'],
   ['/matochdryck', '/mat-dryck'],
   ['/the-suite', '/boende'],
+  ['/bilder', '/'],
+  ['/book-online', '/boka'],
   ['/kopia-på-hem', '/'],
   ['/kopia-på-utrustning-service', '/digital-visning']
 ]);
