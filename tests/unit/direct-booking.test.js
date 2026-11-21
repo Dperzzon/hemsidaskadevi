@@ -783,3 +783,210 @@ test('Stripe Checkout skapas inte om reservationens ägarskap inte kan verifiera
   assert.equal(result.jsonBody.code, 'RESERVATION_UNVERIFIED');
   assert.equal(stripe.sessions.size, 0);
 });
+const { bufferNightsFor, lockedNightsFor } = require('../../server/booking/buffer-nights');
+const { buildCalendar, collectNights } = require('../../server/calendar/export');
+const { quote } = require('../../server/booking/pricing');
+
+function bufferBody(overrides = {}) {
+  return validBody({
+    addons: {
+      ...validBody().addons,
+      tidigIncheckning: false,
+      senUtcheckning: false,
+      ...(overrides.addons ?? {})
+    },
+    ...overrides
+  });
+}
+
+test('buffertnätter: bokning utan tillval får inga extra nätter', () => {
+  const record = {
+    arrival: '2027-05-22', departure: '2027-05-23',
+    addons: { tidigIncheckning: false, senUtcheckning: false },
+    bufferNightsMode: 'auto'
+  };
+  assert.deepEqual(bufferNightsFor(record), []);
+  assert.deepEqual(lockedNightsFor(record), ['2027-05-22']);
+});
+
+test('buffertnätter: endast tidig incheckning blockerar natten före ankomst', () => {
+  const record = {
+    arrival: '2027-05-22', departure: '2027-05-24',
+    addons: { tidigIncheckning: true, senUtcheckning: false },
+    bufferNightsMode: 'auto'
+  };
+  assert.deepEqual(bufferNightsFor(record), ['2027-05-21']);
+  assert.deepEqual(lockedNightsFor(record), ['2027-05-21', '2027-05-22', '2027-05-23']);
+});
+
+test('buffertnätter: endast sen utcheckning blockerar natten på avresedatumet', () => {
+  const record = {
+    arrival: '2027-05-22', departure: '2027-05-23',
+    addons: { tidigIncheckning: false, senUtcheckning: true },
+    bufferNightsMode: 'auto'
+  };
+  assert.deepEqual(bufferNightsFor(record), ['2027-05-23']);
+});
+
+test('buffertnätter: båda tillvalen blockerar båda nätterna', () => {
+  const record = {
+    arrival: '2027-05-22', departure: '2027-05-23',
+    addons: { tidigIncheckning: true, senUtcheckning: true },
+    bufferNightsMode: 'auto'
+  };
+  assert.deepEqual(bufferNightsFor(record), ['2027-05-21', '2027-05-23']);
+});
+
+test('buffertnätter: äldre/manuell bokning får aldrig automatiska buffertar', () => {
+  const record = {
+    arrival: '2027-05-22', departure: '2027-05-23',
+    addons: { tidigIncheckning: true, senUtcheckning: true }
+  };
+  assert.deepEqual(bufferNightsFor(record), []);
+  assert.deepEqual(lockedNightsFor(record), ['2027-05-22']);
+});
+
+test('upptagen buffertnatt nekar tillvalet men ordinarie vistelse kan bokas', async () => {
+  const { options, context, memory, stripe } = setup();
+  await memory.store.createCalendarNight('2026-11-19', {
+    type: 'MANUAL', reference: 'BLOCK-OTHER', source: 'MANUAL', note: 'Upptagen'
+  });
+
+  const blocked = await handleDirectBooking(request({
+    body: bufferBody({ addons: { tidigIncheckning: true } })
+  }), context, options);
+  assert.equal(blocked.status, 409);
+  assert.equal(blocked.jsonBody.code, 'BUFFER_UNAVAILABLE');
+  assert.match(blocked.jsonBody.error, /ordinarie vistelse utan tillvalet/);
+  assert.equal(stripe.sessions.size, 0);
+  assert.equal(memory.calendar.size, 1);
+
+  const ordinary = await handleDirectBooking(request({
+    idempotencyKey: 'bbbbbbbb-cccc-dddd-eeee-ffffffffffff',
+    body: bufferBody({ addons: { tidigIncheckning: false } })
+  }), context, options);
+  assert.equal(ordinary.status, 201);
+  assert.equal(stripe.sessions.size, 1);
+});
+
+test('två samtidiga bokningar kan inte reservera samma buffertnatt', async () => {
+  const { options, context, memory, stripe } = setup();
+  const early = handleDirectBooking(request({
+    idempotencyKey: '11111111-1111-1111-1111-111111111111',
+    body: bufferBody({
+      arrival: '2026-11-20', departure: '2026-11-22',
+      addons: { tidigIncheckning: true, senUtcheckning: false }
+    })
+  }), context, options);
+  const late = handleDirectBooking(request({
+    idempotencyKey: '22222222-2222-2222-2222-222222222222',
+    body: bufferBody({
+      arrival: '2026-11-18', departure: '2026-11-19',
+      addons: { tidigIncheckning: false, senUtcheckning: true }
+    })
+  }), context, options);
+
+  const results = await Promise.all([early, late]);
+  const statuses = results.map((result) => result.status).sort();
+  assert.deepEqual(statuses, [201, 409]);
+  for (const row of memory.calendar.values()) {
+    assert.ok(['2026-11-18', '2026-11-19', '2026-11-20', '2026-11-21'].includes(row.night));
+  }
+  const nights = [...memory.calendar.keys()];
+  assert.equal(new Set(nights).size, nights.length);
+  assert.ok(memory.calendar.size === 2 || memory.calendar.size === 3);
+  assert.equal(stripe.sessions.size, 1);
+});
+
+test('avbruten Stripe-betalning frigör både ordinarie och buffertnätter', async () => {
+  const { options, context, memory, stripe } = setup();
+  const created = await handleDirectBooking(request({
+    body: bufferBody({ addons: { tidigIncheckning: true, senUtcheckning: true } })
+  }), context, options);
+  assert.equal(created.status, 201);
+  assert.equal(memory.calendar.size, 5);
+  const session = [...stripe.sessions.values()][0];
+  session.status = 'expired';
+  session.payment_status = 'unpaid';
+  const response = await signedWebhook(memory.store, {
+    id: 'evt_buffer_expired', type: 'checkout.session.expired', livemode: false,
+    data: { object: session }
+  }, { stripeClient: stripe });
+  assert.equal(response.status, 200);
+  assert.equal(memory.calendar.size, 0);
+});
+
+test('webhook upptäcker ny Airbnb-konflikt även på buffertnatten', async () => {
+  const { options, context, memory, stripe } = setup();
+  const created = await handleDirectBooking(request({
+    body: bufferBody({ addons: { tidigIncheckning: true, senUtcheckning: false } })
+  }), context, options);
+  assert.equal(created.status, 201);
+  const session = [...stripe.sessions.values()][0];
+  session.status = 'complete';
+  session.payment_status = 'paid';
+  const response = await signedWebhook(memory.store, {
+    id: 'evt_buffer_airbnb_conflict', type: 'checkout.session.completed', livemode: false,
+    data: { object: session }
+  }, {
+    stripeClient: stripe,
+    availabilityHandler: async () => ({ status: 200, jsonBody: { blocked: ['2026-11-19'] } })
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.jsonBody.reconciliation, true);
+  const record = await memory.store.findByReference(created.jsonBody.reference);
+  assert.equal(record.statusCode, 'RECONCILIATION');
+  assert.deepEqual(record.reconciliation.nights, ['2026-11-19']);
+});
+
+test('Airbnb-exporten visar buffertdatum som en del av samma bokning', () => {
+  const rows = [
+    { night: '2027-05-21', type: 'BOOKING', kind: 'BUFFER', reference: 'SK-LEGACY', source: 'WEB' },
+    { night: '2027-05-22', type: 'BOOKING', kind: 'STAY', reference: 'SK-LEGACY', source: 'WEB' },
+    { night: '2027-05-23', type: 'BOOKING', kind: 'BUFFER', reference: 'SK-LEGACY', source: 'WEB' }
+  ];
+  assert.deepEqual(
+    collectNights(rows, []).map((item) => item.night),
+    ['2027-05-21', '2027-05-22', '2027-05-23']
+  );
+  const result = buildCalendar({ rows, blockingBookings: [], now: new Date('2027-05-01T12:00:00Z') });
+  const text = result.body ?? result;
+  assert.match(String(text), /DTSTART;VALUE=DATE:20270521/);
+  assert.match(String(text), /DTEND;VALUE=DATE:20270524/);
+  assert.doesNotMatch(String(text), /Anna|Andersson|example\.com/);
+});
+
+test('dubbla webhooks skapar aldrig dubbla buffertrader', async () => {
+  const { options, context, memory, stripe } = setup();
+  const created = await handleDirectBooking(request({
+    body: bufferBody({ addons: { tidigIncheckning: true, senUtcheckning: true } })
+  }), context, options);
+  const session = [...stripe.sessions.values()][0];
+  session.status = 'complete';
+  session.payment_status = 'paid';
+  const event = {
+    id: 'evt_buffer_duplicate', type: 'checkout.session.completed', livemode: false,
+    data: { object: session }
+  };
+  await signedWebhook(memory.store, event, { stripeClient: stripe });
+  await signedWebhook(memory.store, event, { stripeClient: stripe });
+  const record = await memory.store.findByReference(created.jsonBody.reference);
+  assert.equal(record.payments.length, 1);
+  assert.equal(memory.calendar.size, 5);
+  assert.equal([...memory.calendar.values()].filter((row) => row.type === 'BOOKING').length, 5);
+});
+
+test('buffertnätter ändrar varken pris eller antal debiterade nätter', async () => {
+  const { options, context, memory } = setup();
+  const body = bufferBody({ addons: { tidigIncheckning: true, senUtcheckning: true } });
+  const created = await handleDirectBooking(request({ body }), context, options);
+  assert.equal(created.status, 201);
+  const record = await memory.store.findByReference(created.jsonBody.reference);
+  const expected = quote({
+    arrival: '2026-11-20', departure: '2026-11-23', guests: 4, addons: body.addons
+  });
+  assert.equal(record.nights, 3);
+  assert.equal(record.lodgingBase, expected.lodgingBase);
+  assert.equal(record.total, expected.total);
+  assert.deepEqual(record.bufferNights, ['2026-11-19', '2026-11-23']);
+});

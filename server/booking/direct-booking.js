@@ -38,6 +38,7 @@ const {
   releaseReservation,
   verifyReservation
 } = require('./reservations');
+const { bufferNightsFor, addDays, todayKey } = require('./buffer-nights');
 const { layout } = require('./payment-page');
 const { buildPurchaseEvent } = require('../../shared/analytics.js');
 
@@ -166,7 +167,7 @@ function arrivalStartMillis(dateKey) {
   }
 }
 
-async function checkDirectBookingAvailability(store, from, to, now, options = {}) {
+async function checkDirectBookingAvailability(store, from, to, now, options = {}, addons = {}) {
   if (!directBookingAvailable(options)) {
     return { directBooking: false, code: 'DIRECT_BOOKING_DISABLED', reason: 'disabled' };
   }
@@ -194,14 +195,36 @@ async function checkDirectBookingAvailability(store, from, to, now, options = {}
     return { directBooking: false, code: 'DIRECT_BOOKING_UNAVAILABLE', reason: 'unavailable' };
   }
 
+  const buffers = bufferNightsFor({
+    arrival: from,
+    departure: to,
+    addons,
+    bufferNightsMode: 'auto'
+  });
+  const checkNights = [...new Set([...nights, ...buffers])].sort();
+  const checkFrom = checkNights[0];
+  const checkTo = addDays(checkNights[checkNights.length - 1], 1);
+  const earlyBuffer = addons?.tidigIncheckning === true ? addDays(from, -1) : '';
+  if (earlyBuffer && earlyBuffer < todayKey(now)) {
+    return {
+      directBooking: false,
+      code: 'BUFFER_UNAVAILABLE',
+      reason: 'buffer',
+      nights: [earlyBuffer],
+      addons: {
+        tidigIncheckning: { available: false, code: 'BUFFER_IN_PAST', nights: [earlyBuffer] }
+      }
+    };
+  }
+
   const internal = await checkInternal(
     store,
-    { arrival: from, departure: to, reference: '' },
+    { arrival: checkFrom, departure: checkTo, reference: '' },
     now,
     {},
     { ...options, skipExpiredCleanup: options.cleanupExpired !== true }
   );
-  if (!internal.ok) {
+  if (!internal.ok && internal.code !== 'INTERNAL_CONFLICT') {
     return {
       directBooking: false,
       code: internal.code,
@@ -210,8 +233,8 @@ async function checkDirectBookingAvailability(store, from, to, now, options = {}
     };
   }
 
-  const airbnb = await checkAirbnbAutomatic(from, to, options, store);
-  if (!airbnb.ok) {
+  const airbnb = await checkAirbnbAutomatic(checkFrom, checkTo, options, store);
+  if (!airbnb.ok && airbnb.code !== 'AIRBNB_CONFLICT') {
     return {
       directBooking: false,
       code: airbnb.code,
@@ -220,7 +243,56 @@ async function checkDirectBookingAvailability(store, from, to, now, options = {}
     };
   }
 
-  return { directBooking: true, nights };
+  const conflictSet = new Set([
+    ...(internal.nights ?? internal.conflicts ?? []),
+    ...(airbnb.nights ?? [])
+  ]);
+  const stayConflicts = nights.filter((night) => conflictSet.has(night));
+  const bufferConflicts = buffers.filter((night) => conflictSet.has(night));
+
+  const bufferAddons = {};
+  if (addons?.tidigIncheckning === true) {
+    const night = addDays(from, -1);
+    const available = !conflictSet.has(night);
+    bufferAddons.tidigIncheckning = {
+      available,
+      code: available ? '' : 'BUFFER_UNAVAILABLE',
+      nights: [night]
+    };
+  }
+  if (addons?.senUtcheckning === true) {
+    const night = to;
+    const available = !conflictSet.has(night);
+    bufferAddons.senUtcheckning = {
+      available,
+      code: available ? '' : 'BUFFER_UNAVAILABLE',
+      nights: [night]
+    };
+  }
+
+  if (stayConflicts.length) {
+    const code = internal.ok === false ? 'INTERNAL_CONFLICT' : (airbnb.code || 'INTERNAL_CONFLICT');
+    return {
+      directBooking: false,
+      code,
+      reason: internal.ok === false ? 'internal_conflict' : 'airbnb',
+      conflicts: stayConflicts,
+      nights: stayConflicts,
+      addons: bufferAddons
+    };
+  }
+
+  if (bufferConflicts.length) {
+    return {
+      directBooking: false,
+      code: 'BUFFER_UNAVAILABLE',
+      reason: 'buffer',
+      nights: bufferConflicts,
+      addons: bufferAddons
+    };
+  }
+
+  return { directBooking: true, nights, bufferNights: buffers, addons: bufferAddons };
 }
 
 async function checkInternal(store, record, now, context, options) {
@@ -239,10 +311,12 @@ async function checkInternal(store, record, now, context, options) {
   if (!Array.isArray(calendarRows)) return { ok: false, code: 'INTERNAL_UNAVAILABLE' };
   const conflicts = calendarRows.filter((row) => row.reference && row.reference !== record.reference);
   if (conflicts.length) {
+    const nights = [...new Set(conflicts.map((row) => row.night ?? row.RowKey).filter(Boolean))].sort();
     return {
       ok: false,
       code: 'INTERNAL_CONFLICT',
-      conflicts: conflicts.map((row) => row.night ?? row.RowKey)
+      conflicts: nights,
+      nights
     };
   }
 
@@ -256,10 +330,17 @@ async function checkInternal(store, record, now, context, options) {
     if (blocking === null) return { ok: false, code: 'INTERNAL_UNAVAILABLE' };
     const overlaps = blocking.filter((booking) => booking.reference !== record.reference);
     if (overlaps.length) {
+      const nights = [];
+      for (const booking of overlaps) {
+        for (const night of nightKeys(booking.arrival, booking.departure)) {
+          if (night >= record.arrival && night < record.departure) nights.push(night);
+        }
+      }
       return {
         ok: false,
         code: 'INTERNAL_CONFLICT',
-        conflicts: overlaps.map((booking) => booking.reference)
+        conflicts: overlaps.map((booking) => booking.reference),
+        nights: [...new Set(nights)].sort()
       };
     }
   }
@@ -471,7 +552,8 @@ async function handleDirectBooking(request, context = {}, options = {}) {
     validated.record.arrival,
     validated.record.departure,
     now,
-    { ...options, cleanupExpired: true }
+    { ...options, cleanupExpired: true },
+    validated.record.addons
   );
   if (!availability.directBooking) {
     if (
@@ -485,12 +567,29 @@ async function handleDirectBooking(request, context = {}, options = {}) {
         manualReview: true
       });
     }
+    if (availability.code === 'BUFFER_UNAVAILABLE') {
+      const fields = {};
+      if (availability.addons?.tidigIncheckning?.available === false) {
+        fields.tidigIncheckning = 'Tidig incheckning är inte tillgänglig för valda datum eftersom natten före ankomst redan är upptagen.';
+      }
+      if (availability.addons?.senUtcheckning?.available === false) {
+        fields.senUtcheckning = 'Sen utcheckning är inte tillgänglig för valda datum eftersom natten på avresedatumet redan är upptagen.';
+      }
+      return result(409, {
+        error: 'Tillvalet kan inte erbjudas för valda datum. Du kan boka ordinarie vistelse utan tillvalet.',
+        code: availability.code,
+        nights: availability.nights,
+        addons: availability.addons,
+        fields
+      });
+    }
     if (availability.code === 'INTERNAL_CONFLICT' || availability.code === 'AIRBNB_CONFLICT') {
       return result(409, {
         error: 'Datumen är inte tillgängliga. Välj andra datum.',
         code: availability.code,
         conflicts: availability.conflicts,
-        nights: availability.nights
+        nights: availability.nights,
+        addons: availability.addons
       });
     }
     if (availability.code === 'ARRIVAL_TOO_SOON') {
@@ -537,6 +636,8 @@ async function handleDirectBooking(request, context = {}, options = {}) {
     statusCode: 'PENDING_PAYMENT',
     status: 'Väntar på betalning',
     bookingSource: 'DIRECT',
+    bufferNightsMode: 'auto',
+    bufferNights: availability.bufferNights ?? [],
     version: 1,
     paymentStatus: 'UNPAID',
     amountPaid: 0,

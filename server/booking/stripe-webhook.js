@@ -24,6 +24,7 @@ const {
 const { queueNotification, queueNotifications } = require('./outbox');
 const { handleAvailability } = require('../calendar/availability');
 const { nightKeys } = require('./requests');
+const { bufferNightsFor, addDays } = require('./buffer-nights');
 
 const API_HEADERS = {
   'Cache-Control': 'no-store',
@@ -332,9 +333,16 @@ async function markReconciliation(store, record, session, event, options, contex
 // bekräftelse – då skapas i stället ett avstämningsärende.
 async function checkAirbnbBeforeConfirmation(record, store, options, context) {
   const handler = options.availabilityHandler ?? handleAvailability;
+  const bufferNights = bufferNightsFor(record);
+  const checkedNights = [...new Set([
+    ...nightKeys(record.arrival, record.departure),
+    ...bufferNights
+  ])].sort();
+  const from = checkedNights[0] ?? record.arrival;
+  const to = checkedNights.length ? addDays(checkedNights[checkedNights.length - 1], 1) : record.departure;
   let result;
   try {
-    const query = new URLSearchParams({ start: record.arrival, end: record.departure });
+    const query = new URLSearchParams({ start: from, end: to });
     result = await handler({ query }, context, {
       ...(options.availability ?? {}),
       calendarStatusStore: store,
@@ -354,10 +362,10 @@ async function checkAirbnbBeforeConfirmation(record, store, options, context) {
       code: result.jsonBody?.code ?? 'AIRBNB_UNAVAILABLE'
     };
   }
-  const blocked = nightKeys(record.arrival, record.departure)
+  const blocked = checkedNights
     .filter((night) => result.jsonBody.blocked.includes(night));
-  if (blocked.length) return { ok: false, code: 'AIRBNB_CONFLICT', nights: blocked };
-  return { ok: true };
+  if (blocked.length) return { ok: false, code: 'AIRBNB_CONFLICT', nights: blocked, bufferNights };
+  return { ok: true, bufferNights };
 }
 
 async function confirmDirectBooking(store, applied, session, event, options, context) {

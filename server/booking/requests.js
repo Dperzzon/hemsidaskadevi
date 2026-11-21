@@ -27,6 +27,7 @@ const { quote, PRICE_VERSION, LINEN_MAX, EXTRAHUS_MAX_GUESTS } = require('./pric
 const { MAIL } = require('./mail');
 const { MAIL_BRAND, escapeHtml, emailShell, mailList } = require('./mail-templates');
 const { queueNotifications } = require('./outbox');
+const { checkAddonAvailability, bufferAddonFieldErrors } = require('./addon-availability');
 
 const MAX_GUESTS = 24;
 const MAX_NIGHTS = 93;
@@ -450,6 +451,29 @@ async function handleBookingRequest(request, context, options = {}) {
     };
   }
 
+  // Tidig incheckning och sen utcheckning kräver att de extra buffertnätterna
+  // är lediga. Kontrollen görs innan förfrågan registreras, men skapar inga
+  // kalenderlås: en bokningsförfrågan är fortfarande inte en bekräftad bokning.
+  const addonCheck = await checkAddonAvailability(
+    store,
+    { ...validated.record, bufferNightsMode: 'auto' },
+    options,
+    context
+  );
+  if (!addonCheck.ok) {
+    return {
+      status: 409,
+      headers: API_HEADERS,
+      jsonBody: {
+        error: 'Tillvalet kan inte erbjudas för valda datum. Du kan skicka en förfrågan utan tillvalet.',
+        code: addonCheck.code ?? 'BUFFER_UNAVAILABLE',
+        fields: bufferAddonFieldErrors(addonCheck),
+        addons: addonCheck.addons,
+        bufferNights: addonCheck.bufferNights
+      }
+    };
+  }
+
   // Extrahuset har en egen kalender. Nätter som redan är bekräftade eller
   // reserverade där kan aldrig bokas igen, även om herrgården är ledig.
   if (validated.record.addons.extrahus === true) {
@@ -509,6 +533,8 @@ async function handleBookingRequest(request, context, options = {}) {
     statusCode: 'PENDING',
     status: 'Inväntar godkännande',
     bookingSource: 'WEB',
+    bufferNightsMode: 'auto',
+    bufferNights: addonCheck.bufferNights ?? [],
     version: 1,
     paymentStatus: 'UNPAID',
     amountPaid: 0,

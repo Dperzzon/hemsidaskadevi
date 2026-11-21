@@ -16,6 +16,12 @@
 const crypto = require('node:crypto');
 const { quote, PRICE_VERSION, LINEN_MAX, EXTRAHUS_MAX_GUESTS } = require('../booking/pricing');
 const { handleAvailability } = require('../calendar/availability');
+const {
+  bufferNightsFor,
+  lockedNightsFor,
+  lockedRange
+} = require('../booking/buffer-nights');
+const { checkAddonAvailability } = require('../booking/addon-availability');
 const { buildBookingConfirmation, buildCancellationNotification } = require('../booking/booking-mail');
 const { queueNotification } = require('../booking/outbox');
 const { revokePaymentAccess } = require('../booking/payment-access');
@@ -253,6 +259,8 @@ function validateManualBooking(body, now = new Date()) {
       message: mode === 'block' ? message : '',
       latestNote,
       bookingSource: mode === 'block' ? 'MANUAL' : bookingSource,
+      bufferNightsMode: mode === 'block' ? 'manual' : 'auto',
+      bufferNights: [],
       statusCode: mode === 'block' ? 'BLOCKED' : statusCode,
       status: statusLabel(mode === 'block' ? 'BLOCKED' : statusCode),
       addons,
@@ -294,16 +302,18 @@ function bucketByNight(calendar) {
 
 async function internalConflicts(repo, record, now, excludeReference = '') {
   const all = await repo.allBookings(now);
+  const range = lockedRange(record) ?? { from: record.arrival, to: record.departure };
   return all.filter((booking) =>
     booking.reference !== excludeReference &&
     (booking.statusCode === 'CONFIRMED' || booking.statusCode === 'BLOCKED') &&
-    booking.arrival < record.departure &&
-    booking.departure > record.arrival
+    booking.arrival < range.to &&
+    booking.departure > range.from
   );
 }
 
 async function calendarConflicts(repo, record) {
-  const rows = await repo.listCalendar(record.arrival, record.departure);
+  const range = lockedRange(record) ?? { from: record.arrival, to: record.departure };
+  const rows = await repo.listCalendar(range.from, range.to);
   return rows.filter((row) => row.reference !== record.reference);
 }
 
@@ -321,9 +331,10 @@ async function extrahusConflicts(repo, record) {
 async function airbnbConflicts(record, options, context) {
   if (options.requireAirbnbCheck === false) return { blocked: [] };
   const handler = options.availabilityHandler ?? handleAvailability;
+  const range = lockedRange(record) ?? { from: record.arrival, to: record.departure };
   let result;
   try {
-    const query = new URLSearchParams({ start: record.arrival, end: record.departure });
+    const query = new URLSearchParams({ start: range.from, end: range.to });
     result = await handler({ query }, context, options.availability ?? {});
   } catch {
     return { unavailable: true, blocked: [] };
@@ -332,7 +343,7 @@ async function airbnbConflicts(record, options, context) {
     return { unavailable: true, blocked: [] };
   }
   return {
-    blocked: nightKeys(record.arrival, record.departure)
+    blocked: lockedNightsFor(record)
       .filter((night) => result.jsonBody.blocked.includes(night))
   };
 }
@@ -416,8 +427,9 @@ async function assertConfirmable(repo, record, options, context, now, body = {})
 async function lockCalendar(repo, record, principal, now) {
   const created = [];
   const actor = actorOf(principal);
+  const bufferSet = new Set(bufferNightsFor(record));
   const jobs = [
-    { resource: 'main', nights: nightKeys(record.arrival, record.departure) },
+    { resource: 'main', nights: lockedNightsFor(record) },
     {
       resource: 'extrahus',
       nights: record.extrahus?.enabled === true && Array.isArray(record.extrahus.nightKeys)
@@ -436,6 +448,7 @@ async function lockCalendar(repo, record, principal, now) {
       try {
         await repo.createCalendarNight(night, {
           type: record.statusCode === 'BLOCKED' ? 'MANUAL' : 'BOOKING',
+          kind: job.resource === 'main' && bufferSet.has(night) ? 'BUFFER' : 'STAY',
           reference: record.reference,
           blockId: record.blockId ?? '',
           source: record.bookingSource,
@@ -560,6 +573,71 @@ async function syncExtrahusCalendar(repo, record, existingRows, principal, now) 
     await repo.deleteCalendarNight(night, record.reference, { resource: 'extrahus' }).catch(() => {});
   }
   return { ok: true };
+}
+
+function existingBufferRows(record, rows) {
+  const stay = new Set(nightKeys(record.arrival, record.departure));
+  return (Array.isArray(rows) ? rows : []).filter((row) => {
+    if ((row.resource ?? 'main') !== 'main') return false;
+    if (String(row.kind ?? '').toUpperCase() === 'BUFFER') return true;
+    return !stay.has(String(row.night ?? row.RowKey ?? ''));
+  });
+}
+
+// Håller buffertraderna i takt med att tidig incheckning/sen utcheckning
+// ändras på en bekräftad bokning. Nya buffertnätter skapas först när alla är
+// lediga; därefter tas endast de buffertnätter bort som inte längre behövs.
+// Vanliga boendenätter rörs aldrig.
+async function syncBufferCalendar(repo, record, existingRows, principal, now) {
+  if (record.bufferNightsMode !== 'auto') return { ok: true, skipped: 'manual' };
+  const actor = actorOf(principal);
+  const oldRows = existingBufferRows(record, existingRows);
+  const oldKeys = oldRows.map((row) => String(row.night ?? row.RowKey));
+  const newKeys = bufferNightsFor(record);
+  const oldSet = new Set(oldKeys);
+  const newSet = new Set(newKeys);
+  const created = [];
+  for (const night of newKeys) {
+    if (oldSet.has(night)) continue;
+    try {
+      await repo.createCalendarNight(night, {
+        type: 'BOOKING',
+        kind: 'BUFFER',
+        reference: record.reference,
+        blockId: record.blockId ?? '',
+        source: record.bookingSource,
+        note: 'Kalenderbuffert för tillval (inte en debiterad övernattning)',
+        createdBy: actor.name,
+        createdAt: now.toISOString()
+      }, { resource: 'main' });
+      created.push(night);
+    } catch (cause) {
+      for (const inserted of created) {
+        await repo.deleteCalendarNight(inserted, record.reference, { resource: 'main' }).catch(() => {});
+      }
+      if (cause?.status === 409) {
+        return {
+          ok: false,
+          error: error(409, 'Buffertnatten är redan upptagen. Tillvalet kan inte bekräftas för valda datum.', {
+            code: 'BUFFER_UNAVAILABLE',
+            conflicts: [night]
+          })
+        };
+      }
+      throw cause;
+    }
+  }
+  const deleted = [];
+  for (const night of oldKeys) {
+    if (newSet.has(night)) continue;
+    try {
+      await repo.deleteCalendarNight(night, record.reference, { resource: 'main' });
+      deleted.push(night);
+    } catch {
+      // En kvarvarande buffert kan alltid kontrolleras manuellt i kalendern.
+    }
+  }
+  return { ok: true, created, deleted };
 }
 
 async function warningContext(repo, record, now) {
@@ -883,6 +961,8 @@ async function createManualBooking(repo, principal, body, options = {}, context 
     rowKey,
     reference,
     blockId: validated.mode === 'block' ? reference : '',
+    bufferNightsMode: validated.record.bufferNightsMode ?? 'manual',
+    bufferNights: [],
     version: 1,
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
@@ -906,6 +986,7 @@ async function createManualBooking(repo, principal, body, options = {}, context 
   let overrideAudit = null;
   if (record.statusCode === 'CONFIRMED' || record.statusCode === 'BLOCKED') {
     if (record.statusCode === 'CONFIRMED') {
+      record.bufferNights = bufferNightsFor(record);
       const confirmable = await assertConfirmable(repo, record, options, context, now, body);
       if (confirmable.error) return confirmable.error;
       if (confirmable.overrideApplied) {
@@ -1053,6 +1134,7 @@ async function changeStatus(repo, principal, reference, action, body = {}, optio
   record.updatedAt = now.toISOString();
   record.updatedBy = actorOf(principal).name;
   if (nextStatus === 'CONFIRMED') record.confirmedAt = now.toISOString();
+  if (nextStatus === 'CONFIRMED') record.bufferNights = bufferNightsFor(record);
   if (nextStatus === 'CONFIRMED') record.reconciliation = null;
   if (nextStatus === 'CONFIRMED' && record.reservation) {
     record.reservation = { ...record.reservation, status: 'CONFIRMED', confirmedAt: now.toISOString() };
@@ -1534,21 +1616,19 @@ async function updateAddons(repo, principal, reference, body = {}, options = {},
     addons
   });
   const now = options.now ?? new Date();
-  if (record.statusCode === 'CONFIRMED') {
-    const existingCalendar = await repo.listCalendarByReference(record.reference).catch(() => []);
-    const sync = await syncExtrahusCalendar(repo, {
-      ...record, addons, extrahus: pricing.extrahus
-    }, existingCalendar, principal, now);
-    if (!sync.ok) return sync.error;
-  }
   const originalPricing = record.originalPricing ?? pricingSnapshot(record);
   const total = record.agreedTotal !== null && record.agreedTotal !== undefined
     ? Number(record.agreedTotal)
     : pricing.total;
+  const enableAuto = body.enableAutomaticBufferNights === true &&
+    Array.isArray(principal?.roles) && principal.roles.includes('Owner');
+  const bufferNightsMode = record.bufferNightsMode === 'auto' || enableAuto ? 'auto' : 'manual';
   const updatedRecord = {
     ...record,
     addons,
     extrahus: pricing.extrahus,
+    bufferNightsMode,
+    bufferNights: [],
     totalGuests: pricing.totalGuests,
     lodgingBase: pricing.lodgingBase,
     peakNights: pricing.peakNights,
@@ -1568,6 +1648,69 @@ async function updateAddons(repo, principal, reference, body = {}, options = {},
     updatedAt: now.toISOString(),
     updatedBy: actorOf(principal).name
   };
+  updatedRecord.bufferNights = bufferNightsFor(updatedRecord);
+  const neededBuffers = bufferNightsFor({ ...updatedRecord, bufferNightsMode: 'auto' });
+  const bufferNightsWarning = bufferNightsMode === 'manual' && neededBuffers.length
+    ? 'Bokningen är äldre och använder manuella spärrar. Aktivera automatiska buffertnätter (enableAutomaticBufferNights) efter kontrollerad konfliktkontroll.'
+    : '';
+
+  let bufferOverrideAudit = null;
+  if (record.statusCode === 'CONFIRMED') {
+    const existingCalendar = await repo.listCalendarByReference(record.reference).catch(() => []);
+    const extrahusSync = await syncExtrahusCalendar(repo, updatedRecord, existingCalendar, principal, now);
+    if (!extrahusSync.ok) return extrahusSync.error;
+
+    if (bufferNightsMode === 'auto') {
+      const bufferCheck = await checkAddonAvailability(repo, updatedRecord, options, context);
+      if (!bufferCheck.ok) {
+        if (bufferCheck.internalUnavailable || bufferCheck.airbnbUnavailable) {
+          return error(503, 'Buffertnätternas tillgänglighet kunde inte verifieras. Tillvalet har inte bekräftats.', {
+            code: 'BUFFER_UNAVAILABLE'
+          });
+        }
+        if (bufferCheck.internalConflicts.length) {
+          return error(409, 'Buffertnatten är redan upptagen i den interna kalendern. Tillvalet kan inte bekräftas.', {
+            code: 'BUFFER_UNAVAILABLE',
+            conflicts: bufferCheck.internalConflicts
+          });
+        }
+        if (bufferCheck.airbnbConflicts.length) {
+          const override = overrideRequest(body);
+          if (!override.intent) {
+            return error(409, 'Buffertnatten är blockerad i Airbnb-kalendern. Markera att du själv blockerat datumet om det är din egen blockering.', {
+              code: 'AIRBNB_CONFLICT',
+              blockedNights: bufferCheck.airbnbConflicts,
+              requiresOverrideOption: true
+            });
+          }
+          if (!override.allowed || !override.confirmed || !override.reason) {
+            return error(409, 'Airbnb visar upptagna buffertdatum. Bekräfta åsidosättningen aktivt och ange en motivering.', {
+              code: 'AIRBNB_CONFLICT',
+              blockedNights: bufferCheck.airbnbConflicts,
+              requiresConfirmation: true
+            });
+          }
+          const actor = actorOf(principal);
+          updatedRecord.airbnbOverride = true;
+          updatedRecord.airbnbOverrideReason = override.reason;
+          updatedRecord.airbnbOverrideApprovedBy = actor.name;
+          updatedRecord.airbnbOverrideApprovedAt = now.toISOString();
+          updatedRecord.airbnbBlockedNights = bufferCheck.airbnbConflicts;
+          updatedRecord.airbnbOverrideFingerprint = stayFingerprint(updatedRecord);
+          bufferOverrideAudit = {
+            reason: override.reason,
+            blockedNights: bufferCheck.airbnbConflicts
+          };
+        } else {
+          return error(409, 'Tillvalet kan inte bekräftas för valda datum eftersom buffertnatten är upptagen.', {
+            code: 'BUFFER_UNAVAILABLE'
+          });
+        }
+      }
+      const bufferSync = await syncBufferCalendar(repo, updatedRecord, existingCalendar, principal, now);
+      if (!bufferSync.ok) return bufferSync.error;
+    }
+  }
   const addonsChanged = JSON.stringify(record.addons ?? null) !== JSON.stringify(addons);
   if ((addonsChanged || Number(record.total) !== Number(total)) && updatedRecord.paymentAccess) {
     revokePaymentAccess(updatedRecord, {
@@ -1588,9 +1731,27 @@ async function updateAddons(repo, principal, reference, body = {}, options = {},
       fromStatus: record.statusCode,
       toStatus: record.statusCode,
       reason,
-      changes: { addons, total, totalAddons: pricing.addonsTotal },
+      changes: {
+        addons,
+        total,
+        totalAddons: pricing.addonsTotal,
+        bufferNightsMode,
+        bufferNights: updatedRecord.bufferNights
+      },
       context
     });
+    if (bufferOverrideAudit) {
+      await audit(repo, principal, 'AIRBNB_OVERRIDE_APPROVED', updatedRecord, {
+        fromStatus: record.statusCode,
+        toStatus: record.statusCode,
+        reason: bufferOverrideAudit.reason,
+        changes: {
+          scope: 'buffer-nights',
+          blockedNights: bufferOverrideAudit.blockedNights
+        },
+        context
+      });
+    }
     const cancelledPendingMail = addonsChanged || Number(record.total) !== Number(total)
       ? await cancelPendingOutbox(
         repo,
@@ -1609,6 +1770,9 @@ async function updateAddons(repo, principal, reference, body = {}, options = {},
         totalAddons: pricing.addonsTotal,
         total,
         calculatedTotal: pricing.total,
+        bufferNightsMode,
+        bufferNights: updatedRecord.bufferNights,
+        bufferNightsWarning,
         etag: updated.etag,
         cancelledPendingMail
       }

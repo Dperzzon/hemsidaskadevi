@@ -491,12 +491,17 @@ function createRequestListener(options = {}) {
       const to = url.searchParams.get('end');
       try {
         const store = createStore(options);
+        const addons = {
+          tidigIncheckning: url.searchParams.get('tidigIncheckning') === '1',
+          senUtcheckning: url.searchParams.get('senUtcheckning') === '1'
+        };
         const availability = await checkDirectBookingAvailability(
           store,
           from,
           to,
           new Date(),
-          directBookingOptions
+          directBookingOptions,
+          addons
         );
         sendJson(res, 200, availability);
       } catch {

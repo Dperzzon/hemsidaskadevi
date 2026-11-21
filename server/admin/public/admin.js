@@ -450,24 +450,61 @@
           return;
         }
         if (type === 'addons') {
-          await api(`/api/admin/bookings/${encodeURIComponent(form.dataset.reference)}/addons`, {
-            method: 'PATCH',
-            body: {
-              addons: {
-                slutstad: checked(form, 'slutstad'),
-                extrahus: checked(form, 'extrahus'),
-                extrahusNights: Number(formValue(form, 'extrahusNights') || 0),
-                extrahusGuests: Number(formValue(form, 'extrahusGuests') || 0),
-                lakan: checked(form, 'lakan'),
-                linenCount: Number(formValue(form, 'linenCount') || 0),
-                ved: checked(form, 'ved'),
-                tidigIncheckning: checked(form, 'tidigIncheckning'),
-                senUtcheckning: checked(form, 'senUtcheckning')
-              },
-              reason: formValue(form, 'reason'),
-              expectedEtag: form.dataset.etag || undefined
+          const patch = (extra = {}) => api(
+            `/api/admin/bookings/${encodeURIComponent(form.dataset.reference)}/addons`,
+            {
+              method: 'PATCH',
+              body: {
+                addons: {
+                  slutstad: checked(form, 'slutstad'),
+                  extrahus: checked(form, 'extrahus'),
+                  extrahusNights: Number(formValue(form, 'extrahusNights') || 0),
+                  extrahusGuests: Number(formValue(form, 'extrahusGuests') || 0),
+                  lakan: checked(form, 'lakan'),
+                  linenCount: Number(formValue(form, 'linenCount') || 0),
+                  ved: checked(form, 'ved'),
+                  tidigIncheckning: checked(form, 'tidigIncheckning'),
+                  senUtcheckning: checked(form, 'senUtcheckning')
+                },
+                enableAutomaticBufferNights: checked(form, 'enableAutomaticBufferNights'),
+                reason: formValue(form, 'reason'),
+                expectedEtag: form.dataset.etag || undefined,
+                ...extra
+              }
             }
-          });
+          );
+          try {
+            await patch();
+          } catch (error) {
+            if (
+              error.code !== 'AIRBNB_CONFLICT' ||
+              (!error.requiresOverrideOption && !error.requiresConfirmation)
+            ) {
+              throw error;
+            }
+            const approved = window.confirm(
+              `Airbnb visar upptagna buffertdatum.${blockedNightsText(error)}\n\n` +
+              'Bekräfta att du själv har blockerat datumen i Airbnb innan de ersätts ' +
+              'med automatiska buffertnätter. Interna kalenderlås påverkas inte.'
+            );
+            if (!approved) {
+              showFormError(form, 'Tillvalet ändrades inte. Datumen är fortsatt blockerade i Airbnb.');
+              setBusy(form, false);
+              return;
+            }
+            const overrideReason = window.prompt('Kort motivering till varför Airbnb-blockeringen åsidosätts:');
+            if (!overrideReason || !overrideReason.trim()) {
+              showFormError(form, 'En motivering krävs för att åsidosätta Airbnb-blockeringen.');
+              setBusy(form, false);
+              return;
+            }
+            await patch({
+              airbnbOverrideIntent: true,
+              airbnbOverride: true,
+              airbnbOverrideConfirmed: true,
+              airbnbOverrideReason: overrideReason.trim()
+            });
+          }
           window.location.reload();
           return;
         }

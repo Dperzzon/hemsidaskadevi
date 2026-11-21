@@ -362,6 +362,8 @@ function normalizeBooking(record = {}, options = {}) {
         nightKeys: Array.isArray(record.extrahus.nightKeys) ? record.extrahus.nightKeys.map(String) : []
       }
       : null,
+    bufferNightsMode: record.bufferNightsMode === 'auto' ? 'auto' : 'manual',
+    bufferNights: Array.isArray(record.bufferNights) ? record.bufferNights.map(String) : [],
     firstName: String(record.firstName ?? ''),
     lastName: String(record.lastName ?? ''),
     guestName: [record.firstName, record.lastName].filter(Boolean).join(' ') ||

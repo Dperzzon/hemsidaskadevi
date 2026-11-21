@@ -283,7 +283,7 @@ test('lakan: 18 gäster ger 18 uppsättningar och 3 600 kr', async ({ page }) =>
   await expect(page.locator('#price-total')).toContainText('24 600 kr');
 });
 
-test('tjänster för tidig incheckning och sen utcheckning visar tiderna och bekräftelsekravet', async ({ page }) => {
+test('tjänster för tidig incheckning och sen utcheckning visar tiderna och tillgänglighetskravet', async ({ page }) => {
   await goto(page);
   await clickDay(page, '2026-11-16');
   await clickDay(page, '2026-11-19');
@@ -291,11 +291,13 @@ test('tjänster för tidig incheckning och sen utcheckning visar tiderna och bek
   const tidig = page.locator('.booking-addon', { has: page.locator('#addon-tidig-incheckning') });
   await expect(tidig).toContainText('Ordinarie incheckning är kl. 14.00');
   await expect(tidig).toContainText('checka in redan kl. 09.00');
-  await expect(tidig).toContainText('bekräftas av Skadevi Herrgård');
+  await expect(tidig).toContainText('Erbjuds endast om natten före ankomst är ledig');
+  await expect(tidig).toContainText('räknas inte som en betald övernattning');
   const sen = page.locator('.booking-addon', { has: page.locator('#addon-sen-utcheckning') });
   await expect(sen).toContainText('Ordinarie utcheckning är kl. 11.00');
   await expect(sen).toContainText('stanna till kl. 16.00');
-  await expect(sen).toContainText('bekräftas av Skadevi Herrgård');
+  await expect(sen).toContainText('Erbjuds endast om natten på avresedatumet är ledig');
+  await expect(sen).toContainText('räknas inte som en betald övernattning');
 });
 
 test('skick är avstängt när bokningsreglerna inte är publicerade', async ({ page }) => {

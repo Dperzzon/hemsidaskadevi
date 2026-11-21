@@ -18,6 +18,11 @@
 const RESERVATION_TYPE = 'RESERVATION';
 const BOOKING_TYPE = 'BOOKING';
 
+const {
+  bufferNightsFor,
+  lockedNightsFor
+} = require('./buffer-nights');
+
 const RESERVATION_STATUS = Object.freeze({
   PENDING: 'PENDING',
   ACTIVE: 'ACTIVE',
@@ -43,13 +48,16 @@ function nightKeys(arrival, departure) {
   return nights;
 }
 
-function reservationRow(night, record, now) {
+function reservationRow(night, record, now, kind = 'STAY') {
   return {
     type: RESERVATION_TYPE,
+    kind,
     reference: record.reference,
     blockId: '',
     source: 'DIRECT',
-    note: 'Tillfällig betalningsreservation',
+    note: kind === 'BUFFER'
+      ? 'Kalenderbuffert för tillval (inte en debiterad övernattning)'
+      : 'Tillfällig betalningsreservation',
     createdBy: 'Gäst',
     createdAt: now.toISOString()
   };
@@ -64,18 +72,22 @@ async function reserveNights(store, record, now = new Date()) {
     throw new Error('Lagringen saknar atomisk nattlåsning');
   }
   const nights = nightKeys(record.arrival, record.departure);
+  const bufferNights = bufferNightsFor(record);
+  const lockedNights = lockedNightsFor(record);
   if (!nights.length) {
     const invalid = new Error('Bokningens datum är ogiltiga');
     invalid.status = 400;
     throw invalid;
   }
+  const bufferSet = new Set(bufferNights);
   const extrahusNights = record.extrahus?.enabled === true && Array.isArray(record.extrahus.nightKeys)
     ? record.extrahus.nightKeys
     : [];
   const created = [];
   const insert = async (night, resource) => {
     try {
-      await store.createCalendarNight(night, reservationRow(night, record, now), { resource });
+      const kind = resource === 'main' && bufferSet.has(night) ? 'BUFFER' : 'STAY';
+      await store.createCalendarNight(night, reservationRow(night, record, now, kind), { resource });
       created.push({ night, resource });
     } catch (error) {
       for (const inserted of [...created].reverse()) {
@@ -92,9 +104,9 @@ async function reserveNights(store, record, now = new Date()) {
       throw error;
     }
   };
-  for (const night of nights) await insert(night, 'main');
+  for (const night of lockedNights) await insert(night, 'main');
   for (const night of extrahusNights) await insert(night, 'extrahus');
-  return { nights, extrahusNights, created };
+  return { nights, bufferNights, lockedNights, extrahusNights, created };
 }
 
 // Frigör endast rader som tillhör den angivna referensen. Rader som redan
@@ -121,6 +133,8 @@ async function releaseReservation(store, reference, _now = new Date(), options =
 // huvudbyggnadens och extrahusets.
 async function verifyReservation(store, record) {
   const expected = nightKeys(record.arrival, record.departure);
+  const expectedBuffers = bufferNightsFor(record);
+  const expectedLocked = lockedNightsFor(record);
   const expectedExtrahus = record.extrahus?.enabled === true && Array.isArray(record.extrahus.nightKeys)
     ? record.extrahus.nightKeys
     : [];
@@ -139,11 +153,19 @@ async function verifyReservation(store, record) {
   );
   const missing = expected
     .filter((night) => !owned.has(`main:${night}`))
+    .concat(expectedBuffers.filter((night) => !owned.has(`main:${night}`)))
     .concat(expectedExtrahus.filter((night) => !owned.has(`extrahus:${night}`)));
   if (missing.length) {
     return { ok: false, code: 'RESERVATION_MISSING', message: 'Reservationen saknar giltig nattlåsning.', missing };
   }
-  return { ok: true, nights: expected, extrahusNights: expectedExtrahus, rows };
+  return {
+    ok: true,
+    nights: expected,
+    bufferNights: expectedBuffers,
+    lockedNights: expectedLocked,
+    extrahusNights: expectedExtrahus,
+    rows
+  };
 }
 
 // Omvandlar RESERVATION-raderna till BOOKING på plats. Ingen rad raderas, så
@@ -154,22 +176,35 @@ async function convertReservationToBooking(store, record, now = new Date()) {
   if (typeof store.updateCalendarNight !== 'function') {
     return { ok: false, code: 'RESERVATION_UPDATE_UNSUPPORTED', message: 'Lagringen kan inte bekräfta reservationen.' };
   }
+  const mainNights = new Set([
+    ...verification.lockedNights,
+    ...verification.nights,
+    ...verification.bufferNights
+  ]);
+  const bufferSet = new Set(verification.bufferNights);
   for (const row of verification.rows) {
     const night = row.night ?? row.RowKey;
     const resource = row.resource === 'extrahus' ? 'extrahus' : 'main';
-    if (!verification.nights.includes(night) && !verification.extrahusNights.includes(night)) continue;
+    if (resource === 'main' && !mainNights.has(night)) continue;
+    if (resource === 'extrahus' && !verification.extrahusNights.includes(night)) continue;
     if (row.type === BOOKING_TYPE) continue;
     await store.updateCalendarNight(night, {
       type: BOOKING_TYPE,
+      kind: row.kind || (resource === 'main' && bufferSet.has(night) ? 'BUFFER' : 'STAY'),
       reference: record.reference,
       blockId: '',
       source: 'DIRECT',
-      note: 'Direktbokning',
+      note: bufferSet.has(night) ? 'Kalenderbuffert för tillval' : 'Direktbokning',
       createdBy: 'Stripe',
       createdAt: row.createdAt || now.toISOString()
     }, { ifMatch: row.etag, resource });
   }
-  return { ok: true, nights: verification.nights, extrahusNights: verification.extrahusNights };
+  return {
+    ok: true,
+    nights: verification.nights,
+    bufferNights: verification.bufferNights,
+    extrahusNights: verification.extrahusNights
+  };
 }
 
 function reservationIsActive(record, now = new Date()) {

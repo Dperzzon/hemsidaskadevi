@@ -119,6 +119,7 @@ function addonEditor(booking) {
     ${row('ved', 'Ved', addons.ved)}
     ${row('tidigIncheckning', 'Tidig incheckning', addons.tidigIncheckning)}
     ${row('senUtcheckning', 'Sen utcheckning', addons.senUtcheckning)}
+    ${booking.bufferNightsMode === 'manual' ? '<label class="check-row"><input type="checkbox" name="enableAutomaticBufferNights"> <span>Aktivera automatiska buffertnätter (kräver behörighet och konfliktkontroll)</span></label>' : ''}
   </div>`;
 }
 
@@ -527,6 +528,9 @@ function renderBookingDetail(options) {
               ? fact('Extrahus', `${booking.extrahus.nights} nätter · ${escapeHtml(booking.extrahus.arrival)}–${escapeHtml(booking.extrahus.departure)} · ${booking.extrahus.guests} gäster`)
               : ''}
             ${fact('Totalt antal gäster', String(booking.totalGuests || booking.guests))}
+            ${booking.bufferNights?.length
+              ? fact('Kalenderbuffertar', booking.bufferNights.map((night) => escapeHtml(formatDateKey(night))).join(', '))
+              : ''}
           </div>
         </section>
 

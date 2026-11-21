@@ -166,7 +166,7 @@
         </div>
         <fieldset class="booking-addons">
           <legend>Tillval</legend>
-          <p class="booking-addons-note">Samtliga tillval är frivilliga. Priset uppdateras när ni markerar eller avmarkerar tillval.</p>
+          <p class="booking-addons-note">Samtliga tillval är frivilliga. Priset uppdateras när ni markerar eller avmarkerar tillval. Tidig incheckning och sen utcheckning erbjuds i mån av tillgänglighet och kan bara bekräftas om angränsande natt är ledig.</p>
           <div class="booking-addon">
             <input type="checkbox" id="addon-slutstad" name="slutstad">
             <label for="addon-slutstad">Slutstädning (exklusive kök) — 2 500 kr</label>
@@ -202,13 +202,14 @@
           <div class="booking-addon">
             <input type="checkbox" id="addon-tidig-incheckning" name="tidigIncheckning">
             <label for="addon-tidig-incheckning">Tidig incheckning — 500 kr</label>
-            <p class="booking-addon-note">Ordinarie incheckning är kl. 14.00. Med tidig incheckning kan ni checka in redan kl. 09.00. Önskemål som behöver bekräftas av Skadevi Herrgård — bekräftas inte enbart genom betalning eller inskickad bokningsförfrågan.</p>
+            <p class="booking-addon-note">Pris 500 kr. Ordinarie incheckning är kl. 14.00. Med tidig incheckning kan ni checka in redan kl. 09.00. Erbjuds endast om natten före ankomst är ledig. Den extra spärrade natten räknas inte som en betald övernattning.</p>
           </div>
           <div class="booking-addon">
             <input type="checkbox" id="addon-sen-utcheckning" name="senUtcheckning">
             <label for="addon-sen-utcheckning">Sen utcheckning — 500 kr</label>
-            <p class="booking-addon-note">Ordinarie utcheckning är kl. 11.00. Med sen utcheckning kan ni stanna till kl. 16.00. Önskemål som behöver bekräftas av Skadevi Herrgård — bekräftas inte enbart genom betalning eller inskickad bokningsförfrågan.</p>
+            <p class="booking-addon-note">Pris 500 kr. Ordinarie utcheckning är kl. 11.00. Med sen utcheckning kan ni stanna till kl. 16.00. Erbjuds endast om natten på avresedatumet är ledig. Den extra spärrade natten räknas inte som en betald övernattning.</p>
           </div>
+          <p class="booking-addon-note" id="addon-availability" aria-live="polite" hidden></p>
         </fieldset>
         <div class="booking-prices" aria-live="polite">
           <h3>Prisöversikt</h3>

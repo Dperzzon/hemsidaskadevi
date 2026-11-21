@@ -315,7 +315,27 @@ function updateSubmitState() {
   updateSubmitLabel();
 }
 
+function addonAvailabilityMessage() {
+  const data = els.addonAvailabilityData;
+  if (!data) return '';
+  if (els.tidigIncheckning?.checked && data.tidigIncheckning?.available === false) {
+    return 'Tidig incheckning är inte tillgänglig för valda datum eftersom natten före ankomst är upptagen. Du kan boka ordinarie vistelse utan tillvalet.';
+  }
+  if (els.senUtcheckning?.checked && data.senUtcheckning?.available === false) {
+    return 'Sen utcheckning är inte tillgänglig för valda datum eftersom natten på avresedatumet är upptagen. Du kan boka ordinarie vistelse utan tillvalet.';
+  }
+  return '';
+}
+
+function updateAddonAvailabilityMessage() {
+  if (!els.addonAvailability) return;
+  const message = addonAvailabilityMessage();
+  els.addonAvailability.textContent = message;
+  els.addonAvailability.hidden = !message;
+}
+
 function availabilityMessage() {
+  if (addonAvailabilityMessage()) return addonAvailabilityMessage();
   if (els.extrahus?.checked) {
     return 'Extrahusets tillgänglighet kan inte verifieras automatiskt. Skicka en bokningsförfrågan så bekräftar vi extrahuset manuellt innan bokningen blir giltig.';
   }
@@ -342,6 +362,7 @@ function availabilityMessage() {
 }
 
 function updatePaymentOptions() {
+  updateAddonAvailabilityMessage();
   const extrahusSelected = els.extrahus?.checked === true;
   const available = els.directBookingEnabled === true && els.directBookingAvailable === true && !extrahusSelected;
   if (els.paymentCardOption) els.paymentCardOption.hidden = !available;
@@ -359,12 +380,13 @@ function updatePaymentOptions() {
 
 let availabilityRequestId = 0;
 
-async function checkDirectBookingAvailability(arrival, departure) {
+async function checkDirectBookingAvailability(arrival, departure, addons = selectedAddons()) {
   const requestId = ++availabilityRequestId;
   if (!els.directBookingEnabled) {
     els.availabilityChecking = false;
     els.directBookingAvailable = false;
     els.directBookingReason = 'DIRECT_BOOKING_DISABLED';
+    els.addonAvailabilityData = null;
     updatePaymentOptions();
     return;
   }
@@ -374,18 +396,23 @@ async function checkDirectBookingAvailability(arrival, departure) {
   updateSubmitState();
   try {
     const params = new URLSearchParams({ start: arrival, end: departure });
+    if (addons.tidigIncheckning) params.set('tidigIncheckning', '1');
+    if (addons.senUtcheckning) params.set('senUtcheckning', '1');
     const response = await fetch(`/api/direct-booking/availability?${params}`, { cache: 'no-store' });
     const data = await response.json().catch(() => ({}));
     if (requestId !== availabilityRequestId) return;
+    els.addonAvailabilityData = data.addons ?? null;
     els.directBookingAvailable = response.ok && data.directBooking === true;
     els.directBookingReason = data.code || '';
   } catch {
     if (requestId !== availabilityRequestId) return;
+    els.addonAvailabilityData = null;
     els.directBookingAvailable = false;
     els.directBookingReason = 'UNAVAILABLE';
   } finally {
     if (requestId !== availabilityRequestId) return;
     els.availabilityChecking = false;
+    updateAddonAvailabilityMessage();
     updatePaymentOptions();
     updateSubmitState();
   }
@@ -409,7 +436,7 @@ async function loadBookingConfig() {
     els.directBookingAvailable = false;
     updatePaymentOptions();
     if (els.arrival.value && els.departure.value) {
-      checkDirectBookingAvailability(els.arrival.value, els.departure.value);
+      checkDirectBookingAvailability(els.arrival.value, els.departure.value, selectedAddons());
     }
   } catch {
     // Utan konfiguration visas endast det säkra förfrågningsflödet.
@@ -450,7 +477,8 @@ function applyFieldErrors(fields) {
     firstName: els.firstName, lastName: els.lastName,
     email: els.email, phone: els.phone, guests: els.guests,
     extrahusNights: els.extrahusNights, extrahusGuests: els.extrahusGuests,
-    linenCount: els.linenCount, consentRules: els.consentRules
+    linenCount: els.linenCount, consentRules: els.consentRules,
+    tidigIncheckning: els.tidigIncheckning, senUtcheckning: els.senUtcheckning
   };
   let first = null;
   for (const [name, message] of Object.entries(fields)) {
@@ -497,6 +525,8 @@ async function submitRequest(payload) {
       return;
     }
     if (response.status === 409) {
+      if (data.fields) applyFieldErrors(data.fields);
+      showAddonConflict(data.fields);
       showFormError(data.error || 'Några av de valda nätterna är inte längre tillgängliga. Vänligen välj andra datum i kalendern.');
       document.dispatchEvent(new CustomEvent('booking:invalidate'));
       return;
@@ -544,6 +574,8 @@ async function submitDirectBooking(payload) {
     }
     if (response.status === 409) {
       if (data.retryable) resetIdempotencyKey();
+      if (data.fields) applyFieldErrors(data.fields);
+      showAddonConflict(data.fields);
       showFormError(data.error || 'Några av de valda nätterna är inte längre tillgängliga. Välj andra datum i kalendern.');
       document.dispatchEvent(new CustomEvent('booking:invalidate'));
       return;
@@ -559,6 +591,14 @@ async function submitDirectBooking(payload) {
   } finally {
     setSending(false);
   }
+}
+
+function showAddonConflict(fields) {
+  if (!fields || !els.addonAvailability) return;
+  const message = fields.tidigIncheckning || fields.senUtcheckning || '';
+  if (!message) return;
+  els.addonAvailability.textContent = message;
+  els.addonAvailability.hidden = false;
 }
 
 function showFormError(message) {
@@ -582,6 +622,7 @@ function handleSelection(detail) {
   const previousArrival = els.arrival.value;
   const previousDeparture = els.departure.value;
   updateSummary({ arrival, departure, nights });
+  els.addonAvailabilityData = null;
   syncExtrahus();
   els.formError.hidden = true;
   if (els.manualReview) els.manualReview.hidden = true;
@@ -609,7 +650,7 @@ function handleSelection(detail) {
   els.form.hidden = false;
   els.summary.hidden = false;
   updatePrices();
-  checkDirectBookingAvailability(arrival, departure);
+  checkDirectBookingAvailability(arrival, departure, selectedAddons());
 
   if (!wasOpen) {
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -659,6 +700,8 @@ function queryAll() {
     ved: q('addon-ved'),
     tidigIncheckning: q('addon-tidig-incheckning'),
     senUtcheckning: q('addon-sen-utcheckning'),
+    addonAvailability: q('addon-availability'),
+    addonAvailabilityData: null,
     priceList: q('price-list'),
     priceTotal: q('price-total'),
     priceTotalRow: q('price-total-row'),
@@ -699,6 +742,14 @@ function init() {
       if (addon.perNight) {
         syncExtrahus({ resetNights: els.extrahus.checked });
         updatePaymentOptions();
+      }
+      if (addon.id === 'tidigIncheckning' || addon.id === 'senUtcheckning') {
+        els.addonAvailabilityData = null;
+        if (els.arrival.value && els.departure.value) {
+          checkDirectBookingAvailability(els.arrival.value, els.departure.value, selectedAddons());
+        } else {
+          updateAddonAvailabilityMessage();
+        }
       }
       updatePrices();
     });
