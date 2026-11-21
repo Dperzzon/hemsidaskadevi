@@ -56,9 +56,10 @@ async function loadAvailability() {
       throw new Error('Kalender-API returnerade ett ogiltigt svar');
     }
     if (token !== requestToken) return;
-    // Union av hämtade månader: en bokad natt är bokad oavsett vilken månad
-    // som visas just nu (serversidan kontrollerar alltid på nytt vid inskick).
-    state.blocked = new Set([...state.blocked, ...data.blocked]);
+    // Ersätt, inte union: annars kan ett datum som blivit ledigt ligga kvar som
+    // bokat under resten av sidbesöket. Servern kontrollerar alltid på nytt vid
+    // inskick, men kalendern ska visa aktuell bild.
+    state.blocked = new Set(data.blocked);
     state.status = 'ok';
   } catch {
     if (token !== requestToken) return;

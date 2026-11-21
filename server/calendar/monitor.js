@@ -71,6 +71,10 @@ function createCalendarMonitor(options = {}) {
       const to = addDays(from, Math.max(1, Math.min(horizonDays, 730)));
       const store = options.store ?? createStore(options);
       const blocked = [];
+      let safetySuspect = false;
+      let safetyCode = '';
+      let safetyReason = '';
+      let lastMeta = null;
       for (const window of windows(from, to)) {
         const result = await handleAvailability(
           { query: new URLSearchParams({ start: window.start, end: window.end }) },
@@ -80,11 +84,30 @@ function createCalendarMonitor(options = {}) {
             calendarStatusStore: store,
             forceStatusWrite: true,
             statusSource: 'monitor',
-            now
+            now,
+            safetyReportOnly: true,
+            includeMeta: true,
+            includeSafety: true,
+            recordStatus: false
           }
         );
-        if (result.status !== 200 || !Array.isArray(result.jsonBody?.blocked)) return null;
+        if (result.status !== 200 || !Array.isArray(result.jsonBody?.blocked)) {
+          await recordCalendarStatus(store, {
+            ok: false,
+            errorCode: result.jsonBody?.code ?? 'CALENDAR_CHECK_FAILED',
+            source: 'monitor',
+            from,
+            to
+          }, now, { force: true });
+          return null;
+        }
         blocked.push(...result.jsonBody.blocked);
+        if (result.jsonBody.safety?.status === 'suspect') {
+          safetySuspect = true;
+          safetyCode = result.jsonBody.safety.code;
+          safetyReason = result.jsonBody.safety.reason;
+        }
+        if (result.jsonBody.meta) lastMeta = result.jsonBody.meta;
       }
       let conflicts = [];
       try {
@@ -94,14 +117,47 @@ function createCalendarMonitor(options = {}) {
       } catch {
         conflicts = [];
       }
+      const nightsChecked = Math.round(
+        (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY
+      );
+      if (safetySuspect) {
+        await recordCalendarStatus(store, {
+          ok: false,
+          errorCode: safetyCode,
+          blockedCount: blocked.length,
+          nightsChecked,
+          conflicts,
+          source: 'monitor',
+          from,
+          to,
+          eventCount: lastMeta?.eventCount,
+          fingerprint: lastMeta?.fingerprint,
+          lastModified: lastMeta?.lastModified,
+          calendarEtag: lastMeta?.etag,
+          snapshotFrom: from,
+          snapshotTo: to,
+          snapshotNights: blocked,
+          candidate: true,
+          safety: { status: 'suspect', code: safetyCode, reason: safetyReason }
+        }, now, { force: true });
+        return { ok: false, suspect: true, blocked, conflicts, code: safetyCode };
+      }
       await recordCalendarStatus(store, {
         ok: true,
         blockedCount: blocked.length,
-        nightsChecked: Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY),
+        nightsChecked,
         conflicts,
         source: 'monitor',
         from,
-        to
+        to,
+        eventCount: lastMeta?.eventCount,
+        fingerprint: lastMeta?.fingerprint,
+        lastModified: lastMeta?.lastModified,
+        calendarEtag: lastMeta?.etag,
+        snapshotFrom: from,
+        snapshotTo: to,
+        snapshotNights: blocked,
+        safety: { status: 'ok', code: '', reason: '' }
       }, now, { force: true });
       return { ok: true, blocked, conflicts };
     } catch (error) {

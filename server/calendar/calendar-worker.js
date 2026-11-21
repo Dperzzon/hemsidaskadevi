@@ -1,6 +1,7 @@
 'use strict';
 
 const { parentPort, workerData } = require('node:worker_threads');
+const crypto = require('node:crypto');
 
 // Treat parser warnings as errors: some include calendar content or indicate a fallback.
 console.warn = () => { throw new Error('Calendar parser warning'); };
@@ -398,6 +399,27 @@ function applyRange(instance, records, isFullDay) {
   return { ...instance, start: shiftedStart, end: new Date(shiftedStart.getTime() + applicable.duration) };
 }
 
+function calendarMeta(events) {
+  const active = events.filter((event) => String(event.status ?? '').toUpperCase() !== 'CANCELLED');
+  const records = active.map((event) => {
+    const recurrenceKeys = Object.keys(event.recurrences || {}).sort();
+    const exdateKeys = Object.keys(event.exdate || {}).sort();
+    return [
+      String(event.uid ?? ''),
+      event.start instanceof Date ? event.start.toISOString() : '',
+      event.end instanceof Date ? event.end.toISOString() : '',
+      String(event.status ?? ''),
+      recurrenceKeys.join(','),
+      exdateKeys.join(','),
+      JSON.stringify(event.rrule ?? '')
+    ].join('|');
+  }).sort();
+  return {
+    eventCount: active.length,
+    fingerprint: crypto.createHash('sha256').update(records.join('\n')).digest('hex')
+  };
+}
+
 function parseCalendar(text, start, end) {
   const validated = validateCalendar(text);
   const parsed = ical.sync.parseICS(validated.text);
@@ -470,11 +492,12 @@ function parseCalendar(text, start, end) {
       }
     }
   }
-  return [...blocked].sort();
+  return { blocked: [...blocked].sort(), meta: calendarMeta(events) };
 }
 
 try {
-  parentPort.postMessage({ blocked: parseCalendar(workerData.text, workerData.start, workerData.end) });
+  const result = parseCalendar(workerData.text, workerData.start, workerData.end);
+  parentPort.postMessage(result);
 } catch {
   parentPort.postMessage({ error: true });
 }

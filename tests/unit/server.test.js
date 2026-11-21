@@ -248,6 +248,51 @@ test('/api/booking-rules serverar de publicerade beslutade reglerna', async () =
   } finally { close(server); }
 });
 
+test('/api/availability blandar Airbnb med interna bokningar och blockeringar', async () => {
+  const root = withTempRoot();
+  const store = {
+    async listCalendar() {
+      return [
+        { night: '2026-12-10', resource: 'main', type: 'BOOKING', reference: 'SK-1', source: 'DIRECT' },
+        { night: '2026-12-11', resource: 'main', type: 'MANUAL', reference: 'BLOCK-1', source: 'MANUAL' },
+        { night: '2026-12-12', resource: 'extrahus', type: 'BOOKING', reference: 'SK-X', source: 'DIRECT' }
+      ];
+    },
+    async listBlockingBookings() {
+      return [{ statusCode: 'CONFIRMED', bookingSource: 'DIRECT', arrival: '2026-12-20', departure: '2026-12-22' }];
+    }
+  };
+  const server = await listen(createRequestListener({
+    root,
+    store,
+    availabilityHandler: async () => ({ status: 200, jsonBody: { blocked: ['2026-12-05'] } })
+  }));
+  try {
+    const res = await request(server.address().port, '/api/availability?start=2026-12-01&end=2026-12-31');
+    assert.equal(res.status, 200);
+    const body = JSON.parse(res.body);
+    assert.deepEqual(body.blocked, [
+      '2026-12-05', '2026-12-10', '2026-12-11', '2026-12-20', '2026-12-21'
+    ]);
+  } finally { close(server); }
+});
+
+test('/api/availability fail-closar om intern kalender inte kan läsas', async () => {
+  const root = withTempRoot();
+  const store = {
+    async listCalendar() { throw new Error('nere'); }
+  };
+  const server = await listen(createRequestListener({
+    root,
+    store,
+    availabilityHandler: async () => ({ status: 200, jsonBody: { blocked: [] } })
+  }));
+  try {
+    const res = await request(server.address().port, '/api/availability?start=2026-12-01&end=2026-12-05');
+    assert.equal(res.status, 503);
+  } finally { close(server); }
+});
+
 test('POST /api/booking-requests nekas när reglerna inte är publicerade', async () => {
   const root = withTempRoot();
   const server = await listen(createRequestListener({ root }));

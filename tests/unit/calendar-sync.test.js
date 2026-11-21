@@ -18,6 +18,7 @@ const {
   resetStatusThrottle
 } = require('../../server/calendar/sync-status');
 const { createCalendarMonitor } = require('../../server/calendar/monitor');
+const { evaluateCalendarSafety, CODES } = require('../../server/calendar/safety');
 
 const SOURCE = 'https://calendar.example.test/synthetic.ics';
 const TOKEN = 'synthetic-calendar-token-0123456789abcdef';
@@ -35,6 +36,7 @@ function memoryStatusStore() {
   return {
     async getCalendarSyncStatus() { return status; },
     async saveCalendarSyncStatus(data) { status = { ...data }; },
+    write(data) { status = { ...data }; },
     read() { return status; }
   };
 }
@@ -181,6 +183,189 @@ test('exporten slår ihop intilliggande nätter och hoppar över Airbnb-importer
     now: new Date('2026-12-01T12:00:00Z')
   });
   assert.doesNotMatch(loops.body, /20261225/);
+});
+
+test('kalendersäkerheten stoppar tom kalender men tillåter enstaka legitima avbokningar', () => {
+  const base = {
+    eventCount: 10,
+    fingerprint: 'baseline',
+    snapshotFrom: '2026-11-01',
+    snapshotTo: '2027-01-01',
+    snapshotNights: ['2026-11-20', '2026-11-21', '2026-11-22']
+  };
+  const empty = evaluateCalendarSafety({
+    previous: base,
+    current: { eventCount: 0, fingerprint: 'empty', blockedCount: 0 },
+    from: '2026-11-20',
+    to: '2026-11-23'
+  });
+  assert.equal(empty.status, 'suspect');
+  assert.equal(empty.code, CODES.EMPTY);
+
+  const largeDrop = evaluateCalendarSafety({
+    previous: base,
+    current: { eventCount: 5, fingerprint: 'five', blockedCount: 3 },
+    from: '2026-11-20',
+    to: '2026-11-23'
+  });
+  assert.equal(largeDrop.status, 'suspect');
+  assert.equal(largeDrop.code, CODES.DROP);
+
+  const legitCancellation = evaluateCalendarSafety({
+    previous: base,
+    current: { eventCount: 9, fingerprint: 'nine', blockedCount: 2 },
+    from: '2026-11-20',
+    to: '2026-11-23'
+  });
+  assert.equal(legitCancellation.status, 'ok');
+
+  const rangeEmpty = evaluateCalendarSafety({
+    previous: base,
+    current: { eventCount: 10, fingerprint: 'changed', blockedCount: 0 },
+    from: '2026-11-20',
+    to: '2026-11-23'
+  });
+  assert.equal(rangeEmpty.status, 'suspect');
+  assert.equal(rangeEmpty.code, CODES.RANGE_EMPTY);
+});
+
+test('misstänkt kalender återgår automatiskt först när den inte är sämre än baslinjen', () => {
+  const base = {
+    eventCount: 10,
+    fingerprint: 'baseline',
+    safetyStatus: 'suspect',
+    safetyReason: CODES.EMPTY,
+    snapshotFrom: '2026-11-01',
+    snapshotTo: '2027-01-01',
+    snapshotNights: ['2026-11-20', '2026-11-21', '2026-11-22']
+  };
+  const recovered = evaluateCalendarSafety({
+    previous: base,
+    current: { eventCount: 10, fingerprint: 'baseline', blockedCount: 3 },
+    from: '2026-11-20',
+    to: '2026-11-23'
+  });
+  assert.equal(recovered.status, 'ok');
+  assert.equal(recovered.recovered, true);
+
+  const stillBad = evaluateCalendarSafety({
+    previous: base,
+    current: { eventCount: 9, fingerprint: 'lower', blockedCount: 2 },
+    from: '2026-11-20',
+    to: '2026-11-23'
+  });
+  assert.equal(stillBad.status, 'suspect');
+});
+
+test('gammal eller inkonsekvent HTTP-metadata stoppar direktbokning', () => {
+  const previous = {
+    eventCount: 4,
+    fingerprint: 'fp-1',
+    lastModified: 'Tue, 01 Dec 2026 12:00:00 GMT',
+    calendarEtag: '"etag-1"'
+  };
+  const stale = evaluateCalendarSafety({
+    previous,
+    current: { eventCount: 4, fingerprint: 'fp-1', lastModified: 'Mon, 30 Nov 2026 12:00:00 GMT', etag: '"etag-1"' },
+    from: '2026-12-01',
+    to: '2026-12-03'
+  });
+  assert.equal(stale.code, CODES.STALE);
+
+  const inconsistent = evaluateCalendarSafety({
+    previous,
+    current: { eventCount: 4, fingerprint: 'fp-2', lastModified: 'Tue, 01 Dec 2026 12:00:00 GMT', etag: '"etag-1"' },
+    from: '2026-12-01',
+    to: '2026-12-03',
+    now: new Date('2026-12-01T13:00:00Z')
+  });
+  assert.equal(inconsistent.code, CODES.INCONSISTENT);
+});
+
+test('första tomma kalendern accepteras men nästa tomma stoppas mot känd baslinje', async () => {
+  const store = memoryStatusStore();
+  const emptyFetch = async () => new Response(calendar(), {
+    status: 200, headers: { 'Content-Type': 'text/calendar' }
+  });
+  const first = await handleAvailability(range(), context(), {
+    calendarUrl: SOURCE,
+    calendarStatusStore: store,
+    forceStatusWrite: true,
+    statusSource: 'test',
+    fetchImpl: emptyFetch
+  });
+  assert.equal(first.status, 200);
+  assert.equal(store.read().eventCount, 0);
+
+  store.write({
+    ...store.read(),
+    eventCount: 10,
+    fingerprint: 'known',
+    snapshotFrom: '2026-12-01',
+    snapshotTo: '2027-02-01',
+    snapshotNights: ['2026-12-01', '2026-12-02', '2026-12-03']
+  });
+  const second = await handleAvailability(range('2026-12-01', '2026-12-05'), context(), {
+    calendarUrl: SOURCE,
+    calendarStatusStore: store,
+    forceStatusWrite: true,
+    statusSource: 'test',
+    fetchImpl: emptyFetch
+  });
+  assert.equal(second.status, 503);
+  assert.equal(second.jsonBody.code, CODES.EMPTY);
+  assert.equal(store.read().safetyStatus, 'suspect');
+});
+
+test('exporten hoppar över utgången reservation men behåller bekräftad bokning', async () => {
+  const rows = [
+    { night: '2026-12-10', resource: 'main', type: 'RESERVATION', reference: 'SK-STALE', source: 'DIRECT' },
+    { night: '2026-12-11', resource: 'main', type: 'RESERVATION', reference: 'SK-STALE', source: 'DIRECT' },
+    { night: '2026-12-12', resource: 'main', type: 'BOOKING', reference: 'SK-OK', source: 'DIRECT' }
+  ];
+  const store = {
+    async listCalendar() { return rows; },
+    async listBlockingBookings() { return []; },
+    async getByReference(reference) {
+      if (reference === 'SK-OK') return { record: { statusCode: 'CONFIRMED' } };
+      return { record: { statusCode: 'EXPIRED', reservation: { status: 'RELEASED' } } };
+    }
+  };
+  const result = await handleCalendarExport({ token: TOKEN }, {}, {
+    exportToken: TOKEN,
+    store,
+    now: new Date('2026-12-01T12:00:00Z')
+  });
+  assert.equal(result.status, 200);
+  assert.doesNotMatch(result.body, /DTSTART;VALUE=DATE:20261210/);
+  assert.doesNotMatch(result.body, /DTSTART;VALUE=DATE:20261211/);
+  assert.match(result.body, /DTSTART;VALUE=DATE:20261212/);
+});
+
+test('exporten hoppar över kvarvarande rad för avbokad bokning', async () => {
+  const rows = [
+    { night: '2026-12-20', resource: 'main', type: 'BOOKING', reference: 'SK-CANCELLED', source: 'DIRECT' },
+    { night: '2026-12-21', resource: 'main', type: 'BOOKING', reference: 'SK-OK', source: 'DIRECT' }
+  ];
+  const store = {
+    async listCalendar() { return rows; },
+    async listBlockingBookings() { return []; },
+    async getByReference(reference) {
+      return {
+        record: {
+          statusCode: reference === 'SK-CANCELLED' ? 'CANCELLED' : 'CONFIRMED'
+        }
+      };
+    }
+  };
+  const result = await handleCalendarExport({ token: TOKEN }, {}, {
+    exportToken: TOKEN,
+    store,
+    now: new Date('2026-12-01T12:00:00Z')
+  });
+  assert.equal(result.status, 200);
+  assert.doesNotMatch(result.body, /DTSTART;VALUE=DATE:20261220/);
+  assert.match(result.body, /DTSTART;VALUE=DATE:20261221/);
 });
 
 test('övervakningen upptäcker konflikt mellan Airbnb-blockering och intern bokning', async () => {

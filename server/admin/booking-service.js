@@ -461,11 +461,55 @@ async function lockCalendar(repo, record, principal, now) {
   return { created };
 }
 
-async function releaseCalendar(repo, reference) {
-  const rows = await repo.listCalendarByReference(reference);
-  for (const row of rows) {
-    await repo.deleteCalendarNight(row.night ?? row.RowKey, reference, { resource: row.resource }).catch(() => {});
+const RELEASE_ATTEMPTS = 3;
+const RELEASE_RETRY_DELAY_MS = 100;
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function releaseCalendar(repo, reference, options = {}) {
+  let rows;
+  try {
+    rows = await repo.listCalendarByReference(reference);
+  } catch (error) {
+    options.warn?.(`Kalenderrader kunde inte läsas för ${reference}.`);
+    return { released: [], failed: [], listingFailed: true, error };
   }
+  const released = [];
+  const failed = [];
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const night = row.night ?? row.RowKey;
+    let lastError;
+    let deleted = false;
+    for (let attempt = 0; attempt < RELEASE_ATTEMPTS; attempt++) {
+      try {
+        await repo.deleteCalendarNight(night, reference, { resource: row.resource });
+        deleted = true;
+        break;
+      } catch (error) {
+        lastError = error;
+        if (attempt + 1 < RELEASE_ATTEMPTS) {
+          await wait(Number(options.retryDelayMs ?? RELEASE_RETRY_DELAY_MS) * (attempt + 1));
+        }
+      }
+    }
+    if (deleted) {
+      released.push(night);
+    } else {
+      failed.push({
+        night,
+        resource: row.resource ?? 'main',
+        reason: lastError?.message ?? 'delete_failed'
+      });
+    }
+  }
+  if (failed.length) {
+    options.warn?.(
+      `Kvarvarande kalenderblockeringar för ${reference}: ${failed.map((item) => item.night).join(', ')}`
+    );
+  }
+  return { released, failed, listingFailed: false };
 }
 
 // Håller extrahusets kalenderrad i takt med att tillvalet ändras på en
@@ -1030,7 +1074,22 @@ async function changeStatus(repo, principal, reference, action, body = {}, optio
 
   try {
     const updated = await repo.updateRequest(record, { ifMatch: raw.etag });
-    if (nextStatus === 'CANCELLED') await releaseCalendar(repo, record.reference);
+    let calendarRelease = null;
+    if (nextStatus === 'CANCELLED') {
+      calendarRelease = await releaseCalendar(repo, record.reference, { warn: context.warn });
+      if (calendarRelease.failed.length || calendarRelease.listingFailed) {
+        await audit(repo, principal, 'CALENDAR_RELEASE_FAILED', record, {
+          fromStatus,
+          toStatus: nextStatus,
+          reason: 'Kalenderblockeringar kunde inte tas bort fullständigt.',
+          changes: {
+            failedNights: calendarRelease.failed.map((item) => item.night),
+            listingFailed: calendarRelease.listingFailed === true
+          },
+          context
+        });
+      }
+    }
     await audit(repo, principal, auditAction, record, {
       fromStatus,
       toStatus: nextStatus,
@@ -1080,6 +1139,12 @@ async function changeStatus(repo, principal, reference, action, body = {}, optio
         emailWarning: email.ok === false && !email.skipped
           ? 'Mejlet kunde inte köas. Kontrollera historiken.'
           : '',
+        calendarReleaseWarning: calendarRelease && (calendarRelease.failed.length || calendarRelease.listingFailed)
+          ? 'En eller flera kalenderblockeringar kunde inte tas bort. Kontrollera kalendern och frigör datum manuellt.'
+          : '',
+        calendarReleaseFailedNights: calendarRelease
+          ? calendarRelease.failed.map((item) => item.night)
+          : [],
         cancelledPendingMail: cancelledPending
       }
     };

@@ -54,6 +54,7 @@ const {
   openDirectBooking,
   closeDirectBooking,
   setAutomaticDirectBooking,
+  approveCalendarSafety,
   directBookingOverview
 } = require('./direct-booking-service');
 
@@ -417,6 +418,21 @@ async function handleApi(req, res, url, context) {
     const parsed = await readBodyOrError(req, res);
     if (!parsed) return;
     const result = await setAutomaticDirectBooking(
+      repository,
+      principal,
+      parsed.body,
+      serviceOptions(context),
+      { warn: context.warn }
+    );
+    sendJson(req, res, result.status, result.jsonBody);
+    return;
+  }
+
+  if (pathname === '/api/admin/direct-booking/calendar/approve' && req.method === 'POST') {
+    if (!guardWrite(req, res, context)) return;
+    const parsed = await readBodyOrError(req, res);
+    if (!parsed) return;
+    const result = await approveCalendarSafety(
       repository,
       principal,
       parsed.body,

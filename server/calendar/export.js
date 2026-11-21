@@ -18,6 +18,7 @@
 
 const crypto = require('node:crypto');
 const { createStore } = require('../booking/store');
+const { auditReservations } = require('./reservation-audit');
 
 const DAY = 86400000;
 const DEFAULT_HORIZON_DAYS = 730;
@@ -73,11 +74,17 @@ function eventKey(row) {
 // Bygger en nattkarta av kalenderrader och äldre bokningar som saknar
 // kalenderrader. Varje natt får en stabil gruppnyckel så att intilliggande
 // nätter med samma bokning kan slås samman till ett VEVENT.
-function collectNights(rows, blockingBookings) {
+function collectNights(rows, blockingBookings, activeReferences = null) {
   const nights = new Map();
+  const referenceAllowed = (row) => {
+    if (!activeReferences) return true;
+    const reference = String(row.reference ?? '').trim();
+    return Boolean(reference) && activeReferences.has(reference);
+  };
   for (const row of Array.isArray(rows) ? rows : []) {
     if (row.resource && row.resource !== 'main') continue;
     if (!EXPORT_TYPES.has(String(row.type ?? '').toUpperCase())) continue;
+    if (!referenceAllowed(row)) continue;
     const source = String(row.source ?? '').toUpperCase();
     if (source === 'AIRBNB' || source === 'ICAL') continue;
     const night = String(row.night ?? row.RowKey ?? '');
@@ -119,10 +126,17 @@ function escapeIcal(value) {
     .replace(/\r?\n/g, '\\n');
 }
 
-function buildCalendar({ rows, blockingBookings, now = new Date(), horizonDays = DEFAULT_HORIZON_DAYS }) {
+function buildCalendar({
+  rows,
+  blockingBookings,
+  activeReservationReferences = null,
+  now = new Date(),
+  horizonDays = DEFAULT_HORIZON_DAYS
+}) {
   const from = todayKey(now);
   const to = addDays(from, Math.max(1, Math.min(Number(horizonDays) || DEFAULT_HORIZON_DAYS, 1095)));
-  const nights = collectNights(rows, blockingBookings).filter((item) => item.night >= from && item.night < to);
+  const nights = collectNights(rows, blockingBookings, activeReservationReferences)
+    .filter((item) => item.night >= from && item.night < to);
   const stamp = timestamp(now);
   const lines = [
     'BEGIN:VCALENDAR',
@@ -177,7 +191,24 @@ async function handleCalendarExport(request, context = {}, options = {}) {
     if (typeof store.listBlockingBookings === 'function') {
       blockingBookings = await store.listBlockingBookings(from, to) ?? [];
     }
-    const calendar = buildCalendar({ rows, blockingBookings, now, horizonDays });
+    const audit = await auditReservations(rows, {
+      now,
+      getRecord: typeof store.getByReference === 'function'
+        ? async (reference) => (await store.getByReference(reference))?.record ?? null
+        : null
+    });
+    if (audit.issues.length) {
+      context.warn?.(
+        `Kalenderexporten hittade ${audit.totalIssues} kalenderavvikelse(r). Endast aktiva referenser exporteras.`
+      );
+    }
+    const calendar = buildCalendar({
+      rows,
+      blockingBookings,
+      activeReservationReferences: audit.active,
+      now,
+      horizonDays
+    });
     return { status: 200, headers: EXPORT_HEADERS, body: calendar.body };
   } catch {
     context.warn?.('Kalenderexporten kunde inte skapas.');

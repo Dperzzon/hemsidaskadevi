@@ -8,6 +8,7 @@ const http = require('node:http');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { handleAvailability } = require('./calendar/availability');
+const { loadInternalBlocked } = require('./calendar/internal');
 const { handleCalendarExport } = require('./calendar/export');
 const { createCalendarMonitor } = require('./calendar/monitor');
 const { handleBookingRequest, createRateLimiter } = require('./booking/requests');
@@ -328,6 +329,8 @@ function createRequestListener(options = {}) {
     ((request, context) => handleStripeWebhook(request, context, {
       ...options,
       ...paymentOptions,
+      availabilityHandler,
+      availability: options.availability,
       store: createStore(options)
     }));
   const paymentPageHandler = options.paymentPageHandler ??
@@ -364,6 +367,18 @@ function createRequestListener(options = {}) {
       store: createStore(options)
     }));
   const warn = options.warn ?? ((message) => console.error(message));
+  let availabilityStore = options.availabilityStore ?? options.store ?? null;
+  let availabilityStoreResolved = Boolean(availabilityStore);
+  function resolveAvailabilityStore() {
+    if (availabilityStoreResolved) return availabilityStore || null;
+    availabilityStoreResolved = true;
+    try {
+      availabilityStore = createStore(options);
+    } catch {
+      availabilityStore = null;
+    }
+    return availabilityStore;
+  }
   // Kanoniskt värdnamn: rotdomänen 301-omdirigeras till www. Endast exakt
   // angivna apex-värdnamn påverkas — azurewebsites.net, localhost och övriga
   // värdar serveras som vanligt, så redirect-loops kan inte uppstå. API-anrop
@@ -394,9 +409,33 @@ function createRequestListener(options = {}) {
 
     if (url.pathname === '/api/availability' && (req.method === 'GET' || req.method === 'HEAD')) {
       const context = { warn };
+      const mustMergeInternal = options.availabilityStore !== undefined ||
+        options.store !== undefined || isConfigured();
       try {
-        const result = await availabilityHandler({ query: url.searchParams }, context, options.availability ?? {});
-        sendJson(res, result.status, result.jsonBody, result.headers);
+        const store = mustMergeInternal ? resolveAvailabilityStore() : null;
+        if (mustMergeInternal && !store) {
+          sendJson(res, 503, { error: 'Tillgängligheten är för tillfället okänd.' });
+          return;
+        }
+        const result = await availabilityHandler({ query: url.searchParams }, context, {
+          ...(options.availability ?? {}),
+          calendarStatusStore: store ?? options.availability?.calendarStatusStore
+        });
+        if (result.status !== 200 || !Array.isArray(result.jsonBody?.blocked) || !mustMergeInternal) {
+          sendJson(res, result.status, result.jsonBody, result.headers);
+          return;
+        }
+        const start = url.searchParams.get('start');
+        const end = url.searchParams.get('end');
+        let internal;
+        try {
+          internal = await loadInternalBlocked(store, start, end);
+        } catch {
+          sendJson(res, 503, { error: 'Tillgängligheten är för tillfället okänd.' });
+          return;
+        }
+        const blocked = [...new Set([...result.jsonBody.blocked, ...internal])].sort();
+        sendJson(res, 200, { ...result.jsonBody, blocked }, result.headers);
       } catch {
         sendJson(res, 503, { error: 'Tillgängligheten är för tillfället okänd.' });
       }

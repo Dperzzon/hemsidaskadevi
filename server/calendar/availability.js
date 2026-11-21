@@ -3,6 +3,7 @@
 const { Worker } = require('node:worker_threads');
 const path = require('node:path');
 const { recordCalendarStatus } = require('./sync-status');
+const { evaluateCalendarSafety } = require('./safety');
 
 const MAX_BYTES = 1024 * 1024;
 const FETCH_TIMEOUT_MS = 5000;
@@ -115,7 +116,11 @@ async function fetchCalendarOnce(url, fetchImpl, timeoutMs) {
       }
       const text = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks));
       if (!looksLikeCalendar(text)) throw new CalendarFetchError('INVALID_FORMAT', true);
-      return text;
+      return {
+        text,
+        lastModified: response.headers.get('last-modified') ?? '',
+        etag: response.headers.get('etag') ?? ''
+      };
     }
     throw new CalendarFetchError('REDIRECT_INVALID');
   } catch (error) {
@@ -132,7 +137,7 @@ function delay(ms) {
 
 // Begränsade återförsök: endast nätverksfel, timeout, 429 och 5xx försöks igen.
 // Svaret är alltid en ny HTTP-hämtning — aldrig ett cachat kalenderobjekt.
-async function fetchCalendar(url, fetchImpl, timeoutOrOptions = FETCH_TIMEOUT_MS) {
+async function fetchCalendarWithMeta(url, fetchImpl, timeoutOrOptions = FETCH_TIMEOUT_MS) {
   const options = typeof timeoutOrOptions === 'number'
     ? { timeoutMs: timeoutOrOptions }
     : (timeoutOrOptions ?? {});
@@ -152,7 +157,11 @@ async function fetchCalendar(url, fetchImpl, timeoutOrOptions = FETCH_TIMEOUT_MS
   throw lastError;
 }
 
-function parseCalendar(text, start, end, timeoutMs = PARSE_TIMEOUT_MS) {
+async function fetchCalendar(url, fetchImpl, timeoutOrOptions = FETCH_TIMEOUT_MS) {
+  return (await fetchCalendarWithMeta(url, fetchImpl, timeoutOrOptions)).text;
+}
+
+function parseCalendarWithMeta(text, start, end, timeoutMs = PARSE_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     const worker = new Worker(path.join(__dirname, 'calendar-worker.js'), {
       workerData: { text, start, end },
@@ -172,7 +181,13 @@ function parseCalendar(text, start, end, timeoutMs = PARSE_TIMEOUT_MS) {
     }, timeoutMs);
     worker.once('message', (message) => {
       if (!message || !Array.isArray(message.blocked)) finish(true);
-      else finish(false, message.blocked);
+      else finish(false, {
+        blocked: message.blocked,
+        meta: {
+          eventCount: Number(message.meta?.eventCount ?? 0),
+          fingerprint: String(message.meta?.fingerprint ?? '')
+        }
+      });
     });
     worker.once('error', () => finish(true));
     worker.once('exit', (code) => {
@@ -181,7 +196,12 @@ function parseCalendar(text, start, end, timeoutMs = PARSE_TIMEOUT_MS) {
   });
 }
 
+async function parseCalendar(text, start, end, timeoutMs = PARSE_TIMEOUT_MS) {
+  return (await parseCalendarWithMeta(text, start, end, timeoutMs)).blocked;
+}
+
 async function recordStatus(options, outcome, now) {
+  if (options.recordStatus === false) return;
   const store = options.calendarStatusStore;
   if (!store) return;
   try {
@@ -200,27 +220,115 @@ async function handleAvailability(request, context, options = {}) {
   const from = query.get('start');
   const to = query.get('end');
   const statusSource = options.statusSource ?? 'availability';
+  const store = options.calendarStatusStore;
   let stage = 'konfiguration';
+  let previous = null;
+  let statusLookupFailed = false;
+  if (store && typeof store.getCalendarSyncStatus === 'function') {
+    try {
+      previous = await store.getCalendarSyncStatus();
+    } catch {
+      statusLookupFailed = true;
+    }
+  }
+  if (statusLookupFailed && options.calendarSafetyEnabled !== false &&
+      options.calendarSafetyRequired !== false) {
+    await recordStatus(options, {
+      ok: false,
+      errorCode: 'CALENDAR_STATUS_UNAVAILABLE',
+      source: statusSource,
+      from,
+      to
+    }, now);
+    context?.warn?.('Kalenderns säkerhetsstatus kunde inte läsas.');
+    return {
+      status: 503,
+      headers,
+      jsonBody: {
+        error: 'Tillgängligheten kan inte verifieras säkert just nu.',
+        code: 'CALENDAR_STATUS_UNAVAILABLE'
+      }
+    };
+  }
   try {
     const configuredUrl = options.calendarUrl ?? process.env.AIRBNB_ICAL_URL;
     if (!configuredUrl) throw new CalendarFetchError('NOT_CONFIGURED');
     stage = 'hämtning';
-    const text = await fetchCalendar(
+    const fetched = await fetchCalendarWithMeta(
       configuredUrl,
       options.fetchImpl || fetch,
       { timeoutMs: options.fetchTimeoutMs, maxAttempts: options.fetchMaxAttempts }
     );
     stage = 'tolkning';
-    const blocked = await parseCalendar(text, from, to, options.parseTimeoutMs);
-    await recordStatus(options, {
-      ok: true,
-      blockedCount: blocked.length,
-      nightsChecked: Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY),
-      source: statusSource,
-      from,
-      to
-    }, now);
-    return { status: 200, headers, jsonBody: { blocked } };
+    const parsed = await parseCalendarWithMeta(fetched.text, from, to, options.parseTimeoutMs);
+    const blocked = parsed.blocked;
+    const current = {
+      eventCount: parsed.meta.eventCount,
+      fingerprint: parsed.meta.fingerprint,
+      lastModified: fetched.lastModified,
+      etag: fetched.etag,
+      blockedCount: blocked.length
+    };
+    const safety = options.calendarSafetyEnabled === false || !previous
+      ? null
+      : evaluateCalendarSafety({ previous, current, from, to, now });
+    const suspect = safety?.status === 'suspect';
+    if (suspect) {
+      await recordStatus(options, {
+        ok: false,
+        errorCode: safety.code,
+        source: statusSource,
+        from,
+        to,
+        eventCount: current.eventCount,
+        fingerprint: current.fingerprint,
+        lastModified: current.lastModified,
+        calendarEtag: current.etag,
+        candidate: options.safetyReportOnly === true,
+        ...(options.safetyReportOnly === true
+          ? { snapshotFrom: from, snapshotTo: to, snapshotNights: blocked }
+          : {}),
+        safety
+      }, now);
+      if (options.safetyReportOnly !== true) {
+        context?.warn?.(`Kalenderns tillgänglighet kunde inte verifieras säkert (${safety.code}).`);
+        return {
+          status: 503,
+          headers,
+          jsonBody: {
+            error: 'Tillgängligheten kan inte verifieras säkert just nu.',
+            code: safety.code
+          }
+        };
+      }
+    } else {
+      await recordStatus(options, {
+        ok: true,
+        blockedCount: blocked.length,
+        nightsChecked: Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY),
+        source: statusSource,
+        from,
+        to,
+        eventCount: current.eventCount,
+        fingerprint: current.fingerprint,
+        lastModified: current.lastModified,
+        calendarEtag: current.etag,
+        safety
+      }, now);
+    }
+    const jsonBody = { blocked };
+    if (options.includeMeta === true) {
+      jsonBody.meta = {
+        eventCount: current.eventCount,
+        fingerprint: current.fingerprint,
+        lastModified: current.lastModified,
+        etag: current.etag
+      };
+    }
+    if (options.includeSafety === true || options.safetyReportOnly === true) {
+      jsonBody.safety = safety;
+    }
+    return { status: 200, headers, jsonBody };
   } catch (error) {
     const code = error instanceof CalendarFetchError
       ? error.code
@@ -240,7 +348,9 @@ async function handleAvailability(request, context, options = {}) {
 module.exports = {
   handleAvailability,
   fetchCalendar,
+  fetchCalendarWithMeta,
   parseCalendar,
+  parseCalendarWithMeta,
   validateRange,
   CalendarFetchError,
   MAX_BYTES,

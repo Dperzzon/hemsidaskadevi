@@ -496,6 +496,16 @@
           window.location.reload();
           return;
         }
+        if (type === 'calendar-safety-approve') {
+          await api('/api/admin/direct-booking/calendar/approve', {
+            body: {
+              note: formValue(form, 'note'),
+              confirmEmpty: checked(form, 'confirmEmpty')
+            }
+          });
+          window.location.reload();
+          return;
+        }
         if (type === 'direct-booking-open') {
           await api('/api/admin/direct-booking/open', {
             body: {

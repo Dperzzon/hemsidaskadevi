@@ -103,6 +103,23 @@ test('a valid empty response still displays the calendar', async () => {
   assert.equal(calendar.description.hidden, false);
 });
 
+test('ett datum som blir ledigt tas bort från kalendern vid ny hämtning', async () => {
+  let calls = 0;
+  const calendar = createCalendar(async () => {
+    calls += 1;
+    return response({ blocked: calls === 1 ? ['2027-03-10'] : [] });
+  });
+  vm.runInContext('state.base = { y: 2027, m: 2 }', calendar.context);
+  await calendar.load();
+  assert.match(calendar.container.innerHTML, /cal-booked[^"]*" data-date="2027-03-10"/);
+  calendar.handlers['cal-next']();
+  await new Promise((resolve) => setImmediate(resolve));
+  calendar.handlers['cal-prev']();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.doesNotMatch(calendar.container.innerHTML, /cal-booked[^"]*" data-date="2027-03-10"/);
+  assert.match(calendar.container.innerHTML, /cal-selectable[^"]*" data-date="2027-03-10"/);
+});
+
 test('loading and timeout never display available dates', async () => {
   const calendar = createCalendar(
     (url, options) => new Promise((resolve, reject) => {

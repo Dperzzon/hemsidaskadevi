@@ -170,7 +170,8 @@ async function callWebhook(store, eventObject) {
   return handleStripeWebhook(
     { rawBody: Buffer.from(payload), signature: signStripePayload(payload, SECRET, NOW_SECONDS) },
     { warn: () => {} },
-    { enabled: true, webhookSecret: SECRET, store, now: NOW, outboxEnabled: true }
+    { enabled: true, webhookSecret: SECRET, store, now: NOW, outboxEnabled: true,
+      availabilityHandler: async () => ({ status: 200, jsonBody: { blocked: [] } }) }
   );
 }
 

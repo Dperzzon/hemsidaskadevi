@@ -10,9 +10,21 @@
 
 const crypto = require('node:crypto');
 const { handleAvailability } = require('../calendar/availability');
+const { auditReservations } = require('../calendar/reservation-audit');
+const { normalizeNights } = require('../calendar/safety');
 
 const MAX_NIGHTS = 93;
 const DAY = 86400000;
+
+function addDays(dateKey, count) {
+  return new Date(Date.parse(`${dateKey}T00:00:00Z`) + count * DAY).toISOString().slice(0, 10);
+}
+
+function todayKey(now) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Stockholm', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(now);
+}
 const CONFIRMATIONS = [
   'confirmAirbnbBlocked',
   'confirmNoAirbnbGuest',
@@ -264,6 +276,86 @@ async function setAutomaticDirectBooking(repository, principal, body, options = 
   return { status: 200, jsonBody: { enabled } };
 }
 
+async function approveCalendarSafety(repository, principal, body = {}, options = {}, _context = {}) {
+  if (!principal?.roles?.includes('Owner')) {
+    return error(403, 'Endast Owner kan godkänna en misstänkt kalenderbild.', 'FORBIDDEN');
+  }
+  const now = options.now ?? new Date();
+  const status = await repository.getCalendarSyncStatus();
+  if (!status || status.safetyStatus !== 'suspect') {
+    return error(409, 'Det finns ingen misstänkt kalenderbild att godkänna.', 'NO_SUSPECTED_CALENDAR');
+  }
+  if (!status.suspectedSnapshotFrom || !status.suspectedSnapshotTo) {
+    return error(409, 'Kalendern har inte hunnit kontrolleras i hela intervallet ännu. Försök igen efter nästa övervakningskörning.', 'CANDIDATE_MISSING');
+  }
+  const candidateEventCount = Number(status.suspectedEventCount ?? 0);
+  if (candidateEventCount <= 0 && body.confirmEmpty !== true) {
+    return error(400, 'Kalendern är tom. Bekräfta uttryckligen att även en tom kalender ska godkännas innan direktbokning kan öppnas.', 'EMPTY_CALENDAR_NOT_CONFIRMED');
+  }
+  const candidate = normalizeNights(status.suspectedSnapshotNights);
+  const mergeFrom = status.suspectedSnapshotFrom;
+  const mergeTo = status.suspectedSnapshotTo;
+  const baselineOutside = normalizeNights(status.snapshotNights)
+    .filter((night) => night < mergeFrom || night >= mergeTo);
+  const snapshotNights = normalizeNights([...baselineOutside, ...candidate]);
+  const snapshotFrom = status.snapshotFrom && status.snapshotFrom < mergeFrom
+    ? status.snapshotFrom
+    : mergeFrom;
+  const snapshotTo = status.snapshotTo && status.snapshotTo > mergeTo
+    ? status.snapshotTo
+    : mergeTo;
+  const note = String(body.note ?? '').trim().slice(0, 1000);
+  const updated = {
+    ...status,
+    status: 'ok',
+    lastErrorAt: '',
+    lastErrorCode: '',
+    consecutiveFailures: 0,
+    lastSuccessAt: status.suspectedAt || now.toISOString(),
+    blockedNights: snapshotNights.length,
+    snapshotFrom,
+    snapshotTo,
+    snapshotNights,
+    eventCount: candidateEventCount,
+    fingerprint: status.suspectedFingerprint ?? '',
+    safetyStatus: 'ok',
+    safetyReason: '',
+    safetySince: '',
+    suspectedEventCount: 0,
+    suspectedFingerprint: '',
+    suspectedSnapshotFrom: '',
+    suspectedSnapshotTo: '',
+    suspectedSnapshotNights: [],
+    suspectedAt: ''
+  };
+  await repository.saveCalendarSyncStatus(updated);
+  const actor = actorOf(principal);
+  try {
+    await repository.appendHistory({
+      idempotencyKey: `calendar-safety-${now.getTime()}`,
+      reference: 'AIRBNB-CALENDAR',
+      action: 'CALENDAR_SAFETY_APPROVED',
+      fromStatus: 'SUSPECT',
+      toStatus: 'OK',
+      changes: JSON.stringify({
+        eventCount: candidateEventCount,
+        snapshotFrom,
+        snapshotTo,
+        blockedNights: snapshotNights.length,
+        emptyApproved: candidateEventCount <= 0
+      }),
+      reason: note,
+      actorId: actor.id,
+      actorName: actor.name,
+      correlationId: crypto.randomUUID(),
+      at: now.toISOString()
+    });
+  } catch {
+    // Historiken får inte blockera en redan godkänd kalenderbild.
+  }
+  return { status: 200, jsonBody: { approved: true, eventCount: candidateEventCount, blockedNights: snapshotNights.length } };
+}
+
 async function directBookingOverview(repository, now = new Date()) {
   const [all, approvals, setting] = await Promise.all([
     repository.allBookings(now),
@@ -279,6 +371,23 @@ async function directBookingOverview(repository, now = new Date()) {
     }
   }
   const direct = all.filter((booking) => booking.bookingSource === 'DIRECT');
+  let reservationIssues = [];
+  let reservationIssueCount = 0;
+  try {
+    const from = todayKey(now);
+    const to = addDays(from, 730);
+    const rows = await repository.listCalendar(from, to);
+    const byReference = new Map(all.map((booking) => [booking.reference, booking]));
+    const audit = await auditReservations(rows, {
+      now,
+      getRecord: async (reference) => byReference.get(reference) ?? null
+    });
+    reservationIssues = audit.issues;
+    reservationIssueCount = audit.totalIssues;
+  } catch {
+    reservationIssues = [];
+    reservationIssueCount = 0;
+  }
   return {
     automaticEnabled: setting ? setting.enabled === true : true,
     setting: setting ?? null,
@@ -286,7 +395,9 @@ async function directBookingOverview(repository, now = new Date()) {
     approvals: approvals ?? [],
     reservations: direct.filter((booking) => booking.statusCode === 'PENDING_PAYMENT'),
     confirmed: direct.filter((booking) => booking.statusCode === 'CONFIRMED'),
-    reconciliation: direct.filter((booking) => booking.statusCode === 'RECONCILIATION')
+    reconciliation: direct.filter((booking) => booking.statusCode === 'RECONCILIATION'),
+    reservationIssues,
+    reservationIssueCount
   };
 }
 
@@ -294,6 +405,7 @@ module.exports = {
   openDirectBooking,
   closeDirectBooking,
   setAutomaticDirectBooking,
+  approveCalendarSafety,
   directBookingOverview,
   validateRange,
   CONFIRMATIONS,

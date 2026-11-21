@@ -136,7 +136,7 @@ async function checkAirbnbAutomatic(from, to, options, store) {
     return { ok: false, code: 'AIRBNB_UNAVAILABLE' };
   }
   if (availability.status !== 200 || !Array.isArray(availability.jsonBody?.blocked)) {
-    return { ok: false, code: 'AIRBNB_UNAVAILABLE' };
+    return { ok: false, code: availability.jsonBody?.code ?? 'AIRBNB_UNAVAILABLE' };
   }
   const blocked = nightKeys(from, to)
     .filter((night) => availability.jsonBody.blocked.includes(night));

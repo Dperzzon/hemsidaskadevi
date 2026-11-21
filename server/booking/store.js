@@ -247,6 +247,15 @@ function toEntity(record, partition) {
 const CALENDAR_SYNC_PARTITION = 'calendarsync';
 const CALENDAR_SYNC_ROW = 'airbnb';
 
+function parseJsonArray(value) {
+  try {
+    const parsed = JSON.parse(value ?? '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 function fromCalendarSyncEntity(entity) {
   if (!entity) return null;
   return {
@@ -258,17 +267,26 @@ function fromCalendarSyncEntity(entity) {
     consecutiveFailures: Number(entity.consecutiveFailures ?? 0),
     blockedNights: Number(entity.blockedNights ?? 0),
     nightsChecked: Number(entity.nightsChecked ?? 0),
-    conflicts: (() => {
-      try {
-        const value = JSON.parse(entity.conflicts ?? '[]');
-        return Array.isArray(value) ? value : [];
-      } catch {
-        return [];
-      }
-    })(),
+    conflicts: parseJsonArray(entity.conflicts),
     source: entity.source ?? '',
     checkedFrom: entity.checkedFrom ?? '',
     checkedTo: entity.checkedTo ?? '',
+    eventCount: Number(entity.eventCount ?? 0),
+    fingerprint: entity.fingerprint ?? '',
+    lastModified: entity.lastModified ?? '',
+    calendarEtag: entity.calendarEtag ?? '',
+    snapshotFrom: entity.snapshotFrom ?? '',
+    snapshotTo: entity.snapshotTo ?? '',
+    snapshotNights: parseJsonArray(entity.snapshotNights),
+    safetyStatus: entity.safetyStatus === 'suspect' ? 'suspect' : 'ok',
+    safetyReason: entity.safetyReason ?? '',
+    safetySince: entity.safetySince ?? '',
+    suspectedEventCount: Number(entity.suspectedEventCount ?? 0),
+    suspectedFingerprint: entity.suspectedFingerprint ?? '',
+    suspectedSnapshotFrom: entity.suspectedSnapshotFrom ?? '',
+    suspectedSnapshotTo: entity.suspectedSnapshotTo ?? '',
+    suspectedSnapshotNights: parseJsonArray(entity.suspectedSnapshotNights),
+    suspectedAt: entity.suspectedAt ?? '',
     etag: entity['odata.etag'] ?? entity.etag ?? ''
   };
 }
@@ -288,7 +306,23 @@ function calendarSyncEntity(data) {
     conflicts: JSON.stringify(Array.isArray(data.conflicts) ? data.conflicts : []),
     source: data.source ?? '',
     checkedFrom: data.checkedFrom ?? '',
-    checkedTo: data.checkedTo ?? ''
+    checkedTo: data.checkedTo ?? '',
+    eventCount: String(data.eventCount ?? 0),
+    fingerprint: data.fingerprint ?? '',
+    lastModified: data.lastModified ?? '',
+    calendarEtag: data.calendarEtag ?? '',
+    snapshotFrom: data.snapshotFrom ?? '',
+    snapshotTo: data.snapshotTo ?? '',
+    snapshotNights: JSON.stringify(Array.isArray(data.snapshotNights) ? data.snapshotNights : []),
+    safetyStatus: data.safetyStatus === 'suspect' ? 'suspect' : 'ok',
+    safetyReason: data.safetyReason ?? '',
+    safetySince: data.safetySince ?? '',
+    suspectedEventCount: String(data.suspectedEventCount ?? 0),
+    suspectedFingerprint: data.suspectedFingerprint ?? '',
+    suspectedSnapshotFrom: data.suspectedSnapshotFrom ?? '',
+    suspectedSnapshotTo: data.suspectedSnapshotTo ?? '',
+    suspectedSnapshotNights: JSON.stringify(Array.isArray(data.suspectedSnapshotNights) ? data.suspectedSnapshotNights : []),
+    suspectedAt: data.suspectedAt ?? ''
   };
 }
 

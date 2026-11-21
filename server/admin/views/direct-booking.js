@@ -26,7 +26,39 @@ const SYNC_ERROR_LABELS = {
   PARSE_ERROR: 'Kalendern kunde inte tolkas',
   RESPONSE_TOO_LARGE: 'Kalenderfilen var för stor',
   REDIRECT_INVALID: 'Ogiltig omdirigering',
-  REDIRECT_UNTRUSTED: 'Omdirigering till otillåtet mål'
+  REDIRECT_UNTRUSTED: 'Omdirigering till otillåtet mål',
+  CALENDAR_EMPTY: 'Kalendern är tom trots tidigare bokningar',
+  CALENDAR_DROP: 'Onormalt stor minskning av bokningar',
+  CALENDAR_RANGE_EMPTY: 'Tidigare blockeringar saknas i intervallet',
+  CALENDAR_INCONSISTENT: 'Innehållet ändrades utan att ETag/Last-Modified ändrades',
+  CALENDAR_STALE: 'Kalendern returnerar en äldre version',
+  CALENDAR_SUSPECT: 'Kalendern kunde inte verifieras',
+  CALENDAR_STATUS_UNAVAILABLE: 'Kalenderns säkerhetsstatus kunde inte läsas',
+  CALENDAR_CHECK_FAILED: 'Kalenderkontrollen misslyckades'
+};
+
+const RESERVATION_REASON_LABELS = {
+  orphan: 'Saknar bokning i databasen',
+  missing_reference: 'Saknar referens',
+  lookup_failed: 'Kunde inte slås upp',
+  expired: 'Har gått ut',
+  missing_expiry: 'Saknar giltighetstid och är för gammal',
+  in_flight: 'Pågående bokning',
+  confirmed_but_not_converted: 'Bekräftad men inte omvandlad till BOOKING',
+  status_cancelled: 'Avbokad',
+  status_declined: 'Avvisad',
+  status_expired: 'Utgången',
+  status_failed: 'Misslyckad betalning',
+  reconciliation: 'Avstämning krävs',
+  pending_with_booking_rows: 'Väntande betalning med bokningsrader',
+  status_reconciliation: 'Avstämning krävs',
+  status_unknown: 'Okänd status – blockeras av säkerhetsskäl',
+  reservation_released: 'Reservationen är frigjord',
+  reservation_expired: 'Reservationen har gått ut',
+  reservation_failed: 'Reservationen misslyckades',
+  reservation_cancelled: 'Reservationen är avbokad',
+  active_without_expiry: 'Aktiv utan giltighetstid',
+  active: 'Aktiv'
 };
 
 function syncErrorLabel(code) {
@@ -38,6 +70,7 @@ function syncErrorLabel(code) {
 
 function syncLevel(status) {
   if (!status) return 'unknown';
+  if (status.safetyStatus === 'suspect') return 'error';
   if (status.lastErrorCode) {
     return Number(status.consecutiveFailures ?? 0) >= 3 || !status.lastSuccessAt ? 'error' : 'warning';
   }
@@ -67,6 +100,9 @@ function syncStatusPanel(status) {
         ? `${escapeHtml(syncErrorLabel(status.lastErrorCode))} (${escapeHtml(formatDateTime(status.lastErrorAt))})`
         : '—'}</li>
       <li>Misslyckade försök i följd: ${escapeHtml(String(status?.consecutiveFailures ?? 0))}</li>
+      <li>Säkerhetsläge: ${status?.safetyStatus === 'suspect'
+        ? '<strong>Misstänkt – manuell granskning krävs</strong>'
+        : 'Verifierad'}</li>
       <li>Kontrollerat intervall: ${status?.checkedFrom
         ? `${escapeHtml(formatDateKey(status.checkedFrom))} – ${escapeHtml(formatDateKey(status.checkedTo))}`
         : '—'}</li>
@@ -74,6 +110,61 @@ function syncStatusPanel(status) {
     </ul>
     <p class="muted">Statusen bygger på en exporterad iCal-fil, inte realtidsdata. Även en lyckad hämtning kan
     vara fördröjd hos Airbnb. Vid fel eller osäkerhet stoppas alltid direktbetalning för berörda datum.</p>
+  </section>`;
+}
+
+function calendarSafetyPanel(status, canWrite) {
+  if (status?.safetyStatus !== 'suspect') return '';
+  const empty = Number(status.suspectedEventCount ?? 0) <= 0;
+  const nights = Array.isArray(status.suspectedSnapshotNights) ? status.suspectedSnapshotNights : [];
+  const form = canWrite
+    ? `<form class="inline-form" data-admin-form="calendar-safety-approve">
+        <input type="text" name="note" maxlength="1000" placeholder="Underlag för godkännandet (obligatoriskt vid tom kalender)">
+        ${empty ? `<label class="checkbox"><input type="checkbox" name="confirmEmpty" value="1"> Jag har verifierat att Airbnb-kalendern verkligen är tom och godkänner den som ny baslinje.</label>` : ''}
+        <button type="submit" class="btn btn-primary">Godkänn kalenderbilden</button>
+        <p class="form-error" data-form-error hidden></p>
+      </form>`
+    : '<p class="muted">Endast Owner kan godkänna en misstänkt kalenderbild.</p>';
+  return `<section class="panel" style="border-left:4px solid #b33;">
+    <h2>Kalendersäkerhet – manuell granskning krävs</h2>
+    <p><strong>Orsak:</strong> ${escapeHtml(syncErrorLabel(status.safetyReason || status.lastErrorCode))}</p>
+    <ul class="muted">
+      <li>Sedd sedan: ${escapeHtml(formatDateTime(status.safetySince))}</li>
+      <li>Misstänkt kalenderbild: ${escapeHtml(String(status.suspectedEventCount ?? 0))} aktiva event, ${nights.length} blockerade nätter</li>
+      <li>Kontrollerat intervall: ${status.suspectedSnapshotFrom
+        ? `${escapeHtml(formatDateKey(status.suspectedSnapshotFrom))} – ${escapeHtml(formatDateKey(status.suspectedSnapshotTo))}`
+        : '—'}</li>
+    </ul>
+    <p>Direktbetalning är stoppad för berörda datum tills kalenderbilden har granskats. Godkänn bara om du har verifierat att den nya bilden är korrekt i Airbnb. En tom kalender kräver särskild bekräftelse.</p>
+    ${form}
+  </section>`;
+}
+
+function reservationIssuesPanel(data) {
+  const issues = data.reservationIssues ?? [];
+  const total = Number(data.reservationIssueCount ?? issues.length);
+  if (!issues.length) {
+    return `<section class="panel">
+      <h2>Kalenderavvikelser</h2>
+      <p class="muted">Inga misstänkta kalenderrader hittades.</p>
+    </section>`;
+  }
+  const rows = issues.map((issue) => `<tr>
+    <td><strong>${escapeHtml(issue.reference || '—')}</strong></td>
+    <td>${escapeHtml(RESERVATION_REASON_LABELS[issue.reason] || issue.reason)}</td>
+    <td>${escapeHtml(String(issue.statusCode || '—'))}</td>
+    <td>${issue.active === true
+      ? '<span class="badge badge-warning">Blockerar fortfarande</span>'
+      : '<span class="badge badge-danger">Exporteras inte</span>'}</td>
+    <td>${escapeHtml((issue.nights ?? []).join(', ') || '—')}</td>
+  </tr>`).join('');
+  return `<section class="panel" style="border-left:4px solid #c9a96e;">
+    <h2>Kalenderavvikelser</h2>
+    <p>${total} avvikelse(r) hittades. Inaktiva rader exporteras inte till Airbnb. Rader som fortfarande blockerar internt måste granskas manuellt innan de tas bort.</p>
+    <div class="table-wrap"><table class="data-table">
+      <thead><tr><th>Referens</th><th>Orsak</th><th>Status</th><th>Export</th><th>Nätter</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
   </section>`;
 }
 
@@ -149,6 +240,8 @@ function renderDirectBooking({ data, principal, demo, csrfToken, writesEnabled }
     </section>
 
     ${syncStatusPanel(data.syncStatus)}
+    ${calendarSafetyPanel(data.syncStatus, canWrite)}
+    ${reservationIssuesPanel(data)}
 
     <section class="panel">
       <h2>Airbnb-synkroniseringens begränsning</h2>

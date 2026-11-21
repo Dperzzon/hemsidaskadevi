@@ -22,6 +22,8 @@ const {
   buildPaymentFailedNotification
 } = require('./booking-mail');
 const { queueNotification, queueNotifications } = require('./outbox');
+const { handleAvailability } = require('../calendar/availability');
+const { nightKeys } = require('./requests');
 
 const API_HEADERS = {
   'Cache-Control': 'no-store',
@@ -286,7 +288,7 @@ async function appendDirectHistory(store, record, session, event, options, conte
 
 // Betalningen är genomförd men bokningen kan inte säkert bekräftas. Vi bevarar
 // Stripe-transaktionen och skapar ett tydligt avstämningsärende för Owner.
-async function markReconciliation(store, record, session, event, options, context, reason) {
+async function markReconciliation(store, record, session, event, options, context, reason, details = {}) {
   const now = options.now ?? new Date();
   const raw = await store.getByReference(record.reference).catch(() => null);
   const current = raw?.record ?? record;
@@ -296,6 +298,8 @@ async function markReconciliation(store, record, session, event, options, contex
     status: 'Avstämning krävs',
     reconciliation: {
       reason,
+      code: String(details.code ?? ''),
+      nights: Array.isArray(details.nights) ? details.nights.slice(0, 100) : [],
       sessionId: String(session.id ?? ''),
       paymentIntentId: String(session.payment_intent ?? ''),
       amountOre: Number(session.amount_total) || 0,
@@ -310,12 +314,50 @@ async function markReconciliation(store, record, session, event, options, contex
   try {
     const saved = await store.updateRequest(updated, { ifMatch: raw?.etag ?? '*' });
     await appendDirectHistory(store, saved.record, session, event, options, context,
-      'DIRECT_BOOKING_RECONCILIATION', { reason });
+      'DIRECT_BOOKING_RECONCILIATION', {
+        reason,
+        code: details.code ?? '',
+        nights: details.nights ?? []
+      });
     return { ok: false, reconciliation: true, record: saved.record };
   } catch (error) {
     context.warn?.(`Direktbokning: avstämningsärende kunde inte sparas för ${record.reference}.`);
     return { ok: false, reconciliation: true, retryable: true, error };
   }
+}
+
+// Färsk Airbnb-kontroll omedelbart före CONFIRMED. Reservationen låser de
+// interna nätterna, men Airbnb kan ha hunnit få en bokning under Checkout.
+// Ett tekniskt fel eller en misstänkt kalender får aldrig leda till automatisk
+// bekräftelse – då skapas i stället ett avstämningsärende.
+async function checkAirbnbBeforeConfirmation(record, store, options, context) {
+  const handler = options.availabilityHandler ?? handleAvailability;
+  let result;
+  try {
+    const query = new URLSearchParams({ start: record.arrival, end: record.departure });
+    result = await handler({ query }, context, {
+      ...(options.availability ?? {}),
+      calendarStatusStore: store,
+      forceStatusWrite: true,
+      statusSource: 'stripe-webhook',
+      calendarSafetyEnabled: options.calendarSafetyEnabled,
+      fetchTimeoutMs: options.availability?.fetchTimeoutMs ?? 4000,
+      parseTimeoutMs: options.availability?.parseTimeoutMs ?? 6000,
+      fetchMaxAttempts: 1
+    });
+  } catch {
+    return { ok: false, code: 'AIRBNB_UNAVAILABLE' };
+  }
+  if (result.status !== 200 || !Array.isArray(result.jsonBody?.blocked)) {
+    return {
+      ok: false,
+      code: result.jsonBody?.code ?? 'AIRBNB_UNAVAILABLE'
+    };
+  }
+  const blocked = nightKeys(record.arrival, record.departure)
+    .filter((night) => result.jsonBody.blocked.includes(night));
+  if (blocked.length) return { ok: false, code: 'AIRBNB_CONFLICT', nights: blocked };
+  return { ok: true };
 }
 
 async function confirmDirectBooking(store, applied, session, event, options, context) {
@@ -326,7 +368,12 @@ async function confirmDirectBooking(store, applied, session, event, options, con
   if (record.statusCode === 'CONFIRMED') {
     return { ok: true, alreadyConfirmed: true };
   }
-  if (record.statusCode !== 'PENDING_PAYMENT' && record.statusCode !== 'RECONCILIATION') {
+  if (record.statusCode === 'RECONCILIATION') {
+    // Ett redan sparat avstämningsärende är ett manuellt ärende. En dubbel
+    // webhook får inte automatiskt ändra Owner-granskningen till CONFIRMED.
+    return { ok: true, skipped: true, alreadyReconciliation: true, record };
+  }
+  if (record.statusCode !== 'PENDING_PAYMENT') {
     return markReconciliation(
       store, record, session, event, options, context,
       `Bokningen hade status ${record.statusCode ?? 'okänd'} när betalningen togs emot.`
@@ -338,6 +385,22 @@ async function confirmDirectBooking(store, applied, session, event, options, con
     return markReconciliation(
       store, record, session, event, options, context,
       'Reservationen saknar giltig nattlåsning. Kontrollera datumen och återbetala vid behov.'
+    );
+  }
+
+  const airbnb = await checkAirbnbBeforeConfirmation(record, store, options, context);
+  if (!airbnb.ok) {
+    const conflictText = airbnb.code === 'AIRBNB_CONFLICT'
+      ? `Airbnb-kalendern är upptagen på ${airbnb.nights.join(', ')}.`
+      : airbnb.code === 'CALENDAR_EMPTY' || airbnb.code === 'CALENDAR_DROP' ||
+          airbnb.code === 'CALENDAR_RANGE_EMPTY' || airbnb.code === 'CALENDAR_INCONSISTENT' ||
+          airbnb.code === 'CALENDAR_STALE' || airbnb.code === 'CALENDAR_SUSPECT'
+        ? 'Airbnb-kalendern kunde inte verifieras säkert. Kontrollera kalendern manuellt innan bokningen bekräftas.'
+        : 'Airbnb-kalendern kunde inte hämtas eller tolkas. Kontrollera tillgängligheten manuellt innan bokningen bekräftas.';
+    return markReconciliation(
+      store, record, session, event, options, context,
+      conflictText,
+      { code: airbnb.code, nights: airbnb.nights ?? [] }
     );
   }
 
@@ -558,6 +621,9 @@ async function handleStripeWebhook(request, context = {}, options = {}) {
   const finalRecord = direct?.record ?? applied.record;
   const finalSummary = computePaymentSummary(finalRecord);
   const outboxContext = outboxContextFor(store, { warn });
+  const reviewRequired = direct?.reconciliation
+    ? (finalRecord.reconciliation?.reason || 'Manuell avstämning krävs innan bokningen bekräftas.')
+    : applied.reviewRequired;
   const directConfirmed = direct?.ok === true &&
     direct?.skipped !== true &&
     finalRecord.statusCode === 'CONFIRMED';
@@ -568,7 +634,7 @@ async function handleStripeWebhook(request, context = {}, options = {}) {
       finalRecord,
       applied.payment,
       finalSummary,
-      { reviewRequired: applied.reviewRequired }
+      { reviewRequired }
     ).host;
     await queueNotification(
       (entry) => store.save(entry, { warn }),
@@ -583,7 +649,7 @@ async function handleStripeWebhook(request, context = {}, options = {}) {
   } else {
     await queueOutbox(store, finalRecord, applied.payment, finalSummary, event, {
       ...eventOptions,
-      reviewRequired: applied.reviewRequired
+      reviewRequired
     }, { warn });
   }
 
