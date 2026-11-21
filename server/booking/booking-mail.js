@@ -6,12 +6,18 @@ const {
   formatOre
 } = require('./payment-ledger');
 const {
+  MAIL_BRAND,
   escapeHtml,
   formatDate,
   emailShell,
   mailList,
+  sectionTitle,
+  detailRow,
+  practicalInfoHtml,
+  practicalInfoText,
   contactBlockHtml,
   contactBlockText,
+  addonLines,
   stayLines
 } = require('./mail-templates');
 
@@ -57,30 +63,87 @@ function receiptKind(record, payment, summary) {
 
 function buildBookingConfirmation(record, options = {}) {
   const summary = summaryFor(record, options.summary);
-  const details = [
-    ...stayLines(record),
-    ...paymentRows(record, summary)
+  const firstName = String(record.firstName ?? '').trim();
+  const greeting = firstName ? `Hej ${firstName},` : 'Hej,';
+  const headline = 'Din bokning på Skadevi Herrgård är bekräftad';
+  const intro = 'Din bokning är bekräftad. Vi ser fram emot att välkomna er till Skadevi Herrgård. Här hittar ni en sammanställning av er bokning och information inför er vistelse.';
+
+  const stayRows = [
+    ['Bokningsreferens', String(record.reference ?? '')],
+    ['Ankomst', formatDate(record.arrival)],
+    ['Avresa', formatDate(record.departure)],
+    ['Antal nätter', String(record.nights ?? '')],
+    ['Antal gäster', String(record.guests ?? '')]
   ];
-  const confirmedText = 'Din bokning är bekräftad.';
-  const paymentText = summary.paymentStatus === 'PAID'
+  if (record.extrahus?.enabled) {
+    stayRows.push(['Extrahus', `${record.extrahus.nights} nätter, ${record.extrahus.guests} gäster`]);
+  }
+  stayRows.push(['Tillval', addonLines(record).join(', ')]);
+
+  const paymentRowsData = [
+    ['Totalt bokningsbelopp inklusive moms', formatOre(summary.totalOre)],
+    ['Betalt belopp', formatOre(summary.paidOre)],
+    ['Kvar att betala', formatOre(Math.max(0, summary.remainingOre))],
+    ['Betalstatus', summary.paymentLabel]
+  ];
+  if (summary.overpaidOre > 0) {
+    paymentRowsData.push(['Överbetalt belopp', `${formatOre(summary.overpaidOre)} – kontakta Skadevi Herrgård`]);
+  }
+
+  const isPaid = summary.paymentStatus === 'PAID';
+  const paymentText = isPaid
     ? 'Hela bokningsbeloppet är betalt.'
     : `Bokningen är bekräftad men inte fullbetald. Kvar att betala är ${formatOre(Math.max(0, summary.remainingOre))}.`;
-  const nextSteps = 'Betalning, ändringar och praktiska frågor hanteras enligt bokningsvillkoren. Kontakta oss gärna om du har frågor inför din vistelse.';
-  const text = `${confirmedText}\n\n${details.join('\n')}\n\n${paymentText}\n\n${nextSteps}\n\n${contactBlockText()}`;
-  const content = `<p style="margin:0 0 12px;">Hej ${escapeHtml(record.firstName ?? '')},</p>
-<p style="margin:0 0 16px;">${escapeHtml(confirmedText)}</p>
-<div style="background:#eef7ee;border-left:4px solid #4f7f4f;padding:12px 16px;margin:0 0 20px;"><strong>${escapeHtml(paymentText)}</strong></div>
-${mailList(details.map(escapeHtml))}
-<p style="margin:0 0 16px;">${escapeHtml(nextSteps)}</p>
-<p style="margin:0;">Vänliga hälsningar,<br><strong>Skadevi Herrgård</strong></p>
+  const calloutBackground = isPaid ? '#eef7ee' : '#fff8e6';
+  const calloutBorder = isPaid ? '#4f7f4f' : MAIL_BRAND.gold;
+
+  const content = `<p style="margin:0 0 6px;text-align:center;font-size:15px;color:${MAIL_BRAND.muted};">${escapeHtml(greeting)}</p>
+<p style="margin:0 0 18px;text-align:center;font-size:15px;line-height:1.7;">${escapeHtml(intro)}</p>
+${sectionTitle('Er bokning')}
+${stayRows.map(([label, value]) => detailRow(label, value)).join('')}
+${sectionTitle('Betalning')}
+${paymentRowsData.map(([label, value]) => detailRow(label, value)).join('')}
+<div style="background:${calloutBackground};border-left:3px solid ${calloutBorder};padding:14px 16px;margin:16px 0 0;font-size:15px;line-height:1.55;"><strong>${escapeHtml(paymentText)}</strong></div>
+${sectionTitle('Inför er vistelse')}
+${practicalInfoHtml()}
+<p style="margin:24px 0 0;font-size:15px;">Har ni frågor inför er vistelse är ni alltid välkomna att kontakta oss.</p>
+<p style="margin:18px 0 0;font-size:15px;">Vänliga hälsningar,<br><strong style="font-family:Georgia,'Times New Roman',serif;font-weight:normal;font-size:17px;">Skadevi Herrgård</strong></p>
 ${contactBlockHtml()}`;
+
+  const text = [
+    greeting,
+    '',
+    headline,
+    '',
+    intro,
+    '',
+    'Er bokning',
+    ...stayRows.map(([label, value]) => `${label}: ${value}`),
+    '',
+    'Betalning',
+    ...paymentRowsData.map(([label, value]) => `${label}: ${value}`),
+    '',
+    paymentText,
+    '',
+    practicalInfoText(),
+    '',
+    'Har ni frågor inför er vistelse är ni alltid välkomna att kontakta oss.',
+    '',
+    'Vänliga hälsningar,',
+    'Skadevi Herrgård',
+    '',
+    contactBlockText()
+  ].join('\n');
+
   return {
     mailType: options.mailType ?? 'GUEST_BOOKING_CONFIRMED',
     to: record.email,
     replyTo: MAIL.replyTo,
-    subject: `Din bokning är bekräftad (${record.reference})`,
+    subject: `Din bokning på Skadevi Herrgård är bekräftad (${record.reference})`,
     body: text,
-    html: emailShell('Din bokning är bekräftad', content)
+    html: emailShell(headline, content, {
+      preheader: `Bokningsbekräftelse ${record.reference} – Skadevi Herrgård`
+    })
   };
 }
 
