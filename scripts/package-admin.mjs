@@ -56,6 +56,7 @@ const required = [
   'server/booking/rules.js',
   'server/booking/house-rules.json',
   'shared/pricing-config.json',
+  'shared/practical-info.json',
   'src/css/fonts.css',
   'public/images/logo.png',
   'package.json'

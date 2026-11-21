@@ -45,8 +45,10 @@ test('bekräftelsemejlet använder Skadevis logotyp och varumärkesram', () => {
   assert.match(mail.html, /alt="Skadevi Herrgård"/);
   assert.match(mail.html, /max-width:600px/);
   assert.match(mail.html, /www\.skadeviherrgard\.com/);
-  assert.match(mail.html, /https:\/\/www\.skadeviherrgard\.com\/kontakt/);
-  assert.match(mail.html, /Skoklostervägen 16/);
+  assert.doesNotMatch(mail.html, /skadeviherrgard\.com\/kontakt/);
+  assert.match(mail.html, /href="mailto:skadevigard@gmail\.com"/);
+  assert.match(mail.html, /href="tel:\+46702730422"/);
+  assert.match(mail.html, /Besöksadress: Skoklostervägen 16, 746 94 Häggeby/);
   assert.match(mail.html, /\+46 70 273 04 22/);
 });
 
@@ -66,8 +68,11 @@ test('bekräftelsemejlet visar bokning, betalning och praktisk information', () 
   assert.match(mail.html, /Bokningen är bekräftad men inte fullbetald/);
   assert.doesNotMatch(mail.html, /Hela bokningsbeloppet är betalt/);
   assert.doesNotMatch(mail.html, /Fullbetald/);
-  assert.match(mail.html, /Incheckning från kl\. 15\.00/);
+  assert.match(mail.html, /Incheckning från kl\. 14\.00/);
+  assert.doesNotMatch(mail.html, /Incheckning från kl\. 15\.00/);
   assert.match(mail.html, /Utcheckning senast kl\. 11\.00/);
+  assert.match(mail.html, /Tidig incheckning från kl\. 09\.00/);
+  assert.match(mail.html, /sen utcheckning till kl\. 16\.00/);
   assert.match(mail.html, /bekräftas av Skadevi Herrgård/);
   assert.match(mail.html, /Gratis parkering/);
   assert.match(mail.html, /Hundar är välkomna/);
@@ -102,7 +107,12 @@ test('klartextversionen innehåller samma uppgifter utan HTML', () => {
   assert.match(mail.body, /Avresa: 16 maj 2027/);
   assert.match(mail.body, /Antal gäster: 16/);
   assert.match(mail.body, /Hela bokningsbeloppet är betalt/);
-  assert.match(mail.body, /Incheckning från kl\. 15\.00/);
+  assert.match(mail.body, /Incheckning från kl\. 14\.00/);
+  assert.doesNotMatch(mail.body, /Incheckning från kl\. 15\.00/);
+  assert.match(mail.body, /E-post: skadevigard@gmail\.com/);
+  assert.match(mail.body, /Telefon: \+46 70 273 04 22/);
+  assert.match(mail.body, /Besöksadress: Skoklostervägen 16, 746 94 Häggeby/);
+  assert.doesNotMatch(mail.body, /skadeviherrgard\.com\/kontakt/);
   assert.match(mail.body, /Skadevi Herrgård/);
   assert.match(mail.body, /www\.skadeviherrgard\.com/);
   assert.doesNotMatch(mail.body, /<html|<body|<p>/);

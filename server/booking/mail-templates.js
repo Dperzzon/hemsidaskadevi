@@ -17,8 +17,8 @@ const MAIL_BRAND = Object.freeze({
 
 const LOGO_URL = 'https://www.skadeviherrgard.com/images/logo.png';
 const WEBSITE_URL = 'https://www.skadeviherrgard.com';
-const CONTACT_URL = 'https://www.skadeviherrgard.com/kontakt';
 const BOOKING_INFO_URL = 'https://www.skadeviherrgard.com/boka';
+const PRACTICAL_INFO = Object.freeze(require('../../shared/practical-info.json'));
 
 const CONTACT = Object.freeze({
   name: 'Skadevi Herrgård',
@@ -124,22 +124,22 @@ function detailRow(label, value) {
 
 function practicalInfoHtml() {
   return `<ul style="margin:10px 0 0;padding-left:18px;font-size:15px;line-height:1.65;color:${MAIL_BRAND.dark};">
-<li style="margin:0 0 7px;">Incheckning från kl. 15.00. Utcheckning senast kl. 11.00.</li>
-<li style="margin:0 0 7px;">Tidig incheckning från kl. 09.00 och sen utcheckning till kl. 16.00 kan arrangeras efter överenskommelse och bekräftas av Skadevi Herrgård.</li>
+<li style="margin:0 0 7px;">Incheckning från kl. ${PRACTICAL_INFO.checkInTime}. Utcheckning senast kl. ${PRACTICAL_INFO.checkOutTime}.</li>
+<li style="margin:0 0 7px;">Tidig incheckning från kl. ${PRACTICAL_INFO.earlyCheckInTime} och sen utcheckning till kl. ${PRACTICAL_INFO.lateCheckOutTime} kan arrangeras efter överenskommelse och bekräftas av Skadevi Herrgård.</li>
 <li style="margin:0 0 7px;">Gratis parkering finns på gården.</li>
 <li style="margin:0 0 7px;">Hundar är välkomna i samråd med värden.</li>
-<li style="margin:0;">Adress: ${escapeHtml(CONTACT.address)}.</li>
+<li style="margin:0;">Besöksadress: ${escapeHtml(CONTACT.address)}.</li>
 </ul>`;
 }
 
 function practicalInfoText() {
   return [
     'Inför er vistelse:',
-    '- Incheckning från kl. 15.00. Utcheckning senast kl. 11.00.',
-    '- Tidig incheckning från kl. 09.00 och sen utcheckning till kl. 16.00 kan arrangeras efter överenskommelse och bekräftas av Skadevi Herrgård.',
+    `- Incheckning från kl. ${PRACTICAL_INFO.checkInTime}. Utcheckning senast kl. ${PRACTICAL_INFO.checkOutTime}.`,
+    `- Tidig incheckning från kl. ${PRACTICAL_INFO.earlyCheckInTime} och sen utcheckning till kl. ${PRACTICAL_INFO.lateCheckOutTime} kan arrangeras efter överenskommelse och bekräftas av Skadevi Herrgård.`,
     '- Gratis parkering finns på gården.',
     '- Hundar är välkomna i samråd med värden.',
-    `- Adress: ${CONTACT.address}.`
+    `- Besöksadress: ${CONTACT.address}.`
   ].join('\n');
 }
 
@@ -147,11 +147,11 @@ function contactBlockHtml() {
   return `<div style="margin:26px 0 0;padding:16px 18px;background:${MAIL_BRAND.background};border:1px solid ${MAIL_BRAND.border};">
 <p style="margin:0 0 8px;font-family:Georgia,'Times New Roman',serif;font-size:15px;color:${MAIL_BRAND.ink};">Kontakt</p>
 <p style="margin:0;font-size:13px;line-height:1.7;color:${MAIL_BRAND.dark};">
-${escapeHtml(CONTACT.name)}<br>${escapeHtml(CONTACT.address)}<br>
-<a href="tel:${escapeHtml(CONTACT.phoneHref)}" style="color:${MAIL_BRAND.dark};text-decoration:none;">${escapeHtml(CONTACT.phone)}</a><br>
-<a href="mailto:${escapeHtml(CONTACT.email)}" style="color:${MAIL_BRAND.dark};text-decoration:none;">${escapeHtml(CONTACT.email)}</a><br>
-<a href="${WEBSITE_URL}" style="color:${MAIL_BRAND.dark};text-decoration:none;">${escapeHtml(CONTACT.website)}</a><br>
-<a href="${CONTACT_URL}" style="color:${MAIL_BRAND.goldDark};text-decoration:none;">Kontakta oss</a>
+${escapeHtml(CONTACT.name)}<br>
+E-post: <a href="mailto:${escapeHtml(CONTACT.email)}" style="color:${MAIL_BRAND.dark};text-decoration:none;">${escapeHtml(CONTACT.email)}</a><br>
+Telefon: <a href="tel:${escapeHtml(CONTACT.phoneHref)}" style="color:${MAIL_BRAND.dark};text-decoration:none;">${escapeHtml(CONTACT.phone)}</a><br>
+Webbplats: <a href="${WEBSITE_URL}" style="color:${MAIL_BRAND.dark};text-decoration:none;">${escapeHtml(CONTACT.website)}</a><br>
+Besöksadress: ${escapeHtml(CONTACT.address)}
 </p>
 </div>`;
 }
@@ -160,11 +160,10 @@ function contactBlockText() {
   return [
     'Kontakt:',
     CONTACT.name,
-    CONTACT.address,
-    `Telefon: ${CONTACT.phone}`,
     `E-post: ${CONTACT.email}`,
+    `Telefon: ${CONTACT.phone}`,
     `Webbplats: ${CONTACT.website}`,
-    `Kontakta oss: ${CONTACT_URL}`
+    `Besöksadress: ${CONTACT.address}`
   ].join('\n');
 }
 
@@ -198,9 +197,9 @@ function stayLines(record = {}) {
 module.exports = {
   MAIL_BRAND,
   CONTACT,
+  PRACTICAL_INFO,
   LOGO_URL,
   WEBSITE_URL,
-  CONTACT_URL,
   BOOKING_INFO_URL,
   escapeHtml,
   formatDate,

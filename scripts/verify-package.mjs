@@ -83,6 +83,7 @@ const required = [
   'server/booking/refund.js',
   'server/booking/house-rules.json',
   'shared/pricing-config.json',
+  'shared/practical-info.json',
   'dist/index.html',
   'package.json',
 ];

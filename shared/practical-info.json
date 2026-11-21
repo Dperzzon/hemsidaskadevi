@@ -1,0 +1,7 @@
+{
+  "_dokumentation": "Central praktisk information för Skadevi Herrgård. Ordinarie incheckning och utcheckning används av bokningsmejl och kundsidorna. Ändra tiderna här och i de statiska sidornas texter – skapa inte separata avvikande versioner.",
+  "checkInTime": "14.00",
+  "checkOutTime": "11.00",
+  "earlyCheckInTime": "09.00",
+  "lateCheckOutTime": "16.00"
+}
