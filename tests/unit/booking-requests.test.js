@@ -9,6 +9,9 @@ const { handleBookingRequest, validatePayload, nightKeys, createRateLimiter, bui
 const { quote } = require('../../server/booking/pricing');
 
 const RULES = { published: true, version: 'test-2026-11-10', text: '1. Regel ett.\n2. Regel två.' };
+// Fast referenstid så att testerna inte blir datumberoende när "i dag" passerar
+// testdatumen. Samma tid används av setup() och direkta validatePayload-anrop.
+const NOW = new Date('2026-11-10T12:00:00Z');
 
 function validBody(overrides = {}) {
   return {
@@ -53,7 +56,7 @@ function setup(overrides = {}) {
     rateLimiter: () => true,
     enabled: true,
     availabilityHandler: async () => ({ status: 200, jsonBody: { blocked: [] } }),
-    now: new Date('2026-11-10T12:00:00Z'),
+    now: NOW,
     ...overrides
   };
   const warn = [];
@@ -114,7 +117,7 @@ test('fältvalidering returnerar tydliga fel per fält', async () => {
 
 test('lakan: servern beräknar 16, 18 och 28 personer och nekar 29', () => {
   const at = (guests, linenCount) =>
-    validatePayload(validBody({ guests, addons: { ...validBody().addons, slutstad: false, lakan: true, linenCount } }));
+    validatePayload(validBody({ guests, addons: { ...validBody().addons, slutstad: false, lakan: true, linenCount } }), NOW);
   assert.equal(at(16, 16).record.totalAddons, 3200);
   assert.equal(at(18, 18).record.totalAddons, 3600);
   assert.equal(at(24, 24).record.totalAddons, 4800);
@@ -215,15 +218,15 @@ test('fel vid sparande ger 500 och ingen bekräftelse', async () => {
 });
 
 test('validatePayload validerar datum, mejl och telefon noggrant', () => {
-  assert.ok(validatePayload(validBody()).record);
-  assert.ok(validatePayload(validBody({ arrival: '2026-02-30' })).errors.arrival);
-  assert.ok(validatePayload(validBody({ departure: '2026-11-20' })).errors.arrival); // avresa före/lika med ankomst
-  assert.ok(validatePayload(validBody({ arrival: '2026-11-20', departure: '2027-02-25' })).errors.arrival); // > 93 nätter
-  assert.ok(validatePayload(validBody({ phone: 'hej' })).errors.phone);
-  assert.ok(validatePayload(validBody({ guests: 0 })).errors.guests);
-  assert.ok(validatePayload(validBody({ guests: 3.5 })).errors.guests);
+  assert.ok(validatePayload(validBody(), NOW).record);
+  assert.ok(validatePayload(validBody({ arrival: '2026-02-30' }), NOW).errors.arrival);
+  assert.ok(validatePayload(validBody({ departure: '2026-11-20' }), NOW).errors.arrival); // avresa före/lika med ankomst
+  assert.ok(validatePayload(validBody({ arrival: '2026-11-20', departure: '2027-02-25' }), NOW).errors.arrival); // > 93 nätter
+  assert.ok(validatePayload(validBody({ phone: 'hej' }), NOW).errors.phone);
+  assert.ok(validatePayload(validBody({ guests: 0 }), NOW).errors.guests);
+  assert.ok(validatePayload(validBody({ guests: 3.5 }), NOW).errors.guests);
   // Valfria fält får saknas.
-  assert.ok(validatePayload(validBody({ company: undefined, message: undefined, consentContact: undefined })).record);
+  assert.ok(validatePayload(validBody({ company: undefined, message: undefined, consentContact: undefined }), NOW).record);
 });
 
 test('nightKeys följer hotelllogiken: avresedagen är ingen natt', () => {
@@ -442,7 +445,7 @@ test('extrahus: validerar nätter, gäster och kombinerat antal lakan', () => {
   const withAddons = (addons, guests = 4) => validatePayload(validBody({
     guests,
     addons: { ...validBody().addons, ...addons }
-  }));
+  }), NOW);
   const ok = withAddons({ extrahus: true, extrahusNights: 2, extrahusGuests: 3, linenCount: 7 });
   assert.equal(ok.errors, undefined);
   assert.equal(ok.record.extrahus.nights, 2);
