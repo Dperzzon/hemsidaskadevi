@@ -97,6 +97,7 @@
                     "uri": "@{parameters('storageEndpoint')}/@{parameters('tableName')}(PartitionKey='@{items('Behandla_varje_post')?['PartitionKey']}',RowKey='@{items('Behandla_varje_post')?['RowKey']}')",
                     "headers": {
                       "x-ms-version": "2019-02-02",
+                      "Accept": "application/json;odata=minimalmetadata",
                       "If-Match": "@{items('Behandla_varje_post')?['odata.etag']}"
                     },
                     "body": {
@@ -143,6 +144,7 @@
                       "uri": "@{parameters('storageEndpoint')}/@{parameters('tableName')}(PartitionKey='@{items('Behandla_varje_post')?['PartitionKey']}',RowKey='@{items('Behandla_varje_post')?['RowKey']}')",
                       "headers": {
                         "x-ms-version": "2019-02-02",
+                        "Accept": "application/json;odata=minimalmetadata",
                         "If-Match": "@{items('Behandla_varje_post')?['odata.etag']}"
                       },
                       "body": {
@@ -207,6 +209,7 @@
                       "uri": "@{parameters('storageEndpoint')}/@{parameters('tableName')}(PartitionKey='@{items('Behandla_varje_post')?['PartitionKey']}',RowKey='@{items('Behandla_varje_post')?['RowKey']}')",
                       "headers": {
                         "x-ms-version": "2019-02-02",
+                        "Accept": "application/json;odata=minimalmetadata",
                         "If-Match": "*"
                       },
                       "body": {
@@ -240,6 +243,7 @@
                           "uri": "@{parameters('storageEndpoint')}/@{parameters('tableName')}(PartitionKey='@{items('Behandla_varje_post')?['PartitionKey']}',RowKey='@{items('Behandla_varje_post')?['RowKey']}')",
                           "headers": {
                             "x-ms-version": "2019-02-02",
+                            "Accept": "application/json;odata=minimalmetadata",
                             "If-Match": "*"
                           },
                           "body": {
@@ -269,6 +273,7 @@
                             "uri": "@{parameters('storageEndpoint')}/@{parameters('tableName')}(PartitionKey='@{items('Behandla_varje_post')?['PartitionKey']}',RowKey='@{items('Behandla_varje_post')?['RowKey']}')",
                             "headers": {
                               "x-ms-version": "2019-02-02",
+                              "Accept": "application/json;odata=minimalmetadata",
                               "If-Match": "*"
                             },
                             "body": {

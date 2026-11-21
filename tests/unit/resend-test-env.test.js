@@ -182,6 +182,31 @@ test('workflow-only-mallen är låst till testtabell, testnyckel, mock och T0', 
   }
 });
 
+function collectHttpActions(actions, acc = []) {
+  for (const [name, action] of Object.entries(actions ?? {})) {
+    if (action.type === 'Http') acc.push({ name, ...action });
+    collectHttpActions(action.actions, acc);
+    collectHttpActions(action.else?.actions, acc);
+  }
+  return acc;
+}
+
+test('både test- och produktionsdefinitionen har Accept på alla PATCH-anrop', () => {
+  for (const [label, definition] of [['test', testWorkflowDefinition], ['produktion', prodWorkflowDefinition]]) {
+    const patches = collectHttpActions(definition.actions).filter((action) => action.inputs.method === 'PATCH');
+    assert.ok(patches.length >= 5, `${label}: förväntade minst fem PATCH-anrop`);
+    for (const patch of patches) {
+      assert.equal(
+        patch.inputs.headers.Accept,
+        'application/json;odata=minimalmetadata',
+        `${label}/${patch.name} saknar Accept-header`
+      );
+      assert.ok(patch.inputs.headers['If-Match'], `${label}/${patch.name} saknar If-Match`);
+      assert.equal(patch.inputs.headers['x-ms-version'], '2019-02-02', `${label}/${patch.name} saknar x-ms-version`);
+    }
+  }
+});
+
 test('test- och produktionsdefinitionen har samma idempotens- och felskydd', () => {
   const prodAmbiguous = prodWorkflowDefinition.actions.Om_det_finns_poster.actions.Behandla_varje_post.actions.Osaker_dubbelutskick;
   const testAmbiguous = testWorkflowDefinition.actions.Om_det_finns_poster.actions.Behandla_varje_post.actions

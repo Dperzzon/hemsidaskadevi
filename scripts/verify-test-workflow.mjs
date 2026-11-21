@@ -103,6 +103,24 @@ export function verifyDefinition(definition) {
   assert(!/'bookingrequests'/.test(serialized), 'testdefinitionen får inte referera till bookingrequests');
   assert(!serialized.includes('resend-api-key?'), 'testdefinitionen får inte referera till produktionsnyckeln');
 
+  const patches = [];
+  const collectHttp = (actions) => {
+    for (const [name, action] of Object.entries(actions ?? {})) {
+      if (action.type === 'Http' && action.inputs?.method === 'PATCH') patches.push({ name, ...action });
+      collectHttp(action.actions);
+      collectHttp(action.else?.actions);
+    }
+  };
+  collectHttp(definition.actions);
+  assert(patches.length >= 5, 'testdefinitionen saknar PATCH-anrop');
+  for (const patch of patches) {
+    assert(patch.inputs.headers?.Accept === 'application/json;odata=minimalmetadata',
+      `${patch.name} saknar Accept-header`);
+    assert(patch.inputs.headers?.['If-Match'], `${patch.name} saknar If-Match`);
+    assert(patch.inputs.headers?.['x-ms-version'] === '2019-02-02',
+      `${patch.name} saknar x-ms-version`);
+  }
+
   return {
     tableName: parameters.tableName.defaultValue,
     activationCutoff: parameters.outboxActivationSince.defaultValue,

@@ -120,6 +120,26 @@ test('ETag-kontroll och statusmarkering: skickas-aldrig-två-gånger-garantin', 
   }
 });
 
+test('alla PATCH-anrop mot Table Storage har Accept och If-Match', () => {
+  const patches = httpActions.filter((action) => action.inputs.method === 'PATCH');
+  assert.ok(patches.length >= 5, 'förväntade minst fem PATCH-anrop');
+  for (const patch of patches) {
+    assert.equal(
+      patch.inputs.headers.Accept,
+      'application/json;odata=minimalmetadata',
+      `${patch.name} saknar Accept-header`
+    );
+    assert.ok(patch.inputs.headers['If-Match'], `${patch.name} saknar If-Match`);
+    assert.equal(patch.inputs.headers['x-ms-version'], '2019-02-02', `${patch.name} saknar x-ms-version`);
+  }
+});
+
+test('Resend-POST har Content-Type application/json och Bearer-autentisering', () => {
+  const send = byName('Skicka_mejl_resend');
+  assert.equal(send.inputs.headers['Content-Type'], 'application/json');
+  assert.ok(send.inputs.headers.Authorization.startsWith('Bearer '));
+});
+
 test('HTTP 429/500/401/403/409/timeout har täckning i flödet', () => {
   const send = byName('Skicka_mejl_resend');
   assert.equal(send.inputs.retryPolicy.type, 'exponential');

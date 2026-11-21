@@ -106,6 +106,7 @@
                         "uri": "@{parameters('storageEndpoint')}/@{parameters('tableName')}(PartitionKey='@{items('Behandla_varje_post')?['PartitionKey']}',RowKey='@{items('Behandla_varje_post')?['RowKey']}')",
                         "headers": {
                           "x-ms-version": "2019-02-02",
+                          "Accept": "application/json;odata=minimalmetadata",
                           "If-Match": "@{items('Behandla_varje_post')?['odata.etag']}"
                         },
                         "body": {
@@ -159,8 +160,9 @@
                           "method": "PATCH",
                           "uri": "@{parameters('storageEndpoint')}/@{parameters('tableName')}(PartitionKey='@{items('Behandla_varje_post')?['PartitionKey']}',RowKey='@{items('Behandla_varje_post')?['RowKey']}')",
                           "headers": {
-                            "x-ms-version": "2019-02-02",
-                            "If-Match": "@{items('Behandla_varje_post')?['odata.etag']}"
+                          "x-ms-version": "2019-02-02",
+                          "Accept": "application/json;odata=minimalmetadata",
+                          "If-Match": "@{items('Behandla_varje_post')?['odata.etag']}"
                           },
                           "body": {
                             "status": "Skickar",
@@ -233,8 +235,9 @@
                           "method": "PATCH",
                           "uri": "@{parameters('storageEndpoint')}/@{parameters('tableName')}(PartitionKey='@{items('Behandla_varje_post')?['PartitionKey']}',RowKey='@{items('Behandla_varje_post')?['RowKey']}')",
                           "headers": {
-                            "x-ms-version": "2019-02-02",
-                            "If-Match": "*"
+                          "x-ms-version": "2019-02-02",
+                          "Accept": "application/json;odata=minimalmetadata",
+                          "If-Match": "*"
                           },
                           "body": {
                             "status": "Skickad",
@@ -272,8 +275,9 @@
                               "method": "PATCH",
                               "uri": "@{parameters('storageEndpoint')}/@{parameters('tableName')}(PartitionKey='@{items('Behandla_varje_post')?['PartitionKey']}',RowKey='@{items('Behandla_varje_post')?['RowKey']}')",
                               "headers": {
-                                "x-ms-version": "2019-02-02",
-                                "If-Match": "*"
+                              "x-ms-version": "2019-02-02",
+                              "Accept": "application/json;odata=minimalmetadata",
+                              "If-Match": "*"
                               },
                               "body": {
                                 "status": "Kräver manuell kontroll",
@@ -304,8 +308,9 @@
                                 "method": "PATCH",
                                 "uri": "@{parameters('storageEndpoint')}/@{parameters('tableName')}(PartitionKey='@{items('Behandla_varje_post')?['PartitionKey']}',RowKey='@{items('Behandla_varje_post')?['RowKey']}')",
                                 "headers": {
-                                  "x-ms-version": "2019-02-02",
-                                  "If-Match": "*"
+                                "x-ms-version": "2019-02-02",
+                                "Accept": "application/json;odata=minimalmetadata",
+                                "If-Match": "*"
                                 },
                                 "body": {
                                   "status@odata.type": "Edm.String",
@@ -343,8 +348,9 @@
                       "method": "PATCH",
                       "uri": "@{parameters('storageEndpoint')}/@{parameters('tableName')}(PartitionKey='@{items('Behandla_varje_post')?['PartitionKey']}',RowKey='@{items('Behandla_varje_post')?['RowKey']}')",
                       "headers": {
-                        "x-ms-version": "2019-02-02",
-                        "If-Match": "@{items('Behandla_varje_post')?['odata.etag']}"
+                      "x-ms-version": "2019-02-02",
+                      "Accept": "application/json;odata=minimalmetadata",
+                      "If-Match": "@{items('Behandla_varje_post')?['odata.etag']}"
                       },
                       "body": {
                         "status": "Kräver manuell kontroll",
