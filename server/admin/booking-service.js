@@ -22,8 +22,13 @@ const {
   lockedRange
 } = require('../booking/buffer-nights');
 const { checkAddonAvailability } = require('../booking/addon-availability');
-const { buildBookingConfirmation, buildCancellationNotification } = require('../booking/booking-mail');
-const { queueNotification } = require('../booking/outbox');
+const { buildBookingConfirmation, buildCancellationNotification, buildPaymentNotifications } = require('../booking/booking-mail');
+const {
+  queueNotification,
+  confirmationOutboxKey,
+  newConfirmationKey,
+  updateEmailObligation
+} = require('../booking/outbox');
 const { revokePaymentAccess } = require('../booking/payment-access');
 const { cancelOpenInvoiceRequests } = require('../booking/invoice-requests');
 const {
@@ -1134,6 +1139,11 @@ async function changeStatus(repo, principal, reference, action, body = {}, optio
   record.updatedAt = now.toISOString();
   record.updatedBy = actorOf(principal).name;
   if (nextStatus === 'CONFIRMED') record.confirmedAt = now.toISOString();
+  if (nextStatus === 'CONFIRMED' && !record.confirmationKey) {
+    record.confirmationKey = newConfirmationKey();
+  }
+  if (nextStatus === 'CONFIRMED') record.reconciliationRequest = null;
+  if (nextStatus === 'CONFIRMED') record.paymentReview = null;
   if (nextStatus === 'CONFIRMED') record.bufferNights = bufferNightsFor(record);
   if (nextStatus === 'CONFIRMED') record.reconciliation = null;
   if (nextStatus === 'CONFIRMED' && record.reservation) {
@@ -1830,7 +1840,7 @@ async function queueGuestConfirmation(repo, record, options, context) {
   const result = await queueNotification(
     (entry) => repo.saveOutbox(entry),
     {
-      idempotencyKey: `outbox-confirmation-${record.reference}-v${Number(record.version || 1)}`,
+      idempotencyKey: confirmationOutboxKey(record),
       reference: record.reference,
       notification,
       createdAt: (options.now ?? new Date()).toISOString(),
@@ -1838,6 +1848,76 @@ async function queueGuestConfirmation(repo, record, options, context) {
     }
   );
   return { ...result, queued: result.ok === true && result.duplicate !== true };
+}
+
+async function retryBookingNotifications(repo, principal, reference, body = {}, options = {}, context = {}) {
+  if (!principal?.roles?.includes('Owner')) {
+    return error(403, 'Endast Owner kan köa om bokningsmejl.');
+  }
+  if (options.outboxEnabled !== true) {
+    return error(503, 'Mejlutskick är inte aktiverat i denna miljö.', { code: 'OUTBOX_DISABLED' });
+  }
+  const raw = await repo.getRawBooking(reference);
+  if (!raw) return error(404, 'Bokningen hittades inte.');
+  const record = raw.record;
+  if (record.statusCode !== 'CONFIRMED') {
+    return error(422, 'Endast en bekräftad bokning kan få bekräftelsemejl.', { code: 'NOT_CONFIRMED' });
+  }
+  const store = {
+    ...repo,
+    save: (entry, saveOptions) => repo.saveOutbox(entry, saveOptions)
+  };
+  const now = options.now ?? new Date();
+  const guest = await queueGuestConfirmation(repo, record, options, context);
+  let host = null;
+  const payments = Array.isArray(record.payments)
+    ? [...record.payments].sort((a, b) => String(a.createdAt ?? '').localeCompare(String(b.createdAt ?? '')))
+    : [];
+  const payment = payments[payments.length - 1];
+  if (payment?.stripeSessionId) {
+    const summary = computePaymentSummary(record);
+    const notification = buildPaymentNotifications(record, payment, summary, {}).host;
+    host = await queueNotification(
+      (entry) => repo.saveOutbox(entry),
+      {
+        idempotencyKey: `outbox-stripe-${payment.stripeSessionId}-host`,
+        reference: record.reference,
+        notification,
+        createdAt: now.toISOString(),
+        context
+      }
+    );
+  }
+  const obligation = await updateEmailObligation(store, reference, { guest, host }, {
+    ...options,
+    now,
+    updatedBy: actorOf(principal).name
+  }, context);
+  await audit(repo, principal, 'NOTIFICATIONS_RETRIED', record, {
+    reason: cleanString(body.reason, 500),
+    changes: {
+      guestQueued: guest?.ok === true,
+      guestDuplicate: guest?.duplicate === true,
+      hostQueued: host?.ok === true,
+      hostDuplicate: host?.duplicate === true
+    }
+  }, context);
+  if (guest?.ok !== true || (host && host.ok !== true) || obligation.ok !== true) {
+    return error(503, 'Ett eller flera mejl kunde inte köas. Försök igen om en stund.', {
+      code: 'OUTBOX_QUEUE_FAILED'
+    });
+  }
+  return {
+    status: 200,
+    jsonBody: {
+      reference,
+      guestQueued: guest.queued === true,
+      guestDuplicate: guest.duplicate === true,
+      hostQueued: host?.queued === true,
+      hostDuplicate: host?.duplicate === true,
+      message: 'Bekräftelsemejlen ligger i utkorgen.'
+    }
+  };
 }
 
 async function cancelPendingOutbox(repo, record, mailTypes, reason, context, now = new Date()) {
@@ -1902,6 +1982,7 @@ module.exports = {
   calendarRange,
   buildGuestConfirmation,
   queueGuestConfirmation,
+  retryBookingNotifications,
   queueCancellation,
   makeReference,
   makeIdempotencyKey,

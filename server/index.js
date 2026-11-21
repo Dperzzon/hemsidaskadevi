@@ -24,6 +24,7 @@ const {
 const { validateRange, rangeFromQuery } = require('./calendar/availability');
 const { loadRules, publicRules } = require('./booking/rules');
 const { createStore, isConfigured } = require('./booking/store');
+const { createReconciliationScheduler } = require('./booking/reconciliation');
 const { legacyRedirect } = require('./seo/legacy-redirects');
 
 const MIME_TYPES = {
@@ -729,9 +730,19 @@ function main() {
   const calendarMonitor = process.env.AIRBNB_ICAL_URL
     ? createCalendarMonitor({ warn: (message) => console.error(message) })
     : null;
+  const reconciliationScheduler = isConfigured()
+    ? createReconciliationScheduler({
+        store: createStore(),
+        intervalMinutes: Number(process.env.STRIPE_RECONCILE_INTERVAL_MINUTES) || 5,
+        outboxEnabled: process.env.STRIPE_OUTBOX_ENABLED === '1',
+        availabilityHandler: handleAvailability,
+        warn: (message) => console.error(message)
+      })
+    : null;
   server.listen(port, () => {
     console.log(`Skadevi servern lyssnar på port ${port}`);
   });
+  reconciliationScheduler?.start();
 
   // Stängd nedstängning: Azure skickar SIGTERM vid planerade omstarter.
   let shuttingDown = false;
@@ -739,6 +750,7 @@ function main() {
     if (shuttingDown) return;
     shuttingDown = true;
     calendarMonitor?.stop();
+    reconciliationScheduler?.stop();
     console.log(`Mottog ${signal}, stänger ner.`);
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 10000).unref();

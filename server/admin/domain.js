@@ -8,6 +8,7 @@ const { deriveWarnings, applyWarnings } = require('./warnings');
 const { computePaymentSummary, normalizePaymentRequests, latestPaymentRequest } = require('./payments');
 const { normalizeInvoiceRequests, activeInvoiceRequest } = require('../booking/invoice-requests');
 const { paymentAccessState } = require('../booking/payment-access');
+const { calculateRefund } = require('../booking/refunds');
 
 const STATUS_META = {
   PENDING: {
@@ -276,6 +277,20 @@ function emptyMailLevel() {
   };
 }
 
+function obligationMailLevel(record = {}, kind) {
+  const obligation = record?.emailObligation?.[kind];
+  if (!obligation || typeof obligation !== 'object') return null;
+  const status = String(obligation.status ?? '').toUpperCase();
+  if (status !== 'PENDING' && status !== 'FAILED') return null;
+  return normalizeMailLevel({
+    status: status === 'FAILED' ? 'Misslyckad' : 'Kräver manuell kontroll',
+    deliveryStatus: 'manual_review',
+    mailType: kind === 'guest' ? 'GUEST_BOOKING_CONFIRMED' : 'HOST_PAYMENT_RECEIVED',
+    createdAt: obligation.updatedAt ?? '',
+    updatedAt: obligation.lastAttemptAt ?? obligation.updatedAt ?? ''
+  });
+}
+
 function normalizeEmailStatus(record = {}, outbox = []) {
   if (record.emailStatus && typeof record.emailStatus === 'object') {
     return {
@@ -290,8 +305,8 @@ function normalizeEmailStatus(record = {}, outbox = []) {
   const host = sorted.find((row) => String(row.mailType ?? '').startsWith('HOST_'));
   const guest = sorted.find((row) => String(row.mailType ?? '').startsWith('GUEST_'));
   return {
-    host: host ? normalizeMailLevel(host) : emptyMailLevel(),
-    guest: guest ? normalizeMailLevel(guest) : emptyMailLevel()
+    host: host ? normalizeMailLevel(host) : (obligationMailLevel(record, 'host') ?? emptyMailLevel()),
+    guest: guest ? normalizeMailLevel(guest) : (obligationMailLevel(record, 'guest') ?? emptyMailLevel())
   };
 }
 
@@ -494,8 +509,22 @@ function normalizeBooking(record = {}, options = {}) {
       : [],
     overlaps: Array.isArray(record.overlaps) ? record.overlaps : [],
     actionFlags: record.actionFlags && typeof record.actionFlags === 'object' ? record.actionFlags : {},
+    emailObligation: record.emailObligation && typeof record.emailObligation === 'object'
+      ? record.emailObligation
+      : null,
+    reconciliationRequest: record.reconciliationRequest && typeof record.reconciliationRequest === 'object'
+      ? record.reconciliationRequest
+      : null,
+    paymentReview: record.paymentReview && typeof record.paymentReview === 'object'
+      ? record.paymentReview
+      : null,
+    refundSyncRequested: record.refundSyncRequested === true,
+    refundSyncError: String(record.refundSyncError ?? ''),
+    refundSyncedAt: String(record.refundSyncedAt ?? ''),
     isDemo: record.isDemo === true || String(record.reference ?? '').startsWith('DEMO-')
   };
+  booking.refundSummary = calculateRefund(record, { now });
+  booking.refunds = booking.refundSummary.refunds;
   booking.mailStatus = normalizeEmailStatus(record, options.outbox);
   booking.mailEvents = (Array.isArray(options.outbox) ? [...options.outbox] : [])
     .sort((a, b) => String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')))

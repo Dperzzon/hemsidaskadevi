@@ -209,6 +209,14 @@ function createStripeClient(options = {}) {
     async expireCheckoutSession(sessionId) {
       if (!sessionId) throw new StripeError(400, 'STRIPE_SESSION_REQUIRED', 'Sessions-ID krävs.');
       return request('POST', `/v1/checkout/sessions/${encodeURIComponent(sessionId)}/expire`, []);
+    },
+    async listRefundsForPaymentIntent(paymentIntentId) {
+      if (!paymentIntentId) throw new StripeError(400, 'STRIPE_PAYMENT_INTENT_REQUIRED', 'PaymentIntent-ID krävs.');
+      const query = new URLSearchParams({
+        payment_intent: String(paymentIntentId),
+        limit: '100'
+      });
+      return request('GET', `/v1/refunds?${query.toString()}`);
     }
   };
 }

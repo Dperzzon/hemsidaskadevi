@@ -81,6 +81,8 @@ const required = [
   'server/booking/stripe-webhook.js',
   'server/booking/mail.js',
   'server/booking/refund.js',
+  'server/booking/refunds.js',
+  'server/booking/reconciliation.js',
   'server/booking/house-rules.json',
   'shared/pricing-config.json',
   'shared/practical-info.json',

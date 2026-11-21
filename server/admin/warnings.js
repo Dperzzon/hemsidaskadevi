@@ -27,6 +27,7 @@ const WARNING = {
   MAIL_REVIEW: 'mail.review',
   PAYMENT_MISSING: 'payment.missing',
   RECONCILIATION: 'payment.reconciliation',
+  REFUND_PENDING: 'payment.refund_pending',
   REQUEST_STALE: 'request.stale'
 };
 
@@ -57,6 +58,7 @@ const POLICIES = {
   [WARNING.MAIL_REVIEW]: { type: 'MAIL', severity: SEVERITY.VERIFY, dismissible: true, recheckable: false },
   [WARNING.PAYMENT_MISSING]: { type: 'PAYMENT', severity: SEVERITY.ACTION, dismissible: false, recheckable: false },
   [WARNING.RECONCILIATION]: { type: 'PAYMENT', severity: SEVERITY.ACTION, dismissible: false, recheckable: false },
+  [WARNING.REFUND_PENDING]: { type: 'PAYMENT', severity: SEVERITY.ACTION, dismissible: false, recheckable: false },
   [WARNING.REQUEST_STALE]: { type: 'REQUEST', severity: SEVERITY.ACTION, dismissible: false, recheckable: false }
 };
 
@@ -464,6 +466,18 @@ function operationalWarnings(booking, now) {
       why: 'Bekräftade bokningar med framtida ankomst och ett totalpris ska ha en registrerad betalstatus.',
       recommendation: 'Registrera betalning eller ändra betalstatus. Varningen kan inte markeras som hanterad.',
       fingerprint: warningFingerprint(booking, WARNING.PAYMENT_MISSING, `${booking.paymentStatus}|${booking.total}|${booking.arrival}`)
+    }));
+  }
+
+  if (booking.statusCode === 'CANCELLED' && booking.refundSummary &&
+      booking.refundSummary.remainingOre > 0 && booking.refundSummary.calculatedOre > 0) {
+    warnings.push(createWarning(WARNING.REFUND_PENDING, {
+      title: 'Återbetalning kvarstår',
+      what: `Beräknad återbetalning är ${booking.refundSummary.calculatedOre} öre och ${booking.refundSummary.remainingOre} öre återstår att hantera.`,
+      why: 'Avbokningspolicyn kan ge kunden rätt till återbetalning. Portalen utför ingen återbetalning automatiskt.',
+      recommendation: 'Genomför återbetalningen i Stripe och registrera den sedan under Återbetalning. Varningen kan inte kvitteras.',
+      fingerprint: warningFingerprint(booking, WARNING.REFUND_PENDING,
+        `${booking.refundSummary.calculatedOre}|${booking.refundSummary.remainingOre}|${booking.statusCode}`)
     }));
   }
 

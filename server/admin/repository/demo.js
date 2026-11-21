@@ -95,6 +95,18 @@ function createDemoRepository(options = {}) {
     calendar.delete(key);
   }
 
+  function updateCalendarNight(night, data, { resource } = {}) {
+    const target = resource === 'extrahus' ? 'extrahus' : 'main';
+    const key = calendarKey(target, night);
+    const existing = calendar.get(key);
+    if (!existing) {
+      const cause = new Error('Natten hittades inte');
+      cause.status = 404;
+      throw cause;
+    }
+    calendar.set(key, { ...existing, ...data, night, resource: target });
+  }
+
   return {
     type: 'demo',
     readOnly: false,
@@ -108,6 +120,9 @@ function createDemoRepository(options = {}) {
       return { ...booking, etag: etagFor(requests.get(booking.idempotencyKey) ?? booking) };
     },
     async getRawBooking(reference) {
+      return getRawBooking(reference);
+    },
+    async getByReference(reference) {
       return getRawBooking(reference);
     },
     async findByIdempotencyKey(key) {
@@ -245,6 +260,9 @@ function createDemoRepository(options = {}) {
     },
     async createCalendarNight(night, data, options = {}) {
       createCalendarNight(night, data, options);
+    },
+    async updateCalendarNight(night, data, options = {}) {
+      updateCalendarNight(night, data, options);
     },
     async deleteCalendarNight(night, reference, options = {}) {
       deleteCalendarNight(night, reference, options);

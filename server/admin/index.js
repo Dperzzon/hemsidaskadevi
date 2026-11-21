@@ -38,7 +38,8 @@ const {
   calendarRange,
   enrichWarnings,
   acknowledgeWarning,
-  recheckWarning
+  recheckWarning,
+  retryBookingNotifications
 } = require('./booking-service');
 const {
   DOCUMENT_KINDS,
@@ -57,6 +58,11 @@ const {
   approveCalendarSafety,
   directBookingOverview
 } = require('./direct-booking-service');
+const {
+  requestReconciliation,
+  requestRefundSync,
+  recordRefund
+} = require('./refund-service');
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
@@ -648,6 +654,77 @@ async function handleApi(req, res, url, context) {
       decodeURIComponent(paymentLinkRevokeMatch[1]),
       parsed.body,
       serviceOptions(context),
+      { warn: context.warn }
+    );
+    sendJson(req, res, result.status, result.jsonBody);
+    return;
+  }
+
+  const notificationsRetryMatch = /^\/api\/admin\/bookings\/([^/]+)\/notifications\/retry$/.exec(pathname);
+  if (notificationsRetryMatch && req.method === 'POST') {
+    if (!guardWrite(req, res, context)) return;
+    const parsed = await readBodyOrError(req, res, true);
+    if (!parsed) return;
+    const result = await retryBookingNotifications(
+      repository,
+      principal,
+      decodeURIComponent(notificationsRetryMatch[1]),
+      parsed.body,
+      serviceOptions(context),
+      { warn: context.warn }
+    );
+    sendJson(req, res, result.status, result.jsonBody);
+    return;
+  }
+
+  const reconcileMatch = /^\/api\/admin\/bookings\/([^/]+)\/reconcile$/.exec(pathname);
+  if (reconcileMatch && req.method === 'POST') {
+    if (!guardWrite(req, res, context)) return;
+    const parsed = await readBodyOrError(req, res, true);
+    if (!parsed) return;
+    const result = await requestReconciliation(
+      repository,
+      principal,
+      decodeURIComponent(reconcileMatch[1]),
+      parsed.body,
+      serviceOptions(context),
+      { warn: context.warn }
+    );
+    sendJson(req, res, result.status, result.jsonBody);
+    return;
+  }
+
+  const refundsSyncMatch = /^\/api\/admin\/bookings\/([^/]+)\/refunds\/sync$/.exec(pathname);
+  if (refundsSyncMatch && req.method === 'POST') {
+    if (!guardWrite(req, res, context)) return;
+    const parsed = await readBodyOrError(req, res, true);
+    if (!parsed) return;
+    const result = await requestRefundSync(
+      repository,
+      principal,
+      decodeURIComponent(refundsSyncMatch[1]),
+      parsed.body,
+      serviceOptions(context),
+      { warn: context.warn }
+    );
+    sendJson(req, res, result.status, result.jsonBody);
+    return;
+  }
+
+  const refundsMatch = /^\/api\/admin\/bookings\/([^/]+)\/refunds$/.exec(pathname);
+  if (refundsMatch && req.method === 'POST') {
+    if (!guardWrite(req, res, context)) return;
+    const parsed = await readBodyOrError(req, res);
+    if (!parsed) return;
+    const result = await recordRefund(
+      repository,
+      principal,
+      decodeURIComponent(refundsMatch[1]),
+      parsed.body,
+      {
+        ...serviceOptions(context),
+        idempotencyKey: req.headers['idempotency-key'] ?? parsed.body.idempotencyKey
+      },
       { warn: context.warn }
     );
     sendJson(req, res, result.status, result.jsonBody);

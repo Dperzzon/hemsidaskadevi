@@ -39,6 +39,17 @@ param keyVaultSecretName string
 @description('Namn på Key Vault-sekretens för den hemliga token i Skadevis publika iCal-export. Värdet sätts aldrig via Bicep.')
 param calendarExportSecretName string = 'calendar-export-token'
 
+@description('Namn på Key Vault-sekretens för HMAC-hemligheten som gör GA4-transaktions-ID:n stabila men icke-reversibla. Värdet sätts aldrig via Bicep.')
+param analyticsTransactionSecretName string = 'analytics-transaction-secret'
+
+@description('Tabellnamn för bokningsdata. Namnet är ingen hemlighet.')
+param bookingTableName string = 'bookingrequests'
+
+@description('Intervall i minuter för schemalagd Stripe-avstämning av betalningar som saknar webhook.')
+@minValue(1)
+@maxValue(60)
+param stripeReconcileIntervalMinutes int = 5
+
 @description('Domän som planeras kopplas; används som tagg och i domänstegen.')
 param customDomain string
 
@@ -122,6 +133,18 @@ var baseAppSettings = [
   {
     name: 'CALENDAR_EXPORT_TOKEN'
     value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/${calendarExportSecretName})'
+  }
+  {
+    name: 'ANALYTICS_TRANSACTION_SECRET'
+    value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/${analyticsTransactionSecretName})'
+  }
+  {
+    name: 'AZURE_TABLE_NAME'
+    value: bookingTableName
+  }
+  {
+    name: 'STRIPE_RECONCILE_INTERVAL_MINUTES'
+    value: string(stripeReconcileIntervalMinutes)
   }
   {
     name: 'CALENDAR_SYNC_MONITOR_MINUTES'

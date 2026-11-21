@@ -13,6 +13,7 @@ const {
   checkDirectBookingAvailability
 } = require('../../server/booking/direct-booking');
 const { handleStripeWebhook } = require('../../server/booking/stripe-webhook');
+const { reconcileDirectBooking } = require('../../server/booking/reconciliation');
 const { signStripePayload } = require('../../server/booking/stripe');
 const { createAnalyticsTransactionId } = require('../../shared/analytics');
 
@@ -510,6 +511,242 @@ test('dubbel webhook registrerar betalningen exakt en gång', async () => {
   const record = await memory.store.findByReference(reference);
   assert.equal(record.payments.length, 1);
   assert.equal(record.statusCode, 'CONFIRMED');
+});
+
+test('underbetalning bekräftar inte bokningen och bevarar betalningen', async () => {
+  const { options, context, memory, stripe } = setup();
+  const created = await handleDirectBooking(request(), context, options);
+  const reference = created.jsonBody.reference;
+  const session = [...stripe.sessions.values()][0];
+  session.payment_status = 'paid';
+  session.status = 'complete';
+  session.amount_total -= 100;
+
+  const response = await signedWebhook(memory.store, {
+    id: 'evt_direct_underpaid_1',
+    type: 'checkout.session.completed',
+    livemode: false,
+    data: { object: session }
+  }, { stripeClient: stripe });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.jsonBody.reconciliation, true);
+  const record = await memory.store.findByReference(reference);
+  assert.equal(record.statusCode, 'RECONCILIATION');
+  assert.equal(record.reconciliation.code, 'AMOUNT_MISMATCH');
+  assert.equal(record.payments.length, 1);
+  assert.equal(record.reservation.status, 'ACTIVE');
+  for (const row of memory.calendar.values()) assert.equal(row.type, 'RESERVATION');
+});
+
+test('överbetalning får bekräfta en redan fullbetald session', async () => {
+  const { options, context, memory, stripe } = setup();
+  const created = await handleDirectBooking(request(), context, options);
+  const reference = created.jsonBody.reference;
+  const raw = await memory.store.getByReference(reference);
+  const record = raw.record;
+  const extra = {
+    id: 'pay_extra',
+    type: 'PAYMENT',
+    method: 'CARD',
+    amountOre: 10000,
+    currency: 'SEK',
+    paidAt: NOW.toISOString(),
+    createdAt: NOW.toISOString(),
+    stripeSessionId: 'manual-extra'
+  };
+  await memory.store.updateRequest({
+    ...record,
+    payments: [...(record.payments ?? []), extra],
+    version: Number(record.version || 1) + 1
+  }, { ifMatch: raw.etag });
+  const session = [...stripe.sessions.values()][0];
+  session.payment_status = 'paid';
+  session.status = 'complete';
+
+  const response = await signedWebhook(memory.store, {
+    id: 'evt_direct_overpaid_1',
+    type: 'checkout.session.completed',
+    livemode: false,
+    data: { object: session }
+  }, { stripeClient: stripe });
+
+  assert.equal(response.status, 200);
+  const saved = await memory.store.findByReference(reference);
+  assert.equal(saved.statusCode, 'CONFIRMED');
+  assert.ok(saved.payments.length >= 2);
+});
+
+test('betalning med okänd Stripe-session bekräftar inte bokningen', async () => {
+  const { options, context, memory, stripe } = setup();
+  const created = await handleDirectBooking(request(), context, options);
+  const reference = created.jsonBody.reference;
+  const session = { ...[...stripe.sessions.values()][0], id: 'cs_unknown_session', payment_status: 'paid', status: 'complete' };
+
+  const response = await signedWebhook(memory.store, {
+    id: 'evt_direct_unknown_session_1',
+    type: 'checkout.session.completed',
+    livemode: false,
+    data: { object: session }
+  }, { stripeClient: stripe });
+
+  assert.equal(response.status, 200);
+  const record = await memory.store.findByReference(reference);
+  assert.equal(record.statusCode, 'PENDING_PAYMENT');
+  assert.equal((record.payments ?? []).length, 0);
+});
+
+test('misslyckad utkorgsskrivning ger 503, sparas som obligatorisk brist och kan köas om utan dubbletter', async () => {
+  const { options, context, memory, stripe } = setup();
+  const created = await handleDirectBooking(request(), context, options);
+  const reference = created.jsonBody.reference;
+  const originalSave = memory.store.save.bind(memory.store);
+  let failOutbox = true;
+  memory.store.save = async (entry) => {
+    if (failOutbox && entry.partition === 'outbox') throw new Error('simulerat utkorgsfel');
+    return originalSave(entry);
+  };
+  const session = [...stripe.sessions.values()][0];
+  session.payment_status = 'paid';
+  session.status = 'complete';
+  const event = {
+    id: 'evt_direct_outbox_fail_1',
+    type: 'checkout.session.completed',
+    livemode: false,
+    data: { object: session }
+  };
+
+  const failed = await signedWebhook(memory.store, event, { stripeClient: stripe, outboxEnabled: true });
+  assert.equal(failed.status, 503);
+  let record = await memory.store.findByReference(reference);
+  assert.equal(record.statusCode, 'CONFIRMED');
+  assert.equal(record.emailObligation.guest.status, 'FAILED');
+  assert.equal(record.emailObligation.host.status, 'FAILED');
+
+  failOutbox = false;
+  const retried = await signedWebhook(memory.store, event, { stripeClient: stripe, outboxEnabled: true });
+  assert.equal(retried.status, 200);
+  record = await memory.store.findByReference(reference);
+  assert.equal(record.emailObligation.guest.status, 'QUEUED');
+  assert.equal(record.emailObligation.host.status, 'QUEUED');
+  const outboxRows = [...memory.records.values()].filter((entry) => entry.record.partition === 'outbox');
+  assert.equal(outboxRows.length, 2);
+
+  const duplicate = await signedWebhook(memory.store, event, { stripeClient: stripe, outboxEnabled: true });
+  assert.equal(duplicate.status, 200);
+  const after = [...memory.records.values()].filter((entry) => entry.record.partition === 'outbox');
+  assert.equal(after.length, 2);
+});
+
+test('avstämning bekräftar en betald session när webhooken aldrig kom fram', async () => {
+  const { options, context, memory, stripe } = setup();
+  const created = await handleDirectBooking(request(), context, options);
+  const reference = created.jsonBody.reference;
+  const session = [...stripe.sessions.values()][0];
+  session.payment_status = 'paid';
+  session.status = 'complete';
+
+  const result = await reconcileDirectBooking(memory.store, reference, {
+    ...options,
+    stripeClient: stripe
+  }, context);
+
+  assert.equal(result.status, 'CONFIRMED');
+  const record = await memory.store.findByReference(reference);
+  assert.equal(record.statusCode, 'CONFIRMED');
+  assert.equal(record.payments.length, 1);
+  for (const row of memory.calendar.values()) assert.equal(row.type, 'BOOKING');
+});
+
+test('avstämning av betald reservation efter lokal expiresAt behåller bokningen', async () => {
+  const { options, context, memory, stripe } = setup();
+  const created = await handleDirectBooking(request(), context, options);
+  const reference = created.jsonBody.reference;
+  const raw = await memory.store.getByReference(reference);
+  await memory.store.updateRequest({
+    ...raw.record,
+    reservation: { ...raw.record.reservation, expiresAt: '2026-11-01T00:00:00Z' },
+    version: Number(raw.record.version || 1) + 1
+  }, { ifMatch: raw.etag });
+  const session = [...stripe.sessions.values()][0];
+  session.payment_status = 'paid';
+  session.status = 'complete';
+
+  const result = await reconcileDirectBooking(memory.store, reference, { ...options, stripeClient: stripe }, context);
+  assert.equal(result.status, 'CONFIRMED');
+  const record = await memory.store.findByReference(reference);
+  assert.equal(record.statusCode, 'CONFIRMED');
+});
+
+test('avstämning med Airbnb-konflikt går till RECONCILIATION', async () => {
+  const { options, context, memory, stripe } = setup();
+  const created = await handleDirectBooking(request(), context, options);
+  const reference = created.jsonBody.reference;
+  const session = [...stripe.sessions.values()][0];
+  session.payment_status = 'paid';
+  session.status = 'complete';
+  const blockedOptions = {
+    ...options,
+    availabilityHandler: async () => ({ status: 200, jsonBody: { blocked: ['2026-11-21'] } })
+  };
+
+  const result = await reconcileDirectBooking(memory.store, reference, { ...blockedOptions, stripeClient: stripe }, context);
+  assert.equal(result.status, 'RECONCILIATION');
+  const record = await memory.store.findByReference(reference);
+  assert.equal(record.statusCode, 'RECONCILIATION');
+  assert.equal(record.payments.length, 1);
+});
+
+test('avstämning med Stripe-fel behåller reservationen och flaggar granskning', async () => {
+  const { options, context, memory, stripe } = setup();
+  const created = await handleDirectBooking(request(), context, options);
+  const reference = created.jsonBody.reference;
+  const broken = {
+    ...stripe,
+    async retrieveCheckoutSession() { throw new Error('Stripe nere'); }
+  };
+
+  const result = await reconcileDirectBooking(memory.store, reference, { ...options, stripeClient: broken }, context);
+  assert.equal(result.status, 'UNKNOWN');
+  const record = await memory.store.findByReference(reference);
+  assert.equal(record.statusCode, 'PENDING_PAYMENT');
+  assert.equal(record.paymentReview.reason, 'STRIPE_UNAVAILABLE');
+});
+
+test('avstämning frigör utgången obetald reservation', async () => {
+  const { options, context, memory, stripe } = setup();
+  const created = await handleDirectBooking(request(), context, options);
+  const reference = created.jsonBody.reference;
+  const session = [...stripe.sessions.values()][0];
+  session.status = 'expired';
+  session.payment_status = 'unpaid';
+
+  const result = await reconcileDirectBooking(memory.store, reference, { ...options, stripeClient: stripe }, context);
+  assert.equal(result.status, 'RELEASED');
+  const record = await memory.store.findByReference(reference);
+  assert.equal(record.statusCode, 'EXPIRED');
+  assert.equal(memory.calendar.size, 0);
+});
+
+test('avstämning bekräftar aldrig en RECONCILIATION automatiskt', async () => {
+  const { options, context, memory, stripe } = setup();
+  const created = await handleDirectBooking(request(), context, options);
+  const reference = created.jsonBody.reference;
+  const raw = await memory.store.getByReference(reference);
+  await memory.store.updateRequest({
+    ...raw.record,
+    statusCode: 'RECONCILIATION',
+    reconciliation: { code: 'MANUAL', reason: 'Manuell', at: NOW.toISOString() },
+    version: Number(raw.record.version || 1) + 1
+  }, { ifMatch: raw.etag });
+  const session = [...stripe.sessions.values()][0];
+  session.payment_status = 'paid';
+  session.status = 'complete';
+
+  const result = await reconcileDirectBooking(memory.store, reference, { ...options, stripeClient: stripe }, context);
+  assert.equal(result.status, 'PAID_MANUAL_REVIEW');
+  const record = await memory.store.findByReference(reference);
+  assert.equal(record.statusCode, 'RECONCILIATION');
 });
 
 test('utgången Checkout-session frigör reservationen', async () => {

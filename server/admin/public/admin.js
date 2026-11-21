@@ -392,6 +392,57 @@
     });
   });
 
+  document.querySelectorAll('[data-retry-notifications]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      try {
+        const data = await api(
+          `/api/admin/bookings/${encodeURIComponent(button.dataset.retryNotifications)}/notifications/retry`,
+          { body: { reason: 'Manuell omkörning i adminportalen' } }
+        );
+        showToast(data.message || 'Bekräftelsemejlen ligger i utkorgen.');
+        window.location.reload();
+      } catch (error) {
+        showToast(errorText(error));
+        button.disabled = false;
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-sync-refunds]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      try {
+        const data = await api(
+          `/api/admin/bookings/${encodeURIComponent(button.dataset.syncRefunds)}/refunds/sync`,
+          { body: {} }
+        );
+        showToast(data.message || 'Synk mot Stripe är begärd.');
+        button.disabled = false;
+      } catch (error) {
+        showToast(errorText(error));
+        button.disabled = false;
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-request-reconciliation]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      try {
+        const data = await api(
+          `/api/admin/bookings/${encodeURIComponent(button.dataset.requestReconciliation)}/reconcile`,
+          { body: {} }
+        );
+        showToast(data.message || 'Avstämning är begärd.');
+        button.disabled = false;
+      } catch (error) {
+        showToast(errorText(error));
+        button.disabled = false;
+      }
+    });
+  });
+
   function formValue(form, name) {
     const element = form.elements[name];
     return element ? element.value : '';
@@ -505,6 +556,28 @@
               airbnbOverrideReason: overrideReason.trim()
             });
           }
+          window.location.reload();
+          return;
+        }
+        if (type === 'refund-record') {
+          let idempotencyKey = formValue(form, 'idempotencyKey');
+          if (!idempotencyKey) {
+            idempotencyKey = crypto.randomUUID();
+            form.elements.idempotencyKey.value = idempotencyKey;
+          }
+          const amount = Number(formValue(form, 'amount'));
+          await api(`/api/admin/bookings/${encodeURIComponent(form.dataset.reference)}/refunds`, {
+            headers: { 'Idempotency-Key': idempotencyKey },
+            body: {
+              status: formValue(form, 'status'),
+              amountOre: Math.round(amount * 100),
+              stripeRefundId: formValue(form, 'stripeRefundId'),
+              reason: formValue(form, 'reason'),
+              note: formValue(form, 'note'),
+              confirm: checked(form, 'confirm'),
+              expectedEtag: form.dataset.etag || undefined
+            }
+          });
           window.location.reload();
           return;
         }

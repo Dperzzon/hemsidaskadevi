@@ -63,18 +63,18 @@ param enableStripeWebhook = true
 // medvetet, inte som bieffekt av en infra-deployment.
 param enableBookingRequests = true
 
-// Utkorgen för betalningsmejl är fortsatt avstängd. Aktiveras först efter
-// kontrollerad test och separat godkännande.
-param enableStripeOutbox = false
+// Utkorgen för betalningsmejl är aktiverad i produktion sedan 2026-11-21.
+// Värdet är codifierat så att en infra-deployment inte stänger av bekräftelser.
+param enableStripeOutbox = true
 
 param enableCardCheckout = true
 
 param enableSwishCheckout = false
 
-// Direktbokning är aktiverad som funktion, men ALLA datum är stängda som
-// standard. Owner måste uttryckligen öppna ett datumintervall i adminportalen
-// och bekräfta Airbnb-blockeringen. Inga datum öppnas automatiskt.
-param enableDirectBooking = true
+// Direktbokning är tillfälligt pausad under Steg 13B. Sätt till true först
+// efter uttryckligt godkännande av kontrollerat testköp. Detta förhindrar att
+// en infra-deployment återaktiverar försäljning medan säkerhetspausen gäller.
+param enableDirectBooking = false
 
 param stripeMode = 'live'
 

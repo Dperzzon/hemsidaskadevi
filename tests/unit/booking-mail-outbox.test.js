@@ -306,10 +306,19 @@ test('direktbokning efter verifierad betalning skickar en kombinerad bekräftels
     assert.equal(row.deliveryStatus, 'Ej skickad');
   }
   const confirmation = store.outbox.find((row) => row.mailType === 'GUEST_BOOKING_CONFIRMED');
-  assert.match(confirmation.mailHtml, /Din bokning är bekräftad/);
+  assert.match(confirmation.mailHtml, /Din bokning på Skadevi Herrgård är bekräftad/);
   assert.match(confirmation.mailHtml, /10 februari 2027/);
   assert.match(confirmation.mailHtml, /Hela bokningsbeloppet är betalt/);
   assert.doesNotMatch(confirmation.mailHtml, /pi_test_11d/);
+
+  const host = store.outbox.find((row) => row.mailType === 'HOST_PAYMENT_RECEIVED');
+  assert.match(host.mailHtml, /Gäst:/);
+  assert.match(host.mailHtml, /Ankomst:/);
+  assert.match(host.mailHtml, /Avresa:/);
+  assert.match(host.mailHtml, /Antal nätter:/);
+  assert.match(host.mailHtml, /Antal gäster:/);
+  assert.match(host.mailHtml, /Tillval:/);
+  assert.match(host.mailHtml, /Totalt bokningsbelopp:/);
 });
 
 test('dubbel direktbokningswebhook ger aldrig dubbla bekräftelser', async () => {

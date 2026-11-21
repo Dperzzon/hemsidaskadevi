@@ -477,6 +477,83 @@ function paymentPanel(booking, isOwner, writesEnabled, today, stripeEnabled, str
   </section>`;
 }
 
+function refundPanel(booking, isOwner, writesEnabled) {
+  const summary = booking.refundSummary ?? { refunds: [], calculatedOre: 0, remainingOre: 0, statusLabel: 'Ingen uppgift' };
+  const refunds = Array.isArray(summary.refunds) ? summary.refunds : [];
+  const rows = refunds.length
+    ? refunds.map((refund) => `<tr>
+        <td data-label="Status">${escapeHtml(refund.status === 'COMPLETED' ? 'Genomförd' : refund.status === 'PROCESSING' ? 'Pågår' : 'Misslyckades')}</td>
+        <td data-label="Belopp">${escapeHtml(formatOre(refund.amountOre))}</td>
+        <td data-label="Stripe Refund-ID"><code>${escapeHtml(refund.stripeRefundId || '—')}</code></td>
+        <td data-label="Källa">${escapeHtml(refund.source === 'STRIPE' ? 'Stripe' : 'Manuell')}</td>
+        <td data-label="Datum">${escapeHtml(refund.completedAt ? formatDateTime(refund.completedAt) : refund.createdAt ? formatDateTime(refund.createdAt) : '—')}</td>
+      </tr>`).join('')
+    : '<tr><td colspan="5" class="muted">Inga återbetalningar registrerade.</td></tr>';
+  return `<section class="panel">
+    <div class="panel-heading"><div><p class="eyebrow">Ekonomi</p><h2>Återbetalning</h2></div><span class="snapshot-pill">${escapeHtml(summary.statusLabel)}</span></div>
+    <div class="fact-grid">
+      ${fact('Registrerat betalt', escapeHtml(formatOre(summary.paidOre)))}
+      ${fact('Underlag enligt policy', escapeHtml(formatOre(summary.basisOre)))}
+      ${fact('Policysats', summary.percent === null ? '—' : `${summary.percent} %`)}
+      ${fact('Beräknad återbetalning', escapeHtml(formatOre(summary.calculatedOre)))}
+      ${fact('Genomfört', escapeHtml(formatOre(summary.completedOre)))}
+      ${fact('Pågår', escapeHtml(formatOre(summary.processingOre)))}
+      ${fact('Kvar att hantera', escapeHtml(formatOre(summary.remainingOre)))}
+    </div>
+    <div class="table-wrap"><table class="data-table compact">
+      <thead><tr><th>Status</th><th>Belopp</th><th>Stripe Refund-ID</th><th>Källa</th><th>Datum</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+    ${summary.remainingOre > 0
+      ? '<p class="notice">Återbetalning behöver hanteras. Ingen återbetalning utförs automatiskt av portalen.</p>'
+      : summary.calculatedOre > 0
+        ? '<p class="price-note">Beräknat återbetalningsbelopp är fullt hanterat enligt registrerade poster.</p>'
+        : '<p class="price-note">Policyn ger ingen återbetalning för detta datum.</p>'}
+    ${summary.policyVersion ? `<p class="price-note">Policy ${escapeHtml(summary.policyVersion)} · ${escapeHtml(summary.basis || '')} · avbokningsdatum ${escapeHtml(summary.cancellationDate || '')}</p>` : ''}
+    ${isOwner && writesEnabled ? `
+      <form data-admin-form="refund-record" data-reference="${escapeHtml(booking.reference)}" data-etag="${escapeHtml(booking.etag)}">
+        <div class="form-grid">
+          <label class="field"><span>Status</span><select name="status" required>
+            <option value="PROCESSING">Pågår</option>
+            <option value="COMPLETED">Genomförd</option>
+            <option value="FAILED">Misslyckades</option>
+          </select></label>
+          <label class="field"><span>Belopp i kronor</span><input type="number" min="0.01" step="0.01" name="amount" required></label>
+          <label class="field"><span>Stripe Refund-ID (krävs för genomförd)</span><input type="text" name="stripeRefundId" maxlength="120" placeholder="re_..."></label>
+        </div>
+        <label class="field"><span>Orsak</span><input type="text" name="reason" maxlength="500"></label>
+        <label class="field"><span>Intern anteckning</span><input type="text" name="note" maxlength="1000"></label>
+        <label class="check-row"><input type="checkbox" name="confirm" required> Jag bekräftar att uppgifterna avser en faktisk eller påbörjad återbetalning.</label>
+        <input type="hidden" name="idempotencyKey" value="">
+        <div class="button-row">
+          <button class="btn btn-secondary" type="submit">Registrera återbetalning</button>
+          <button class="btn btn-ghost" type="button" data-sync-refunds="${escapeHtml(booking.reference)}">Hämta från Stripe</button>
+        </div>
+        <p class="price-note">Portalen utför ingen återbetalning. Registreringen är ett spårbarhetsskydd; genomför återbetalningen i Stripe först.</p>
+      </form>` : '<p class="price-note">Endast Owner kan registrera återbetalningar.</p>'}
+    ${booking.refundSyncRequested ? '<p class="notice">Synk mot Stripe är begärd och körs inom några minuter.</p>' : ''}
+    ${booking.refundSyncError ? `<p class="inline-warning">${escapeHtml(booking.refundSyncError)}</p>` : ''}
+    ${booking.refundSyncedAt ? `<p class="price-note">Senast synkad från Stripe: ${escapeHtml(formatDateTime(booking.refundSyncedAt))}</p>` : ''}
+  </section>`;
+}
+
+function reconciliationPanel(booking, isOwner, writesEnabled) {
+  if (!['PENDING_PAYMENT', 'RECONCILIATION'].includes(booking.statusCode)) return '';
+  const review = booking.paymentReview;
+  return `<section class="panel">
+    <div class="panel-heading"><div><p class="eyebrow">Betalning</p><h2>Avstämning mot Stripe</h2></div></div>
+    ${review ? `<p class="prose">${escapeHtml(review.message || review.reason || 'Kontroll krävs.')}</p>
+      <p class="price-note">Kontrollerad: ${escapeHtml(review.checkedAt ? formatDateTime(review.checkedAt) : '—')}${review.sessionId ? ` · Session ${escapeHtml(review.sessionId)}` : ''}</p>` : '<p class="muted">Ingen Stripe-kontroll har sparats ännu.</p>'}
+    ${booking.reconciliationRequest?.status === 'REQUESTED'
+      ? '<p class="notice">Avstämning är begärd och körs automatiskt inom några minuter.</p>'
+      : ''}
+    ${isOwner && writesEnabled
+      ? `<div class="button-row"><button class="btn btn-secondary" type="button" data-request-reconciliation="${escapeHtml(booking.reference)}">Kontrollera betalning mot Stripe</button></div>
+         <p class="price-note">Systemet kontrollerar den faktiska Stripe-sessionen. En betald session återupptar den säkra bekräftelseprocessen med Airbnb-kontroll. En avstämningsbokning bekräftas aldrig automatiskt.</p>`
+      : ''}
+  </section>`;
+}
+
 function renderBookingDetail(options) {
   const { booking, principal, demo, csrfToken, writesEnabled, history = [], today, stripeEnabled = false, stripeMode = 'disabled', stripeSwishEnabled = false, outboxEnabled = false } = options;
   const isOwner = principal.roles?.includes('Owner');
@@ -587,6 +664,10 @@ function renderBookingDetail(options) {
 
         ${booking.isBlock ? '' : paymentPanel(booking, isOwner, writesEnabled, today, stripeEnabled, stripeMode, stripeSwishEnabled)}
 
+        ${booking.isBlock ? '' : reconciliationPanel(booking, isOwner, writesEnabled)}
+
+        ${booking.isBlock ? '' : refundPanel(booking, isOwner, writesEnabled)}
+
         ${booking.isBlock ? '' : invoicePanel(booking, isOwner, writesEnabled)}
 
         <section class="panel">
@@ -594,6 +675,12 @@ function renderBookingDetail(options) {
           ${emailRow('Värdmejl', booking.mailStatus.host)}
           ${emailRow('Gästmejl', booking.mailStatus.guest)}
           ${mailEventsTable(booking)}
+          ${booking.statusCode === 'CONFIRMED' && booking.emailObligation &&
+            [booking.emailObligation.guest?.status, booking.emailObligation.host?.status]
+              .some((status) => status === 'PENDING' || status === 'FAILED')
+            ? `<div class="button-row"><button class="btn btn-secondary" type="button" data-retry-notifications="${escapeHtml(booking.reference)}">Köa bekräftelsemejl igen</button></div>
+               <p class="notice">Minst en bekräftelse saknar spårbar utkorgspost. Knappen köar om med samma idempotensnyckel och skapar inga dubbletter.</p>`
+            : ''}
           <p class="price-note">”Accepterat av Resend” betyder att API:et tog emot mejlet, inte att det levererats till mottagaren. Köade mejl skickas först när utkorgen och Logic App är aktiverade. Leveransbekräftelse från Resend är inte aktiverad ännu.</p>
         </section>
 

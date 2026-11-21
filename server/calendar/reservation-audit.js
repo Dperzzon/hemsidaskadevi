@@ -75,7 +75,10 @@ function classifyReference(record, types, now) {
     // PENDING_PAYMENT med BOOKING/MANUAL-rader är inkonsekvent: fail closed.
     return { active: true, reason: 'pending_with_booking_rows' };
   }
-  if (expired) return { active: false, reason: 'expired' };
+  // En betald reservation kan sakna bekräftelse om webhooken är fördröjd.
+  // Den lokala expiresAt är då inte bevis på att Stripe-sessionen är utgången.
+  // Fail closed: behåll blockeringen i exporten och rapportera för avstämning.
+  if (expired) return { active: true, reason: 'expired_pending_review' };
   if (Number.isFinite(expiresAt)) return { active: true, reason: 'active' };
   if (reservationStatus === 'ACTIVE') return { active: true, reason: 'active_without_expiry' };
 
@@ -83,7 +86,7 @@ function classifyReference(record, types, now) {
   if (Number.isFinite(created) && now.getTime() - created <= MISSING_EXPIRY_MAX_AGE_MS) {
     return { active: true, reason: 'in_flight' };
   }
-  return { active: false, reason: 'missing_expiry' };
+  return { active: true, reason: 'missing_expiry_review' };
 }
 
 function classifyReservation(record, now) {

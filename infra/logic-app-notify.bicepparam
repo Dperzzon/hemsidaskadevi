@@ -41,6 +41,6 @@ param hostRecipient = 'skadevigard@gmail.com'
 // Sätts uttryckligen till en tidpunkt EFTER godkänd aktivering, så att inga
 // äldre utkorgsposter kan skickas av misstag. Nya poster kräver dessutom
 // dispatchEligible=true och outboxVersion=1.
-param outboxActivationSince = '9999-12-31T23:59:59Z'
+param outboxActivationSince = '2026-11-21T17:15:00Z'
 param environment = 'prod'
 param owner = 'Skadevi Herrgård'

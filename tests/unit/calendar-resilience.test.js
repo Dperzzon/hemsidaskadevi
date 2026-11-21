@@ -93,7 +93,11 @@ test('reservationsavstämning skiljer aktiv, utgången och föräldralös reserv
   assert.equal(classifyReservation({
     statusCode: 'PENDING_PAYMENT',
     reservation: { status: 'ACTIVE', expiresAt: '2026-12-01T11:00:00Z' }
-  }, now).reason, 'expired');
+  }, now).reason, 'expired_pending_review');
+  assert.equal(classifyReservation({
+    statusCode: 'PENDING_PAYMENT',
+    reservation: { status: 'ACTIVE', expiresAt: '2026-12-01T11:00:00Z' }
+  }, now).active, true);
   assert.equal(classifyReservation(null, now).reason, 'orphan');
   assert.equal(classifyReservation({ statusCode: 'RECONCILIATION' }, now).active, true);
   assert.equal(classifyReservation({ statusCode: 'RECONCILIATION' }, now).reason, 'reconciliation');

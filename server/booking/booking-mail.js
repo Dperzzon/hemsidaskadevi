@@ -171,9 +171,12 @@ function buildPaymentNotifications(record, payment, summary, options = {}) {
   ];
   const hostLines = [
     `Referens: ${record.reference}`,
+    `Gäst: ${record.guestName ?? `${record.firstName ?? ''} ${record.lastName ?? ''}`.trim()}`,
+    ...stayLines(record),
     `Betalning mottagen via ${methodText} (Stripe Checkout).`,
     `Betalningstyp: ${kind}`,
     `Belopp: ${formatOre(payment.amountOre)}`,
+    `Totalt bokningsbelopp: ${formatOre(safeSummary.totalOre)}`,
     `Totalt betalt: ${formatOre(safeSummary.paidOre)}`,
     `Återstår: ${formatOre(Math.max(0, safeSummary.remainingOre))}`,
     `Betalstatus: ${safeSummary.paymentLabel}`,

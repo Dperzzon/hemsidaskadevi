@@ -8,7 +8,8 @@ const {
 const {
   applyStripePayment,
   markPaymentRequestStatus,
-  computePaymentSummary
+  computePaymentSummary,
+  normalizePaymentRequests
 } = require('./payment-ledger');
 const {
   RESERVATION_STATUS,
@@ -21,7 +22,14 @@ const {
   buildBookingConfirmation,
   buildPaymentFailedNotification
 } = require('./booking-mail');
-const { queueNotification, queueNotifications } = require('./outbox');
+const {
+  queueNotification,
+  queueNotifications,
+  confirmationOutboxKey,
+  newConfirmationKey,
+  buildEmailObligation,
+  updateEmailObligation
+} = require('./outbox');
 const { handleAvailability } = require('../calendar/availability');
 const { nightKeys } = require('./requests');
 const { bufferNightsFor, addDays } = require('./buffer-nights');
@@ -93,7 +101,7 @@ async function queueConfirmation(store, record, options, context) {
   return queueNotification(
     (entry) => store.save(entry, context),
     {
-      idempotencyKey: `outbox-confirmation-${record.reference}-v${Number(record.version || 1)}`,
+      idempotencyKey: confirmationOutboxKey(record),
       reference: record.reference,
       notification: buildBookingConfirmation(record),
       createdAt: (options.now ?? new Date()).toISOString(),
@@ -368,6 +376,48 @@ async function checkAirbnbBeforeConfirmation(record, store, options, context) {
   return { ok: true, bufferNights };
 }
 
+function verifyDirectPaymentAmount(record, applied, session) {
+  const target = normalizePaymentRequests(record)
+    .find((request) => request.sessionId === String(session.id ?? ''));
+  if (!target) {
+    return {
+      ok: false,
+      code: 'UNKNOWN_SESSION',
+      message: 'Stripe-sessionen tillhör inte denna bokning. Betalningen har bevarats för granskning.'
+    };
+  }
+  const sessionAmount = Number(session.amount_total);
+  const targetAmount = Number(target.amountOre);
+  if (!Number.isSafeInteger(sessionAmount) || sessionAmount <= 0 ||
+      !Number.isSafeInteger(targetAmount) || targetAmount <= 0) {
+    return {
+      ok: false,
+      code: 'AMOUNT_INVALID',
+      message: 'Stripe-sessionens belopp kunde inte verifieras. Betalningen har bevarats för granskning.'
+    };
+  }
+  if (sessionAmount !== targetAmount) {
+    return {
+      ok: false,
+      code: 'AMOUNT_MISMATCH',
+      message: `Stripe-sessionens belopp (${sessionAmount} öre) matchar inte det auktoritativa sessionsbeloppet (${targetAmount} öre). Bokningen har inte bekräftats.`,
+      expectedOre: targetAmount,
+      actualOre: sessionAmount
+    };
+  }
+  const summary = applied.summary ?? computePaymentSummary(applied.record);
+  if (!Number.isSafeInteger(summary.paidOre) || summary.paidOre < summary.totalOre) {
+    return {
+      ok: false,
+      code: 'UNDERPAYMENT',
+      message: `Registrerad betalning (${summary.paidOre} öre) täcker inte bokningens totalbelopp (${summary.totalOre} öre). Bokningen har inte bekräftats.`,
+      expectedOre: summary.totalOre,
+      actualOre: summary.paidOre
+    };
+  }
+  return { ok: true, overpaid: summary.paidOre > summary.totalOre };
+}
+
 async function confirmDirectBooking(store, applied, session, event, options, context) {
   const record = applied.record;
   if (record.bookingSource !== 'DIRECT' && !record.reservation) {
@@ -385,6 +435,19 @@ async function confirmDirectBooking(store, applied, session, event, options, con
     return markReconciliation(
       store, record, session, event, options, context,
       `Bokningen hade status ${record.statusCode ?? 'okänd'} när betalningen togs emot.`
+    );
+  }
+
+  const amountCheck = verifyDirectPaymentAmount(record, applied, session);
+  if (!amountCheck.ok) {
+    return markReconciliation(
+      store, record, session, event, options, context,
+      amountCheck.message,
+      {
+        code: amountCheck.code,
+        expectedOre: amountCheck.expectedOre,
+        actualOre: amountCheck.actualOre
+      }
     );
   }
 
@@ -422,11 +485,24 @@ async function confirmDirectBooking(store, applied, session, event, options, con
   }
 
   const now = options.now ?? new Date();
+  const confirmationKey = record.confirmationKey || newConfirmationKey();
+  const confirmationRecord = { ...record, confirmationKey };
   const updated = {
     ...record,
     statusCode: 'CONFIRMED',
     status: 'Bekräftad',
     confirmedAt: now.toISOString(),
+    confirmationKey,
+    emailObligation: options.outboxEnabled === true
+      ? buildEmailObligation({
+          confirmationKey,
+          guestOutboxKey: confirmationOutboxKey(confirmationRecord),
+          hostOutboxKey: `outbox-stripe-${String(session.id)}-host`,
+          now
+        })
+      : record.emailObligation,
+    reconciliationRequest: null,
+    paymentReview: null,
     reservation: {
       ...(record.reservation ?? {}),
       status: RESERVATION_STATUS.CONFIRMED,
@@ -507,6 +583,101 @@ async function releaseDirectReservation(store, reference, session, event, option
     context.warn?.(`Direktbokning: reservationen kunde inte frigöras för ${reference}.`);
     return { ok: false, retryable: true, error };
   }
+}
+
+// Gemensam sluthantering för en betald Checkout-session. Används av både
+// Stripe-webhooken och den schemalagda avstämningen, så att en betalning som
+// aldrig fick en webhook går genom exakt samma säkra bekräftelseprocess.
+async function finalizePaidCheckoutSession(store, reference, session, event, options, context = {}) {
+  const warn = context.warn ?? (() => {});
+  if (session.payment_status !== 'paid') {
+    return { ...result(200, { received: true, ignored: 'not_paid' }), applied: null, direct: null };
+  }
+
+  let applied;
+  try {
+    applied = await savePaymentWithRetry(store, reference, session, event, options, { warn });
+  } catch (error) {
+    warn(`Stripe-webhook: kunde inte spara betalning för ${reference} (${error?.message ?? 'okänt fel'}).`);
+    return result(503, { error: 'Betalningen kunde inte registreras just nu.' });
+  }
+  if (!applied.ok) {
+    return result(200, { received: true, ignored: applied.reason ?? 'not_applicable' });
+  }
+
+  await appendPaymentHistory(store, applied.record, applied.payment, applied.summary, event, {
+    ...options,
+    reviewRequired: applied.reviewRequired
+  }, { warn });
+
+  const direct = await confirmDirectBooking(store, applied, session, event, options, { warn });
+  if (direct?.retryable) {
+    return result(503, { error: 'Betalningen kunde inte registreras just nu.' });
+  }
+
+  const finalRecord = direct?.record ?? applied.record;
+  const finalSummary = computePaymentSummary(finalRecord);
+  const outboxContext = outboxContextFor(store, { warn });
+  const reviewRequired = direct?.reconciliation
+    ? (finalRecord.reconciliation?.reason || 'Manuell avstämning krävs innan bokningen bekräftas.')
+    : applied.reviewRequired;
+  const directConfirmed = direct?.ok === true &&
+    direct?.skipped !== true &&
+    finalRecord.statusCode === 'CONFIRMED';
+
+  if (directConfirmed) {
+    const guest = await queueConfirmation(store, finalRecord, options, outboxContext);
+    const hostNotification = buildPaymentNotifications(
+      finalRecord,
+      applied.payment,
+      finalSummary,
+      { reviewRequired }
+    ).host;
+    const host = await queueNotification(
+      (entry) => store.save(entry, { warn }),
+      {
+        idempotencyKey: `outbox-stripe-${String(session.id)}-host`,
+        reference: finalRecord.reference,
+        notification: hostNotification,
+        createdAt: (options.now ?? new Date()).toISOString(),
+        context: outboxContext
+      }
+    );
+    const obligation = await updateEmailObligation(
+      store,
+      finalRecord.reference,
+      { guest, host },
+      { ...options, updatedBy: 'Stripe' },
+      { warn }
+    );
+    if (options.outboxEnabled === true && obligation.ok !== true) {
+      warn(`Direktbokning: e-postkvittens kunde inte sparas för ${reference}.`);
+      return result(503, { error: 'Bokningen är bekräftad men mejlkvittensen kunde inte sparas.' });
+    }
+    if (options.outboxEnabled === true && (guest.ok !== true || host.ok !== true)) {
+      warn(`Direktbokning: ett eller flera bekräftelsemejl kunde inte köas för ${reference}.`);
+      return result(503, { error: 'Bokningen är bekräftad men mejlen kunde inte köas.' });
+    }
+  } else {
+    const outbox = await queueOutbox(store, finalRecord, applied.payment, finalSummary, event, {
+      ...options,
+      reviewRequired
+    }, { warn });
+    if (options.outboxEnabled === true && outbox.ok !== true) {
+      return result(503, { error: 'Betalningen är registrerad men kvittomejlen kunde inte köas.' });
+    }
+  }
+
+  if (direct?.reconciliation) {
+    return { ...result(200, { received: true, reconciliation: true }), applied, direct, record: finalRecord };
+  }
+
+  return {
+    ...result(200, { received: true, duplicate: applied.duplicate === true }),
+    applied,
+    direct,
+    record: finalRecord
+  };
 }
 
 async function handleStripeWebhook(request, context = {}, options = {}) {
@@ -605,74 +776,13 @@ async function handleStripeWebhook(request, context = {}, options = {}) {
     return result(200, { received: true, ignored: 'not_paid' });
   }
 
-  let applied;
-  try {
-    applied = await savePaymentWithRetry(store, reference, session, event, eventOptions, { warn });
-  } catch (error) {
-    warn(`Stripe-webhook: kunde inte spara betalning för ${reference} (${error?.message ?? 'okänt fel'}).`);
-    return result(503, { error: 'Betalningen kunde inte registreras just nu.' });
-  }
-  if (!applied.ok) {
-    return result(200, { received: true, ignored: applied.reason ?? 'not_applicable' });
-  }
-
-  await appendPaymentHistory(store, applied.record, applied.payment, applied.summary, event, {
-    ...eventOptions,
-    reviewRequired: applied.reviewRequired
-  }, { warn });
-
-  const direct = await confirmDirectBooking(store, applied, session, event, eventOptions, { warn });
-  if (direct?.retryable) {
-    return result(503, { error: 'Betalningen kunde inte registreras just nu.' });
-  }
-
-  const finalRecord = direct?.record ?? applied.record;
-  const finalSummary = computePaymentSummary(finalRecord);
-  const outboxContext = outboxContextFor(store, { warn });
-  const reviewRequired = direct?.reconciliation
-    ? (finalRecord.reconciliation?.reason || 'Manuell avstämning krävs innan bokningen bekräftas.')
-    : applied.reviewRequired;
-  const directConfirmed = direct?.ok === true &&
-    direct?.skipped !== true &&
-    finalRecord.statusCode === 'CONFIRMED';
-
-  if (directConfirmed) {
-    await queueConfirmation(store, finalRecord, eventOptions, outboxContext);
-    const hostNotification = buildPaymentNotifications(
-      finalRecord,
-      applied.payment,
-      finalSummary,
-      { reviewRequired }
-    ).host;
-    await queueNotification(
-      (entry) => store.save(entry, { warn }),
-      {
-        idempotencyKey: `outbox-stripe-${String(session.id)}-host`,
-        reference: finalRecord.reference,
-        notification: hostNotification,
-        createdAt: now.toISOString(),
-        context: outboxContext
-      }
-    );
-  } else {
-    await queueOutbox(store, finalRecord, applied.payment, finalSummary, event, {
-      ...eventOptions,
-      reviewRequired
-    }, { warn });
-  }
-
-  if (direct?.reconciliation) {
-    return result(200, { received: true, reconciliation: true });
-  }
-
-  return result(200, {
-    received: true,
-    duplicate: applied.duplicate === true
-  });
+  return finalizePaidCheckoutSession(store, reference, session, event, eventOptions, { warn });
 }
 
 module.exports = {
   handleStripeWebhook,
+  finalizePaidCheckoutSession,
+  releaseDirectReservation,
   buildPaymentNotifications,
   HANDLED_EVENTS
 };

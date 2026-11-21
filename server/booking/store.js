@@ -1020,6 +1020,22 @@ function createTableStore(options = {}) {
       });
       return result.status === 200 && result.json?.value ? result.json.value.map(fromEntity) : [];
     },
+    async listReconciliationCandidates() {
+      const result = await tableRequest({
+        accountName, method: 'GET', table,
+        query: [['$filter', `PartitionKey eq 'request' and (statusCode eq 'PENDING_PAYMENT' or statusCode eq 'RECONCILIATION')`]],
+        fetchImpl: options.fetchImpl, auth
+      });
+      return result.status === 200 && result.json?.value ? result.json.value.map(fromEntity) : [];
+    },
+    async listRefundSyncCandidates() {
+      const result = await tableRequest({
+        accountName, method: 'GET', table,
+        query: [['$filter', `PartitionKey eq 'request' and refundSyncRequested eq true`]],
+        fetchImpl: options.fetchImpl, auth
+      });
+      return result.status === 200 && result.json?.value ? result.json.value.map(fromEntity) : [];
+    },
     // Gallring: tar bort request- och utkorgsposter äldre än tröskeln
     // (bör köras som schemalagd rutin, se scripts/purge-old-bookings.mjs).
     async purgeOlderThan(thresholdIso, context = {}) {
@@ -1282,6 +1298,16 @@ function createLocalStore(options = {}) {
     async listPending() {
       await loadOnce();
       return [...records.values()].filter((record) => record.status === 'Inväntar godkännande');
+    },
+    async listReconciliationCandidates() {
+      await loadOnce();
+      return [...records.values()].filter((record) =>
+        record.statusCode === 'PENDING_PAYMENT' || record.statusCode === 'RECONCILIATION'
+      );
+    },
+    async listRefundSyncCandidates() {
+      await loadOnce();
+      return [...records.values()].filter((record) => record.refundSyncRequested === true);
     },
     async purgeOlderThan(thresholdIso, context = {}) {
       await loadOnce(context);

@@ -161,6 +161,9 @@ function createTableAdminRepository(options = {}) {
     async getRawBooking(reference) {
       return getRawBooking(reference);
     },
+    async getByReference(reference) {
+      return getRawBooking(reference);
+    },
     async findByIdempotencyKey(key) {
       const result = await request({
         method: 'GET',
@@ -437,6 +440,30 @@ function createTableAdminRepository(options = {}) {
       if (result.status === 409 || result.status === 412) throw conflict('Natten är redan blockerad');
       if (result.status !== 201) {
         throw new Error(`Kalenderraden kunde inte sparas (${result.status})`);
+      }
+    },
+    async updateCalendarNight(night, data, { resource, ifMatch } = {}) {
+      const partition = calendarPartition(resource);
+      const result = await request({
+        method: 'PUT',
+        target: rowTarget(partition, night),
+        body: {
+          PartitionKey: partition,
+          RowKey: night,
+          type: data.type ?? '',
+          kind: data.kind ?? '',
+          reference: data.reference ?? '',
+          blockId: data.blockId ?? '',
+          source: data.source ?? '',
+          note: data.note ?? '',
+          createdBy: data.createdBy ?? '',
+          createdAt: data.createdAt ?? new Date().toISOString()
+        },
+        ifMatch: ifMatch ?? '*'
+      });
+      if (result.status === 409 || result.status === 412) throw conflict('ETag-konflikt');
+      if (![200, 204].includes(result.status)) {
+        throw new Error(`Kalenderraden kunde inte uppdateras (${result.status})`);
       }
     },
     async deleteCalendarNight(night, reference, { resource } = {}) {

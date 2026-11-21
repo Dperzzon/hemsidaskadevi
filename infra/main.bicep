@@ -103,6 +103,17 @@ param stripeSecretUri string = ''
 @description('SecretUri till Stripe-webhookens hemlighet i befintligt Key Vault. Ingen hemlighet anges i Git. Tomt = fail-closed.')
 param stripeWebhookSecretUri string = ''
 
+@description('Namn på Key Vault-secret för GA4-transaktions-ID. Värdet sätts aldrig i Git.')
+param analyticsTransactionSecretName string = 'analytics-transaction-secret'
+
+@description('Tabellnamn för bokningsdata. Namnet är ingen hemlighet.')
+param bookingTableName string = 'bookingrequests'
+
+@description('Intervall i minuter för schemalagd Stripe-avstämning.')
+@minValue(1)
+@maxValue(60)
+param stripeReconcileIntervalMinutes int = 5
+
 @description('Objekt-ID (principalId) för Logic Appens system-assigned managed identity. Lämnas tom: Logic Appens tabellroll tilldelas i logic-app-notify-modulen (samma tenant). Parametern finns kvar endast för bakåtkompatibilitet med storage-tables-modulen.')
 #disable-next-line secure-secrets-in-params
 param logicAppPrincipalId string = ''
@@ -149,6 +160,9 @@ module webapp 'modules/webapp.bicep' = {
     allowStripeLive: allowStripeLive
     stripeSecretUri: stripeSecretUri
     stripeWebhookSecretUri: stripeWebhookSecretUri
+    analyticsTransactionSecretName: analyticsTransactionSecretName
+    bookingTableName: bookingTableName
+    stripeReconcileIntervalMinutes: stripeReconcileIntervalMinutes
   }
 }
 

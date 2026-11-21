@@ -61,3 +61,16 @@ test('inga Stripe-hemligheter är hårdkodade i infra eller server', () => {
     assert.doesNotMatch(content, /whsec_[A-Za-z0-9]+/, file);
   }
 });
+
+test('Bicep bevarar aktiverad utkorg, aktiveringsdatum och analytics-hemlighet', () => {
+  const main = read('infra/main.bicepparam');
+  const admin = read('infra/admin-webapp.bicepparam');
+  const logic = read('infra/logic-app-notify.bicepparam');
+  const webapp = read('infra/modules/webapp.bicep');
+  assert.match(main, /param enableStripeOutbox = true/);
+  assert.match(admin, /param enableMailOutbox = true/);
+  assert.match(logic, /param outboxActivationSince = '2026-11-21T17:15:00Z'/);
+  assert.match(webapp, /name: 'ANALYTICS_TRANSACTION_SECRET'\s+value: '@Microsoft\.KeyVault/);
+  assert.match(webapp, /name: 'AZURE_TABLE_NAME'\s+value: bookingTableName/);
+  assert.match(webapp, /name: 'STRIPE_RECONCILE_INTERVAL_MINUTES'\s+value: string\(stripeReconcileIntervalMinutes\)/);
+});

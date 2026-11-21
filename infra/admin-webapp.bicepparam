@@ -13,7 +13,7 @@ param githubDeployPrincipalId = 'ee380faf-83af-489d-82bb-ea48eab13ad5'
 // Matchar verifierat produktionsläge 2026-11-19. Ändras endast medvetet.
 param enableBookingWrites = true
 // Utkorgen för adminmejl är fortsatt avstängd.
-param enableMailOutbox = false
+param enableMailOutbox = true
 param enableStripePayments = true
 param stripeMode = 'live'
 param stripeSwishEnabled = false
