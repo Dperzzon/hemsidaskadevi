@@ -772,7 +772,7 @@ function createAdminRequestListener(options = {}) {
     }
 
     if (url.pathname === '/healthz' && (req.method === 'GET' || req.method === 'HEAD')) {
-let calendarParserReady = false;
+      let calendarParserReady = false;
       try {
         require.resolve('node-ical');
         calendarParserReady = true;
@@ -781,10 +781,31 @@ let calendarParserReady = false;
       }
       const airbnbConfigured = typeof process.env.AIRBNB_ICAL_URL === 'string' &&
         process.env.AIRBNB_ICAL_URL.startsWith('http');
+      let calendarSync = null;
+      try {
+        const stored = await repository.getCalendarSyncStatus();
+        if (stored) {
+          calendarSync = {
+            status: stored.status,
+            safetyStatus: stored.safetyStatus,
+            safetyReason: stored.safetyReason,
+            lastCheckAt: stored.lastCheckAt,
+            lastSuccessAt: stored.lastSuccessAt,
+            consecutiveFailures: stored.consecutiveFailures,
+            eventCount: stored.eventCount,
+            snapshotFrom: stored.snapshotFrom,
+            snapshotTo: stored.snapshotTo,
+            blockedNights: Array.isArray(stored.snapshotNights) ? stored.snapshotNights.length : 0
+          };
+        }
+      } catch {
+        calendarSync = null;
+      }
       sendJson(req, res, 200, {
         status: 'ok',
         airbnbConfigured,
-        calendarParserReady
+        calendarParserReady,
+        calendarSync
       });
       return;
     }
