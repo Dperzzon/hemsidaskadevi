@@ -38,6 +38,16 @@ function validateRange(query) {
   return days > 0 && days <= 93;
 }
 
+// Plockar ut exakt ett start- och ett end-värde och släpper igenom dem till
+// den strikta interval-valideringen. På så vis kan publika anrop skicka med
+// tillvalsflaggor utan att okända parametrar når kalenderhämtningen.
+function rangeFromQuery(query) {
+  const starts = query.getAll('start');
+  const ends = query.getAll('end');
+  if (starts.length !== 1 || ends.length !== 1) return new URLSearchParams();
+  return new URLSearchParams({ start: starts[0], end: ends[0] });
+}
+
 function trustedUrl(value) {
   const url = new URL(value);
   if (url.protocol !== 'https:' || url.username || url.password) {
@@ -352,6 +362,7 @@ module.exports = {
   parseCalendar,
   parseCalendarWithMeta,
   validateRange,
+  rangeFromQuery,
   CalendarFetchError,
   MAX_BYTES,
   MAX_ATTEMPTS

@@ -21,7 +21,7 @@ const {
   directBookingAvailable,
   checkDirectBookingAvailability
 } = require('./booking/direct-booking');
-const { validateRange } = require('./calendar/availability');
+const { validateRange, rangeFromQuery } = require('./calendar/availability');
 const { loadRules, publicRules } = require('./booking/rules');
 const { createStore, isConfigured } = require('./booking/store');
 const { legacyRedirect } = require('./seo/legacy-redirects');
@@ -483,12 +483,13 @@ function createRequestListener(options = {}) {
     }
 
     if (url.pathname === '/api/direct-booking/availability' && (req.method === 'GET' || req.method === 'HEAD')) {
-      if (!validateRange(url.searchParams)) {
+      const rangeQuery = rangeFromQuery(url.searchParams);
+      if (!validateRange(rangeQuery)) {
         sendJson(res, 400, { error: 'Ogiltigt datumintervall.' });
         return;
       }
-      const from = url.searchParams.get('start');
-      const to = url.searchParams.get('end');
+      const from = rangeQuery.get('start');
+      const to = rangeQuery.get('end');
       try {
         const store = createStore(options);
         const addons = {

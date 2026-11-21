@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { handleAvailability, fetchCalendar, parseCalendar, MAX_BYTES } = require('../../server/calendar/availability');
+const { handleAvailability, fetchCalendar, parseCalendar, validateRange, rangeFromQuery, MAX_BYTES } = require('../../server/calendar/availability');
 
 const SOURCE = 'https://calendar.example.test/synthetic.ics';
 const calendar = (...lines) => [
@@ -437,4 +437,16 @@ test('fetches on every request rather than caching availability', async () => {
   assert.equal((await handleAvailability(range(), context(), options)).status, 200);
   assert.equal((await handleAvailability(range(), context(), options)).status, 200);
   assert.equal(calls, 2);
+});
+
+test('availability-routen filtrerar bort tillvalsparametrar före strikt range-validering', () => {
+  const cleaned = rangeFromQuery(new URLSearchParams({
+    start: '2027-01-10', end: '2027-01-14', tidigIncheckning: '1', senUtcheckning: '1'
+  }));
+  assert.deepEqual([...cleaned.keys()], ['start', 'end']);
+  assert.equal(validateRange(cleaned), true);
+
+  assert.equal(validateRange(rangeFromQuery(new URLSearchParams({ start: '2027-01-10', end: '2027-01-14' }))), true);
+  assert.equal(validateRange(rangeFromQuery(new URLSearchParams({ start: '2027-01-10' }))), false);
+  assert.equal(validateRange(rangeFromQuery(new URLSearchParams('start=2027-01-10&start=2027-01-11&end=2027-01-14'))), false);
 });
