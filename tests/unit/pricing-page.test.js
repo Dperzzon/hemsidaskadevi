@@ -22,6 +22,20 @@ test('prissidan får alla ordinarie priser från pricing-config', async () => {
   }
 });
 
+test('startsidans pris hämtas från pricing-config', async () => {
+  const { applyPricingTokens, loadPricingConfig } = await import('../../scripts/pricing-page.mjs');
+  const config = loadPricingConfig();
+  const source = readFileSync(path.join(root, 'src', 'index.html'), 'utf8');
+  const rendered = applyPricingTokens(source, config);
+
+  assert.match(rendered, /Från\s7\s000 kr per natt/);
+  assert.doesNotMatch(rendered, /\{\{[\w.]+\}\}/);
+  assert.doesNotMatch(rendered, /Grundpris 10 000 kr per natt/);
+  assert.doesNotMatch(rendered, /DET HÄR INGÅR|Det här ingår/i);
+  assert.doesNotMatch(rendered, /Bröllopspaket/);
+  assert.doesNotMatch(rendered, /price-details|price-package/);
+});
+
 test('bröllopskonceptets priser och innehåll är oförändrade', async () => {
   const { applyPricingTokens } = await import('../../scripts/pricing-page.mjs');
   const source = readFileSync(path.join(root, 'src', 'pages', 'priser.html'), 'utf8');

@@ -138,16 +138,20 @@ async function pageInputs() {
   ];
 }
 
-// Prissidans ordinarie priser hämtas vid bygget från samma konfiguration som
-// bokningsmotorn använder. Bröllopskonceptets priser är separata och lämnas
-// orörda (de innehåller inga {{pris.*}}-tokens).
+// Prissidans och startsidans ordinarie priser hämtas vid bygget från samma
+// konfiguration som bokningsmotorn använder. Bröllopskonceptets priser är
+// separata och lämnas orörda (de innehåller inga {{pris.*}}-tokens).
+const PRICING_PAGES = ['index.html', 'priser.html'];
+
 function pricingTokens() {
   return {
     name: 'skadevi-pricing-tokens',
     transformIndexHtml: {
       order: 'pre',
       handler(html, ctx) {
-        if (!ctx.filename || !ctx.filename.endsWith('priser.html')) return html;
+        if (!ctx.filename || !PRICING_PAGES.some((page) => ctx.filename.endsWith(page))) {
+          return html;
+        }
         return applyPricingTokens(html);
       }
     }
