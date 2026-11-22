@@ -1,20 +1,21 @@
 'use strict';
 
-// Avbokningsvillkor (beslutade 2026-11-10, v3).
+// Avbokningsvillkor (beslutade 2026-11-10, version 4 från 2026-11-22).
 //
 //   Avbokning minst 30 dagar före incheckning ............ 100 % återbetalning
 //   Avbokning 14 dagar till mindre än 30 dagar före ........ 50 % återbetalning
 //   Avbokning mindre än 14 dagar före incheckning ..........   0 % återbetalning
 //
-// Återbetalningsprocenten beräknas på den bekräftade boendesumman enligt
-// offerten — tillval debiteras inte i förväg och avbokningsvillkoren
-// begränsar inte lagstadgade konsumenträttigheter.
+// Återbetalningsprocenten beräknas på den bekräftade boendekostnaden enligt
+// offerten. Vid direktbokning betalas valda tillval tillsammans med boendet.
+// Betalda tillval återbetalas normalt inte separat vid gästens avbokning.
+// Villkoren begränsar inte lagstadgade konsumenträttigheter.
 
 const POLICY = {
   fullRefund: { minDaysBefore: 30, percent: 100 },
   partialRefund: { minDaysBefore: 14, percent: 50 },
   noRefund: { minDaysBefore: 0, percent: 0 },
-  basis: 'bekräftad boendesumma enligt offerten',
+  basis: 'bekräftad boendekostnad enligt offerten',
   pendingDecisions: []
 };
 

@@ -105,7 +105,7 @@ function calculateRefund(record = {}, options = {}) {
   else if (failedOre > 0) status = 'FAILED';
   return {
     policyVersion: '2026-11-10-v3',
-    basis: 'bekräftad boendesumma enligt offerten',
+    basis: 'bekräftad boendekostnad enligt offerten',
     basisOre,
     paidOre,
     percent,

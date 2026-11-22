@@ -1308,7 +1308,7 @@ datamodell men byggs först efter att första versionen är i drift.
 | Lagring | `server/booking/store.js:237–330` | Table Storage, MI, idempotens, listPending, purge |
 | Utkorg | `server/booking/store.js:399–431` | RowKey-mönster och mejlfält |
 | iCal | `server/calendar/availability.js:107–125` | Hämtning, tolkning, “okänd = fel” |
-| Regler | `server/booking/rules.js`, `server/booking/house-rules.json` | Publicerad version 2026-11-10-v3 |
+| Regler | `server/booking/rules.js`, `server/booking/house-rules.json` | Publicerad version 2026-11-22-v4 |
 | Avbokning | `server/booking/refund.js:13–38` | 30/14/0 dagar, 100/50/0 % |
 | Publik konfiguration | `infra/modules/webapp.bicep:76–102` | App settings och `BOOKING_REQUESTS_ENABLED=0` |
 | Lagringsmodul | `infra/modules/storage-tables.bicep:46–103` | Standard_LRS, Entra-only, tabell-RBAC |

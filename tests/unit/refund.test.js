@@ -31,5 +31,5 @@ test('datumgränserna är dagsprecisa', () => {
 });
 
 test('policyn anger beräkningsgrund och lagstadgade rättigheter', () => {
-  assert.match(POLICY.basis, /boendesumma enligt offerten/);
+  assert.match(POLICY.basis, /boendekostnad enligt offerten/);
 });

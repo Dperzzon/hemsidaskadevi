@@ -7,20 +7,24 @@ bokningsreglerna och skicka en förfrågan — utan att lämna sidan.
 En bokningsförfrågan är **aldrig** en bekräftad bokning: den sparas alltid med
 status **"Inväntar godkännande"** och påverkar aldrig Airbnb-kalendern.
 
-## Beslutade regler och avbokningsvillkor (2026-11-10-v2)
+## Beslutade regler och avbokningsvillkor (2026-11-22-v4)
 
 Bokningsreglerna är publicerade i `server/booking/house-rules.json` med
-version `2026-11-10-v2`:
+version `2026-11-22-v4`:
 
 - Avbokning minst 30 dagar före incheckning: 100 % återbetalning.
-- Avbokning från 7 dagar till mindre än 30 dagar före incheckning: 50 % återbetalning.
-- Återbetalningsprocenten beräknas på den bekräftade boendesumman enligt
-  offerten; tillval debiteras inte i förväg; villkoren begränsar inte
-  lagstadgade konsumenträttigheter.
-- **Ej beslutat (flaggat, inte påhittat):** avbokning mindre än 7 dagar före
-  incheckning — specificeras vid bekräftelse (`pendingDecisions` i JSON,
-  verifierat i `tests/unit/refund.test.js`). Uppdateras villkoret: ändra texten
-  och höj reglerversionen.
+- Avbokning från 14 dagar till mindre än 30 dagar före incheckning: 50 % återbetalning.
+- Avbokning mindre än 14 dagar före incheckning: ingen återbetalning.
+- Återbetalningsprocenten beräknas på den bekräftade boendekostnaden enligt
+  offerten.
+- Vid direktbokning betalas valda tillval tillsammans med boendet enligt det
+  totalpris som visas före betalning.
+- Betalda tillval återbetalas normalt inte separat vid gästens avbokning, med
+  undantag för situationer där återbetalning krävs enligt lag eller där Skadevi
+  Herrgård inte kan tillhandahålla den avtalade tjänsten.
+- Tillval som kräver separat bekräftelse, till exempel extrahus, debiteras först
+  efter att Skadevi Herrgård har bekräftat tillgängligheten.
+- Villkoren begränsar inte lagstadgade konsumenträttigheter.
 - Husregler: ingen rökning; lås alla dörrar och stäng alla fönster vid avfärd;
   max två husdjur; inga katter.
 

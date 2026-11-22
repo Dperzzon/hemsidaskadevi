@@ -22,10 +22,10 @@ test('injektade ofullständiga regler behandlas som opublicerade', async () => {
   }
 });
 
-test('filen i repot publicerar de beslutade reglerna (version 2026-11-10-v3)', async () => {
+test('filen i repot publicerar de beslutade reglerna (version 2026-11-22-v4)', async () => {
   const rules = await loadRules();
   assert.equal(rules.published, true);
-  assert.equal(rules.version, '2026-11-10-v3');
+  assert.equal(rules.version, '2026-11-22-v4');
   assert.ok(rules.text.length > 0);
 });
 
@@ -36,7 +36,11 @@ test('avbokningspolicyn stämmer med beslutet (100/50/0 %, dagsgränser)', async
   assert.match(rules.text, /Avbokning från 14 dagar till mindre än 30 dagar före incheckning: 50 % återbetalning/);
   assert.match(rules.text, /Avbokning mindre än 14 dagar före incheckning: ingen återbetalning/);
   // Beräkningsgrund ska vara tydlig och lagstadgade rättigheter inte åsidosättas.
-  assert.match(rules.text, /beräknas på den bekräftade boendesumman enligt offerten/);
+  assert.match(rules.text, /beräknas på den bekräftade boendekostnaden enligt offerten/);
+  assert.match(rules.text, /Vid direktbokning betalas valda tillval tillsammans med boendet/);
+  assert.match(rules.text, /Betalda tillval återbetalas normalt inte separat/);
+  assert.match(rules.text, /krävs enligt lag/);
+  assert.match(rules.text, /extrahus, debiteras först efter att Skadevi Herrgård har bekräftat tillgängligheten/);
   assert.match(rules.text, /inte era lagstadgade konsumenträttigheter/);
   // Alla villkor är beslutade — inga kvarhängande beslut.
   assert.deepEqual(rules.pendingDecisions, []);
