@@ -605,6 +605,18 @@ async function finalizePaidCheckoutSession(store, reference, session, event, opt
     return result(200, { received: true, ignored: applied.reason ?? 'not_applicable' });
   }
 
+  // En dubbel webhook som kommer efter att bokningen redan avbokats får inte
+  // flytta tillbaka den till RECONCILIATION eller skapa ett nytt kvittomejl.
+  // Betalningen finns redan registrerad (applied.duplicate) och kan granskas i
+  // admin utan att kunden kontaktas igen.
+  if (applied.duplicate === true && applied.record?.statusCode === 'CANCELLED') {
+    return {
+      ...result(200, { received: true, duplicate: true, reconciliation: true }),
+      applied,
+      record: applied.record
+    };
+  }
+
   await appendPaymentHistory(store, applied.record, applied.payment, applied.summary, event, {
     ...options,
     reviewRequired: applied.reviewRequired

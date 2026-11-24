@@ -513,6 +513,43 @@ test('dubbel webhook registrerar betalningen exakt en gång', async () => {
   assert.equal(record.statusCode, 'CONFIRMED');
 });
 
+test('dubbel webhook efter avbokning skapar inget nytt kvittomejl', async () => {
+  const { options, context, memory, stripe } = setup();
+  const created = await handleDirectBooking(request(), context, options);
+  const reference = created.jsonBody.reference;
+  const session = [...stripe.sessions.values()][0];
+  session.payment_status = 'paid';
+  session.status = 'complete';
+  const event = {
+    id: 'evt_direct_duplicate_after_cancel',
+    type: 'checkout.session.completed',
+    livemode: false,
+    data: { object: session }
+  };
+
+  const first = await signedWebhook(memory.store, event, { stripeClient: stripe, outboxEnabled: true });
+  assert.equal(first.status, 200);
+  const outboxBefore = [...memory.records.values()].filter((entry) => entry.record.partition === 'outbox');
+  assert.equal(outboxBefore.length, 2);
+
+  const raw = await memory.store.getByReference(reference);
+  await memory.store.updateRequest({
+    ...raw.record,
+    statusCode: 'CANCELLED',
+    status: 'Avbokad',
+    cancelledAt: NOW.toISOString()
+  }, { ifMatch: raw.etag });
+
+  const duplicate = await signedWebhook(memory.store, event, { stripeClient: stripe, outboxEnabled: true });
+  assert.equal(duplicate.status, 200);
+  assert.equal(duplicate.jsonBody.duplicate, true);
+  const record = await memory.store.findByReference(reference);
+  assert.equal(record.statusCode, 'CANCELLED');
+  const outboxAfter = [...memory.records.values()].filter((entry) => entry.record.partition === 'outbox');
+  assert.equal(outboxAfter.length, 2);
+  assert.equal(outboxAfter.filter((entry) => entry.record.mailType === 'GUEST_PAYMENT_RECEIPT').length, 0);
+});
+
 test('underbetalning bekräftar inte bokningen och bevarar betalningen', async () => {
   const { options, context, memory, stripe } = setup();
   const created = await handleDirectBooking(request(), context, options);
