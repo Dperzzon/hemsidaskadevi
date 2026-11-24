@@ -71,10 +71,10 @@ param enableCardCheckout = true
 
 param enableSwishCheckout = false
 
-// Direktbokning är tillfälligt pausad under Steg 13B. Sätt till true först
-// efter uttryckligt godkännande av kontrollerat testköp. Detta förhindrar att
-// en infra-deployment återaktiverar försäljning medan säkerhetspausen gäller.
-param enableDirectBooking = false
+// Direktbokning är permanent aktiverad i produktion efter ägarens uttryckliga
+// godkännande (Steg 14). Värdet är codifierat så att nästa infra-deployment
+// inte stänger av kundernas kortbetalning. Ändra endast medvetet.
+param enableDirectBooking = true
 
 param stripeMode = 'live'
 
