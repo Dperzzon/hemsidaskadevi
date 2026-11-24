@@ -386,5 +386,5 @@ test('Main-mallen: BOOKING_REQUESTS_ENABLED är parameteriserad och Logic App ä
   const params = fs.readFileSync(path.join(__dirname, '../../infra/main.bicepparam'), 'utf8');
   assert.match(params, /param enableBookingRequests = true/, 'produktionsparametern ska matcha verifierat driftläge');
   assert.match(params, /param enableStripeOutbox = true/, 'utkorgen ska matcha aktiverat produktionsläge');
-  assert.match(params, /param enableDirectBooking = false/, 'direktbokning ska vara pausad tills kontrollerat testköp godkänts');
+  assert.match(params, /param enableDirectBooking = true/, 'direktbokning ska matcha det aktiverade produktionsläget');
 });
