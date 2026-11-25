@@ -282,7 +282,18 @@ function createReconciliationScheduler(options = {}) {
         ...options,
         now: options.nowProvider?.() ?? new Date()
       }, { warn: options.warn });
-      return { ...result, refundSync };
+      let addonOrders = null;
+      try {
+        const { releaseExpiredAddonOrders } = require('./existing-booking-addons');
+        addonOrders = await releaseExpiredAddonOrders(store, {
+          ...options,
+          now: options.nowProvider?.() ?? new Date(),
+          requireStripeVerification: true
+        }, { warn: options.warn });
+      } catch (error) {
+        options.warn?.(`Schemalagd tillvalsavstämning misslyckades: ${error?.message ?? 'okänt fel'}`);
+      }
+      return { ...result, refundSync, addonOrders };
     } catch (error) {
       options.warn?.(`Schemalagd betalningsavstämning misslyckades: ${error?.message ?? 'okänt fel'}`);
       return { error: true };

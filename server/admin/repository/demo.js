@@ -295,6 +295,12 @@ function createDemoRepository(options = {}) {
       }
       return cancelled;
     },
+    async listAddonOrders() {
+      return [];
+    },
+    async listAddonRequests() {
+      return [];
+    },
     async dashboard(now = initialNow) {
       return dashboardData(allBookings(now), now);
     },

@@ -221,6 +221,8 @@ function toEntity(record, partition) {
     reservation: record.reservation ? JSON.stringify(record.reservation) : '',
     bufferNightsMode: record.bufferNightsMode === 'auto' ? 'auto' : 'manual',
     bufferNights: JSON.stringify(record.bufferNights ?? []),
+    addonOrders: JSON.stringify(record.addonOrders ?? []),
+    addonPayments: JSON.stringify(record.addonPayments ?? []),
     reconciliation: record.reconciliation ? JSON.stringify(record.reconciliation) : '',
     invoiceRequests: JSON.stringify(record.invoiceRequests ?? []),
     latestNote: record.latestNote ?? '',
@@ -384,6 +386,8 @@ function fromEntity(entity) {
     reservation: parse(entity.reservation, null),
     bufferNightsMode: entity.bufferNightsMode === 'auto' ? 'auto' : 'manual',
     bufferNights: parse(entity.bufferNights, []),
+    addonOrders: parse(entity.addonOrders, []),
+    addonPayments: parse(entity.addonPayments, []),
     reconciliation: parse(entity.reconciliation, null),
     invoiceRequests: parse(entity.invoiceRequests, []),
     latestNote: entity.latestNote ?? '',
@@ -411,6 +415,36 @@ function fromEntity(entity) {
 
 function rowTarget(partition, rowKey) {
   return `(PartitionKey='${partition}',RowKey='${encodeURIComponent(rowKey)}')`;
+}
+
+// Generiska hjälpobjekt (verifieringar, sessioner, tillvalsordrar och
+// tillvalsförfrågningar). De lagras i egna partitioner så att själva
+// bokningsposten aldrig ändras av en påbörjad eller avbruten verifiering.
+function fromAuxEntity(entity) {
+  if (!entity) return null;
+  let data = {};
+  try {
+    data = JSON.parse(entity.data ?? '{}');
+  } catch {
+    data = {};
+  }
+  return {
+    ...data,
+    etag: entity['odata.etag'] ?? entity.etag ?? ''
+  };
+}
+
+function toAuxEntity(partition, rowKey, data) {
+  return {
+    PartitionKey: partition,
+    RowKey: rowKey,
+    reference: data.reference ?? '',
+    kind: data.kind ?? '',
+    status: data.status ?? '',
+    createdAt: data.createdAt ?? '',
+    expiresAt: data.expiresAt ?? '',
+    data: JSON.stringify(data)
+  };
 }
 
 // Huvudbyggnaden och extrahuset har separata kalenderpartitioner. Samma natt
@@ -557,6 +591,82 @@ function createTableStore(options = {}) {
         fetchImpl: options.fetchImpl, auth
       });
       return result.status === 200 && result.json ? fromEntity(result.json) : null;
+    },
+    // --- Generiska hjälpobjekt -------------------------------------------------
+    // Används av tillvalsflödet för engångskoder, sessioner, ordrar och
+    // förfrågningar. All data ligger i en JSON-kolumn och varje partition har
+    // ett tydligt syfte. Bokningsposten rörs inte förrän en betalning är
+    // verifierad och tillvalen faktiskt ska läggas till.
+    async getAux(partition, rowKey) {
+      const result = await tableRequest({
+        accountName, method: 'GET', table,
+        target: rowTarget(partition, rowKey),
+        fetchImpl: options.fetchImpl, auth
+      });
+      if (result.status === 404) return null;
+      if (result.status !== 200 || !result.json) {
+        throw new Error(`Hjälpposten kunde inte läsas (${result.status})`);
+      }
+      return fromAuxEntity(result.json);
+    },
+    async putAux(partition, rowKey, data, { ifMatch } = {}) {
+      const existing = await this.getAux(partition, rowKey);
+      const body = toAuxEntity(partition, rowKey, data);
+      if (existing) {
+        const result = await tableRequest({
+          accountName, method: 'PUT', table,
+          target: rowTarget(partition, rowKey),
+          body,
+          ifMatch: ifMatch ?? existing.etag ?? '*',
+          fetchImpl: options.fetchImpl, auth
+        });
+        if (result.status === 412 || result.status === 409) {
+          const conflict = new Error('Hjälpposten har ändrats av någon annan');
+          conflict.status = 409;
+          throw conflict;
+        }
+        if (![200, 204].includes(result.status)) {
+          throw new Error(`Hjälpposten kunde inte uppdateras (${result.status})`);
+        }
+        return { record: data, etag: result.etag ?? '' };
+      }
+      const result = await tableRequest({
+        accountName, method: 'POST', table,
+        body,
+        fetchImpl: options.fetchImpl, auth
+      });
+      if (result.status === 409) {
+        const conflict = new Error('Hjälpposten finns redan');
+        conflict.status = 409;
+        throw conflict;
+      }
+      if (result.status !== 201) {
+        throw new Error(`Hjälpposten kunde inte sparas (${result.status})`);
+      }
+      return { record: data, etag: result.etag ?? '' };
+    },
+    async deleteAux(partition, rowKey) {
+      const result = await tableRequest({
+        accountName, method: 'DELETE', table,
+        target: rowTarget(partition, rowKey),
+        ifMatch: '*',
+        fetchImpl: options.fetchImpl, auth
+      });
+      if (![200, 204, 404].includes(result.status)) {
+        throw new Error(`Hjälpposten kunde inte tas bort (${result.status})`);
+      }
+    },
+    async listAux(partition, filter = {}) {
+      const clauses = [`PartitionKey eq '${escapeOData(partition)}'`];
+      if (filter.reference) clauses.push(`reference eq '${escapeOData(filter.reference)}'`);
+      if (filter.status) clauses.push(`status eq '${escapeOData(filter.status)}'`);
+      const result = await tableRequest({
+        accountName, method: 'GET', table,
+        query: [['$filter', clauses.join(' and ')]],
+        fetchImpl: options.fetchImpl, auth
+      });
+      if (result.status !== 200 || !Array.isArray(result.json?.value)) return null;
+      return result.json.value.map(fromAuxEntity);
     },
     async findByReference(reference) {
       const result = await tableRequest({
@@ -1071,6 +1181,7 @@ function createLocalStore(options = {}) {
   const historyFile = path.resolve(options.historyFile ?? path.join(path.dirname(file), 'booking-history.jsonl'));
   const records = new Map();
   const calendar = new Map();
+  const aux = new Map();
   const calendarKey = (resource, night) => `${resource === 'extrahus' ? 'extrahus' : 'main'}:${night}`;
   const directBooking = new Map();
   let syncStatus = null;
@@ -1109,6 +1220,32 @@ function createLocalStore(options = {}) {
     async findByIdempotencyKey(key) {
       await loadOnce();
       return records.get(key) ?? null;
+    },
+    async getAux(partition, rowKey) {
+      const entry = aux.get(`${partition}:${rowKey}`);
+      return entry ? { ...entry.data, etag: entry.etag } : null;
+    },
+    async putAux(partition, rowKey, data, { ifMatch } = {}) {
+      const key = `${partition}:${rowKey}`;
+      const existing = aux.get(key);
+      if (existing && ifMatch && ifMatch !== '*' && ifMatch !== existing.etag) {
+        const conflict = new Error('Hjälpposten har ändrats av någon annan');
+        conflict.status = 409;
+        throw conflict;
+      }
+      const nextEtag = existing ? `aux-${Number(existing.etag.split('-').at(-1)) + 1}` : 'aux-1';
+      aux.set(key, { data: { ...data }, etag: nextEtag });
+      return { record: { ...data }, etag: nextEtag };
+    },
+    async deleteAux(partition, rowKey) {
+      aux.delete(`${partition}:${rowKey}`);
+    },
+    async listAux(partition, filter = {}) {
+      return [...aux.entries()]
+        .filter(([key, entry]) => key.startsWith(`${partition}:`) &&
+          (!filter.reference || entry.data.reference === filter.reference) &&
+          (!filter.status || entry.data.status === filter.status))
+        .map(([, entry]) => ({ ...entry.data, etag: entry.etag }));
     },
     async findByReference(reference) {
       await loadOnce();
@@ -1391,6 +1528,7 @@ function isConfigured(options = {}) {
 module.exports = {
   createStore, createTableStore, createLocalStore, isConfigured, sharedKeySignature,
   toEntity, fromEntity, toOutboxEntity, fromOutboxEntity,
+  fromAuxEntity, toAuxEntity,
   fromDirectBookingEntity, directBookingEntity, groupDirectBookingApprovals,
   fromCalendarSyncEntity, calendarSyncEntity,
   CALENDAR_SYNC_PARTITION, CALENDAR_SYNC_ROW,

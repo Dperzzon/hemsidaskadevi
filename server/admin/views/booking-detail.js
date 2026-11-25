@@ -554,8 +554,89 @@ function reconciliationPanel(booking, isOwner, writesEnabled) {
   </section>`;
 }
 
+function addonStatusLabel(status) {
+  const labels = {
+    PENDING_PAYMENT: 'Väntar på betalning',
+    PAID: 'Betald',
+    RECONCILIATION: 'Avstämning krävs',
+    EXPIRED: 'Utgången',
+    FAILED: 'Misslyckad',
+    CANCELED: 'Avbokad'
+  };
+  return labels[String(status ?? '').toUpperCase()] ?? (status || 'Okänd');
+}
+
+function addonStatusTone(status) {
+  const code = String(status ?? '').toUpperCase();
+  if (code === 'PAID') return 'confirmed';
+  if (code === 'RECONCILIATION') return 'warning';
+  if (code === 'EXPIRED' || code === 'FAILED' || code === 'CANCELED') return 'danger';
+  return 'preliminary';
+}
+
+function addonOrdersPanel(orders = [], requests = []) {
+  const orderRows = (Array.isArray(orders) ? orders : []).map((order) => {
+    const lines = Array.isArray(order.lines) ? order.lines : [];
+    const emailStatus = order.emailStatus && typeof order.emailStatus === 'object'
+      ? [order.emailStatus.guest, order.emailStatus.host].filter(Boolean).join(' / ')
+      : '';
+    return `<article class="addon-admin-card">
+      <div class="addon-admin-head">
+        <div>
+          <p class="eyebrow">Tillvalsorder</p>
+          <h3><code>${escapeHtml(order.orderId ?? '')}</code></h3>
+        </div>
+        <span class="badge badge-${addonStatusTone(order.status)}">${escapeHtml(addonStatusLabel(order.status))}</span>
+      </div>
+      <div class="fact-grid">
+        ${fact('Skapad', escapeHtml(formatDateTime(order.createdAt)))}
+        ${fact('Belopp', escapeHtml(formatOre(Number(order.totalOre) || Math.round(Number(order.total || 0) * 100))))}
+        ${order.paidAt ? fact('Betald', escapeHtml(formatDateTime(order.paidAt))) : ''}
+        ${order.sessionId ? fact('Stripe-session', `<code>${escapeHtml(order.sessionId)}</code>`) : ''}
+        ${order.paymentId ? fact('Betalningspost', `<code>${escapeHtml(order.paymentId)}</code>`) : ''}
+        ${order.termsVersion ? fact('Villkorsversion', escapeHtml(order.termsVersion)) : ''}
+        ${Array.isArray(order.bufferNights) && order.bufferNights.length
+          ? fact('Buffertnätter', order.bufferNights.map((night) => escapeHtml(formatDateKey(night))).join(', '))
+          : ''}
+        ${emailStatus ? fact('Mejl', escapeHtml(emailStatus)) : ''}
+      </div>
+      ${lines.length ? `<ul class="addon-admin-lines">${lines.map((line) =>
+        `<li><span>${escapeHtml(line.label)}${Number(line.quantity) > 1 ? ` × ${Number(line.quantity)}` : ''}</span><strong>${escapeHtml(formatOre(Number(line.amountOre) || Math.round(Number(line.amount || 0) * 100)))}</strong></li>`
+      ).join('')}</ul>` : ''}
+      ${order.reconciliation ? `<p class="inline-warning">Avstämning: ${escapeHtml(order.reconciliation.reason ?? '')} ${order.reconciliation.code ? `(${escapeHtml(order.reconciliation.code)})` : ''}</p>` : ''}
+      ${order.status === 'PENDING_PAYMENT' && order.checkoutUrl ? `<p class="price-note">Pågående Checkout skapad ${escapeHtml(formatDateTime(order.createdAt))}. Sessionen giltig till ${escapeHtml(formatDateTime(order.expiresAt))}.</p>` : ''}
+    </article>`;
+  });
+
+  const requestRows = (Array.isArray(requests) ? requests : []).map((request) => `<article class="addon-admin-card">
+    <div class="addon-admin-head">
+      <div><p class="eyebrow">Tillvalsförfrågan</p><h3><code>${escapeHtml(request.requestId ?? '')}</code></h3></div>
+      <span class="badge badge-${request.status === 'PENDING' ? 'preliminary' : 'neutral'}">${escapeHtml(request.status === 'PENDING' ? 'Väntar på svar' : request.status ?? '')}</span>
+    </div>
+    <div class="fact-grid">${fact('Skapad', escapeHtml(formatDateTime(request.createdAt)))}</div>
+    <ul class="addon-admin-lines">${(Array.isArray(request.lines) ? request.lines : []).map((line) =>
+      `<li><span>${escapeHtml(line.label)}</span></li>`
+    ).join('')}</ul>
+    ${request.message ? `<p class="prose">${escapeHtml(request.message)}</p>` : ''}
+    <p class="price-note">Ingen betalning har skett. Huvudbokningens status ändras inte av förfrågan.</p>
+  </article>`);
+
+  if (!orderRows.length && !requestRows.length) {
+    return `<section class="panel">
+      <div class="panel-heading"><div><p class="eyebrow">Ekonomi</p><h2>Tillvalsköp och förfrågningar</h2></div></div>
+      <p class="muted">Inga tillvalsordrar eller tillvalsförfrågningar finns registrerade för bokningen.</p>
+    </section>`;
+  }
+  return `<section class="panel">
+    <div class="panel-heading"><div><p class="eyebrow">Ekonomi</p><h2>Tillvalsköp och förfrågningar</h2></div><span class="snapshot-pill">Separata från boendebetalningen</span></div>
+    <p class="price-note">Tillvalsordrar är egna Stripe-betalningar. De påverkar bokningens addonOrders och betalningshistorik men ändrar aldrig boendedatum eller det ursprungliga boendepriset.</p>
+    ${orderRows.join('')}
+    ${requestRows.join('')}
+  </section>`;
+}
+
 function renderBookingDetail(options) {
-  const { booking, principal, demo, csrfToken, writesEnabled, history = [], today, stripeEnabled = false, stripeMode = 'disabled', stripeSwishEnabled = false, outboxEnabled = false } = options;
+  const { booking, principal, demo, csrfToken, writesEnabled, history = [], today, stripeEnabled = false, stripeMode = 'disabled', stripeSwishEnabled = false, outboxEnabled = false, addonOrders = [], addonRequests = [] } = options;
   const isOwner = principal.roles?.includes('Owner');
   const content = `
     <div class="detail-header">
@@ -616,6 +697,8 @@ function renderBookingDetail(options) {
           ${addonTable(booking)}
           ${priceSummary(booking)}
         </section>`}
+
+        ${booking.isBlock ? '' : addonOrdersPanel(addonOrders, addonRequests)}
 
         ${booking.message ? `<section class="panel">
           <div class="panel-heading"><div><p class="eyebrow">Gästen skrev</p><h2>Särskilda önskemål</h2></div></div>

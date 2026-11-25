@@ -35,7 +35,7 @@ const PAGE_ROUTES = [
   'foretag', 'fest', 'brollop', 'semester', 'boende', 'aktiviteter',
   'priser', 'mat-dryck', 'om-oss', 'vanliga-fragor', 'kontakt',
   'digital-visning', 'boka', 'lediga-datum', 'betalning-klar', 'betalning-avbruten',
-  'integritet'
+  'tillval-klar', 'integritet'
 ];
 
 // Middleware för rena URL:er + kalender-API i dev- och preview-servern.

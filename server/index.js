@@ -21,6 +21,9 @@ const {
   directBookingAvailable,
   checkDirectBookingAvailability
 } = require('./booking/direct-booking');
+const {
+  addonsAvailable
+} = require('./booking/existing-booking-addons');
 const { validateRange, rangeFromQuery } = require('./calendar/availability');
 const { loadRules, publicRules } = require('./booking/rules');
 const { createStore, isConfigured } = require('./booking/store');
@@ -56,7 +59,7 @@ const PAGE_ROUTES = new Set([
   'foretag', 'fest', 'brollop', 'semester', 'boende', 'aktiviteter',
   'priser', 'mat-dryck', 'om-oss', 'vanliga-fragor', 'kontakt',
   'digital-visning', 'boka', 'lediga-datum', 'betalning-klar', 'betalning-avbruten',
-  'integritet'
+  'tillval-klar', 'integritet'
 ]);
 
 const SECURITY_HEADERS = {
@@ -356,6 +359,29 @@ function createRequestListener(options = {}) {
       ...directBookingOptions,
       store: createStore(options)
     }));
+  const addonOptions = {
+    ...paymentOptions,
+    existingBookingAddonsEnabled: options.existingBookingAddonsEnabled ??
+      process.env.EXISTING_BOOKING_ADDONS_ENABLED === '1',
+    allowLiveExistingBookingAddons: options.allowLiveExistingBookingAddons,
+    stripeMode: options.stripeMode ?? process.env.STRIPE_MODE ?? 'test',
+    availability: options.availability,
+    availabilityHandler,
+    addonsOutboxEnabled: options.addonsOutboxEnabled ?? options.outboxEnabled
+  };
+  const addonHandler = (handler) => options[`addon${handler}Handler`] ??
+    ((request, context) => require('./booking/existing-booking-addons')[`handleAddon${handler}`](
+      request,
+      context,
+      { ...addonOptions, store: createStore(options) }
+    ));
+  const addonVerifyStartHandler = addonHandler('VerifyStart');
+  const addonVerifyConfirmHandler = addonHandler('VerifyConfirm');
+  const addonSessionHandler = addonHandler('Session');
+  const addonCheckoutHandler = addonHandler('Checkout');
+  const addonAbandonHandler = addonHandler('Abandon');
+  const addonRequestHandler = addonHandler('Request');
+  const addonCheckoutResultHandler = addonHandler('CheckoutResult');
   const directBookingConfirmationHandler = options.directBookingConfirmationHandler ??
     ((request, context) => handleDirectBookingConfirmation(request, context, {
       ...directBookingOptions,
@@ -455,6 +481,7 @@ function createRequestListener(options = {}) {
     if (url.pathname === '/api/booking-config' && (req.method === 'GET' || req.method === 'HEAD')) {
       sendJson(res, 200, {
         directBookingEnabled: directBookingAvailable(directBookingOptions),
+        existingBookingAddonsEnabled: addonsAvailable(addonOptions),
         cardEnabled: directBookingOptions.cardEnabled !== false,
         manualRequestEnabled: options.bookingRequestsEnabled ?? process.env.BOOKING_REQUESTS_ENABLED === '1'
       });
@@ -538,6 +565,165 @@ function createRequestListener(options = {}) {
         sendJson(res, result.status, result.jsonBody, result.headers);
       } catch {
         sendJson(res, 503, { error: 'Direktbokningen är tillfälligt otillgänglig. Skicka gärna en bokningsförfrågan.' });
+      }
+      return;
+    }
+
+    if (url.pathname === '/api/addons/verify/start' && req.method === 'POST') {
+      if (!isSameOrigin(req)) {
+        sendJson(res, 403, { error: 'Förfrågan kommer från en otillåten origin.' });
+        return;
+      }
+      let body;
+      try {
+        body = JSON.parse(await readJsonBody(req));
+      } catch {
+        sendJson(res, 400, { error: 'Förfrågan kunde inte tolkas.' });
+        return;
+      }
+      try {
+        const result = await addonVerifyStartHandler(
+          { body, ip: clientIp(req), headers: req.headers, token: req.headers['x-addon-token'] },
+          { warn },
+          {}
+        );
+        sendJson(res, result.status, result.jsonBody, result.headers);
+      } catch {
+        sendJson(res, 503, { error: 'Verifieringen kan inte tas emot just nu.' });
+      }
+      return;
+    }
+
+    if (url.pathname === '/api/addons/verify/confirm' && req.method === 'POST') {
+      if (!isSameOrigin(req)) {
+        sendJson(res, 403, { error: 'Förfrågan kommer från en otillåten origin.' });
+        return;
+      }
+      let body;
+      try {
+        body = JSON.parse(await readJsonBody(req));
+      } catch {
+        sendJson(res, 400, { error: 'Förfrågan kunde inte tolkas.' });
+        return;
+      }
+      try {
+        const result = await addonVerifyConfirmHandler(
+          { body, ip: clientIp(req), headers: req.headers, token: req.headers['x-addon-token'] },
+          { warn },
+          {}
+        );
+        sendJson(res, result.status, result.jsonBody, result.headers);
+      } catch {
+        sendJson(res, 503, { error: 'Verifieringen kan inte genomföras just nu.' });
+      }
+      return;
+    }
+
+    if (url.pathname === '/api/addons/session' && (req.method === 'GET' || req.method === 'HEAD')) {
+      try {
+        const result = await addonSessionHandler(
+          { token: req.headers['x-addon-token'], headers: req.headers },
+          { warn },
+          {}
+        );
+        sendJson(res, result.status, result.jsonBody, result.headers);
+      } catch {
+        sendJson(res, 503, { error: 'Bokningen kunde inte läsas just nu.' });
+      }
+      return;
+    }
+
+    if (url.pathname === '/api/addons/checkout' && req.method === 'POST') {
+      if (!isSameOrigin(req)) {
+        sendJson(res, 403, { error: 'Förfrågan kommer från en otillåten origin.' });
+        return;
+      }
+      let body;
+      try {
+        body = JSON.parse(await readJsonBody(req));
+      } catch {
+        sendJson(res, 400, { error: 'Förfrågan kunde inte tolkas.' });
+        return;
+      }
+      try {
+        const result = await addonCheckoutHandler(
+          {
+            body,
+            ip: clientIp(req),
+            headers: req.headers,
+            token: req.headers['x-addon-token'],
+            idempotencyKey: req.headers['idempotency-key']
+          },
+          { warn },
+          {}
+        );
+        sendJson(res, result.status, result.jsonBody, result.headers);
+      } catch {
+        sendJson(res, 503, { error: 'Betalningen kunde inte startas just nu.' });
+      }
+      return;
+    }
+
+    if (url.pathname === '/api/addons/abandon' && req.method === 'POST') {
+      if (!isSameOrigin(req)) {
+        sendJson(res, 403, { error: 'Förfrågan kommer från en otillåten origin.' });
+        return;
+      }
+      let body;
+      try {
+        body = JSON.parse(await readJsonBody(req));
+      } catch {
+        sendJson(res, 400, { error: 'Förfrågan kunde inte tolkas.' });
+        return;
+      }
+      try {
+        const result = await addonAbandonHandler(
+          { body, ip: clientIp(req), headers: req.headers, token: req.headers['x-addon-token'] },
+          { warn },
+          {}
+        );
+        sendJson(res, result.status, result.jsonBody, result.headers);
+      } catch {
+        sendJson(res, 503, { error: 'Betalningssessionen kunde inte avslutas just nu.' });
+      }
+      return;
+    }
+
+    if (url.pathname === '/api/addons/request' && req.method === 'POST') {
+      if (!isSameOrigin(req)) {
+        sendJson(res, 403, { error: 'Förfrågan kommer från en otillåten origin.' });
+        return;
+      }
+      let body;
+      try {
+        body = JSON.parse(await readJsonBody(req));
+      } catch {
+        sendJson(res, 400, { error: 'Förfrågan kunde inte tolkas.' });
+        return;
+      }
+      try {
+        const result = await addonRequestHandler(
+          { body, ip: clientIp(req), headers: req.headers, token: req.headers['x-addon-token'] },
+          { warn },
+          {}
+        );
+        sendJson(res, result.status, result.jsonBody, result.headers);
+      } catch {
+        sendJson(res, 503, { error: 'Förfrågan kunde inte tas emot just nu.' });
+      }
+      return;
+    }
+
+    if (url.pathname === '/api/addons/checkout-result' && (req.method === 'GET' || req.method === 'HEAD')) {
+      try {
+        const result = await addonCheckoutResultHandler(
+          { query: Object.fromEntries(url.searchParams) },
+          { warn },
+          {}
+        );
+        sendJson(res, result.status, result.jsonBody, result.headers);
+      } catch {
+        sendJson(res, 503, { error: 'Betalningsstatus kunde inte kontrolleras.' });
       }
       return;
     }

@@ -21,6 +21,7 @@ const {
   groupDirectBookingApprovals,
   fromCalendarSyncEntity,
   calendarSyncEntity,
+  fromAuxEntity,
   CALENDAR_SYNC_PARTITION,
   CALENDAR_SYNC_ROW
 } = require('../../booking/store');
@@ -107,6 +108,13 @@ function createTableAdminRepository(options = {}) {
       "PartitionKey eq 'outbox'",
       'reference,mailType,status,deliveryStatus,resendId,sentAt,createdAt'
     );
+  }
+
+  async function loadAddonRows(partition, reference) {
+    const rows = await query(
+      `PartitionKey eq '${escapeOData(partition)}' and reference eq '${escapeOData(reference)}'`
+    );
+    return rows.map(fromAuxEntity).filter(Boolean);
   }
 
   function groupOutbox(rows) {
@@ -563,6 +571,14 @@ function createTableAdminRepository(options = {}) {
         if ([200, 204].includes(result.status)) cancelled += 1;
       }
       return cancelled;
+    },
+    async listAddonOrders(reference) {
+      const rows = await loadAddonRows('addonorder', reference);
+      return rows.sort((a, b) => String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')));
+    },
+    async listAddonRequests(reference) {
+      const rows = await loadAddonRows('addonrequest', reference);
+      return rows.sort((a, b) => String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')));
     },
     async dashboard(now = new Date()) {
       const bookings = await loadAllBookings();

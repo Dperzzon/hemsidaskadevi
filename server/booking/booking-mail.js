@@ -308,6 +308,160 @@ function buildInvoiceNotifications(record, request) {
   };
 }
 
+function buildAddonVerificationMail(record, code, options = {}) {
+  const minutes = Number(options.expiresMinutes ?? 10);
+  const subject = 'Din verifieringskod för tillval – Skadevi Herrgård';
+  const intro = 'Använd koden nedan för att visa din befintliga bokning och köpa tillval.';
+  const warn = `Koden gäller i ${minutes} minuter och kan bara användas en gång. Om du inte begärt koden kan du bortse från detta mejl.`;
+  const text = [
+    `Hej ${record.firstName ?? ''},`.trim(),
+    '',
+    intro,
+    '',
+    `Verifieringskod: ${code}`,
+    '',
+    warn,
+    '',
+    contactBlockText()
+  ].join('\n');
+  const html = emailShell('Verifiera din bokning', `<p style="margin:0 0 12px;">Hej ${escapeHtml(record.firstName ?? '')},</p>
+<p style="margin:0 0 16px;">${escapeHtml(intro)}</p>
+<div style="background:${MAIL_BRAND.background};border:1px solid ${MAIL_BRAND.border};padding:20px;text-align:center;margin:0 0 18px;">
+<div style="font-family:Georgia,'Times New Roman',serif;font-size:34px;letter-spacing:8px;color:${MAIL_BRAND.ink};">${escapeHtml(code)}</div>
+</div>
+<p style="margin:0 0 16px;font-size:13px;color:${MAIL_BRAND.muted};">${escapeHtml(warn)}</p>
+<p style="margin:0;">Vänliga hälsningar,<br><strong>Skadevi Herrgård</strong></p>${contactBlockHtml()}`);
+  return {
+    mailType: 'GUEST_ADDON_VERIFICATION_CODE',
+    to: record.email,
+    replyTo: MAIL.replyTo,
+    subject,
+    body: text,
+    html
+  };
+}
+
+function buildAddonConfirmation(record, order) {
+  const firstName = String(record.firstName ?? '').trim();
+  const greeting = firstName ? `Hej ${firstName},` : 'Hej,';
+  const lines = Array.isArray(order.lines) ? order.lines : [];
+  const lineText = lines.length
+    ? lines.map((line) => `${line.label}${line.quantity > 1 ? ` × ${line.quantity}` : ''}: ${formatOre(line.amountOre ?? Math.round(Number(line.amount ?? 0) * 100))}`)
+    : ['Inga nya tillval'];
+  const totalText = formatOre(order.totalOre ?? Math.round(Number(order.total ?? 0) * 100));
+  const stayRows = [
+    ['Bokningsreferens', String(record.reference ?? '')],
+    ['Ankomst', formatDate(record.arrival)],
+    ['Avresa', formatDate(record.departure)],
+    ['Antal gäster', String(record.guests ?? '')]
+  ];
+  const paymentText = 'Betalningen för tillvalen är genomförd med kort via Stripe. Boendebetalningen och de ursprungliga bokningsuppgifterna är oförändrade.';
+  const content = `<p style="margin:0 0 18px;text-align:center;font-size:15px;line-height:1.7;">Tack! Vi har lagt till följande tillval på din befintliga bokning.</p>
+${sectionTitle('Er bokning')}
+${stayRows.map(([label, value]) => detailRow(label, value)).join('')}
+${sectionTitle('Nya tillval')}
+${mailList(lineText.map(escapeHtml))}
+${detailRow('Summa för detta köp', totalText)}
+${detailRow('Betalstatus', 'Betald')}
+${sectionTitle('Bokningens samtliga tillval')}
+${mailList(addonLines(record).map(escapeHtml))}
+<div style="background:#eef7ee;border-left:3px solid #4f7f4f;padding:14px 16px;margin:16px 0 0;font-size:15px;line-height:1.55;"><strong>${escapeHtml(paymentText)}</strong></div>
+<p style="margin:20px 0 0;font-size:13px;color:${MAIL_BRAND.muted};">Villkor för tillvalsköpet: version ${escapeHtml(order.termsVersion ?? '')}.</p>
+${contactBlockHtml()}`;
+  const text = [
+    greeting,
+    '',
+    'Tack! Vi har lagt till följande tillval på din befintliga bokning.',
+    '',
+    'Er bokning',
+    ...stayRows.map(([label, value]) => `${label}: ${value}`),
+    '',
+    'Nya tillval',
+    ...lineText,
+    `Summa för detta köp: ${totalText}`,
+    'Betalstatus: Betald',
+    '',
+    'Bokningens samtliga tillval',
+    ...addonLines(record),
+    '',
+    paymentText,
+    '',
+    `Villkor för tillvalsköpet: version ${order.termsVersion ?? ''}.`,
+    '',
+    contactBlockText()
+  ].join('\n');
+  return {
+    mailType: 'GUEST_ADDON_PURCHASE_CONFIRMATION',
+    to: record.email,
+    replyTo: MAIL.replyTo,
+    subject: `Bekräftelse på tillval till din bokning (${record.reference})`,
+    body: text,
+    html: emailShell('Bekräftelse på tillval till din bokning', content, {
+      preheader: `Tillvalsbekräftelse ${record.reference} – Skadevi Herrgård`
+    })
+  };
+}
+
+function buildAddonHostNotification(record, order) {
+  const lines = [
+    `Referens: ${record.reference}`,
+    `Gäst: ${record.guestName ?? `${record.firstName ?? ''} ${record.lastName ?? ''}`.trim()}`,
+    `E-post: ${record.email}`,
+    `Tillvalsorder: ${order.orderId}`,
+    ...stayLines(record),
+    'Nya köpta tillval:',
+    ...(Array.isArray(order.lines) ? order.lines.map((line) => `${line.label}: ${formatOre(line.amountOre ?? Math.round(Number(line.amount ?? 0) * 100))}`) : []),
+    `Summa för köpet: ${formatOre(order.totalOre)}`,
+    `Bokningens totalbelopp efter köpet: ${formatOre(Math.round(Number(record.total ?? 0) * 100))}`,
+    `Stripe-session: ${order.sessionId ?? ''}`,
+    `Villkorsversion: ${order.termsVersion ?? ''}`
+  ];
+  return {
+    mailType: 'HOST_ADDON_PURCHASE',
+    to: MAIL.hostRecipient,
+    replyTo: MAIL.replyTo,
+    subject: `Nytt tillvalsköp ${record.reference} – ${formatOre(order.totalOre)}`,
+    body: `${lines.join('\n')}\n\n${contactBlockText()}`,
+    html: emailShell(`Nytt tillvalsköp – ${record.reference}`, `<div style="background:#eef7ee;border-left:4px solid #4f7f4f;padding:12px 16px;margin:0 0 18px;"><strong>Betald tillvalsorder ${escapeHtml(order.orderId)}</strong></div>${mailList(lines.map(escapeHtml))}${contactBlockHtml()}`)
+  };
+}
+
+function buildAddonRequestNotifications(record, request) {
+  const lines = [
+    `Referens: ${record.reference}`,
+    `Förfrågan: ${request.requestId}`,
+    `Gäst: ${record.guestName ?? `${record.firstName ?? ''} ${record.lastName ?? ''}`.trim()}`,
+    `E-post: ${record.email}`,
+    ...stayLines(record),
+    'Önskade tillval:',
+    ...(Array.isArray(request.lines) ? request.lines.map((line) => line.label) : []),
+    request.message ? `Meddelande: ${request.message}` : '',
+    'Ingen betalning har skett. Skadevi bekräftar tillgänglighet och pris manuellt.'
+  ].filter(Boolean);
+  const guestIntro = 'Vi har tagit emot din förfrågan om ytterligare tillval. Inget har debiterats. Skadevi Herrgård återkommer med besked om tillgänglighet och pris.';
+  return {
+    host: {
+      mailType: 'HOST_ADDON_REQUEST',
+      to: MAIL.hostRecipient,
+      replyTo: MAIL.replyTo,
+      subject: `Tillvalsförfrågan ${record.reference}`,
+      body: `${lines.join('\n')}\n\n${contactBlockText()}`,
+      html: emailShell(`Tillvalsförfrågan – ${record.reference}`, `${mailList(lines.map(escapeHtml))}${contactBlockHtml()}`)
+    },
+    guest: {
+      mailType: 'GUEST_ADDON_REQUEST_RECEIVED',
+      to: record.email,
+      replyTo: MAIL.replyTo,
+      subject: `Vi har tagit emot din tillvalsförfrågan (${record.reference})`,
+      body: `${guestIntro}\n\n${contactBlockText()}`,
+      html: emailShell('Tillvalsförfrågan mottagen', `<p style="margin:0 0 12px;">Hej ${escapeHtml(record.firstName ?? '')},</p>
+<p style="margin:0 0 16px;">${escapeHtml(guestIntro)}</p>
+<p style="margin:0 0 16px;">Det gäller: ${escapeHtml((request.lines ?? []).map((line) => line.label).join(', '))}</p>
+<p style="margin:0;">Vänliga hälsningar,<br><strong>Skadevi Herrgård</strong></p>${contactBlockHtml()}`)
+    }
+  };
+}
+
 module.exports = {
   summaryFor,
   receiptKind,
@@ -316,5 +470,9 @@ module.exports = {
   buildPaymentLinkNotification,
   buildCancellationNotification,
   buildPaymentFailedNotification,
-  buildInvoiceNotifications
+  buildInvoiceNotifications,
+  buildAddonVerificationMail,
+  buildAddonConfirmation,
+  buildAddonHostNotification,
+  buildAddonRequestNotifications
 };

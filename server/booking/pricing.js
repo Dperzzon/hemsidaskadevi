@@ -224,6 +224,6 @@ function quote({ arrival, departure, addons = {}, guests = 0 }) {
 }
 
 module.exports = {
-  PRICE_VERSION, CONFIG, LINEN_MAX, EXTRAHUS_MAX_GUESTS, nightRate, bestDiscount, nightsBetween, nightKeys, quote,
-  addonTotals, extrahusSelection, applyDiscountToLodging, dayNumber, keyFromDayNumber, weekdayOf
+  PRICE_VERSION, CONFIG, LINEN_MAX, EXTRAHUS_MAX_GUESTS, linenLimit, nightRate, bestDiscount, nightsBetween, nightKeys, quote,
+  addonTotals, extrahusSelection, applyDiscountToLodging, dayNumber, keyFromDayNumber, weekdayOf, formatSek
 };

@@ -84,6 +84,25 @@
     </div>
   </section>
 
+  <section class="booking-mode-section" aria-labelledby="booking-mode-title">
+    <div class="booking-mode-inner">
+      <p class="eyebrow">Vad vill ni göra?</p>
+      <h2 id="booking-mode-title">Boka nytt eller komplettera er bokning</h2>
+      <div class="booking-mode-grid" role="group" aria-label="Välj bokningsflöde">
+        <button type="button" class="booking-mode-card is-active" data-booking-mode="new" aria-pressed="true">
+          <span class="booking-mode-index">01</span>
+          <span class="booking-mode-title">Boka en ny vistelse</span>
+          <span class="booking-mode-text">Välj datum i kalendern och boka boende med eller utan tillval.</span>
+        </button>
+        <button type="button" class="booking-mode-card" data-booking-mode="addons" id="addons-mode-button" aria-pressed="false" hidden>
+          <span class="booking-mode-index">02</span>
+          <span class="booking-mode-title">Lägg till tillval till min bokning</span>
+          <span class="booking-mode-text">Har ni redan en bekräftad bokning? Verifiera er bokning och köp endast de nya tillvalen.</span>
+        </button>
+      </div>
+    </div>
+  </section>
+
   <section class="calendar-section" aria-label="Bokningskalender">
     <div class="calendar-card">
       <div id="availability-calendar" role="status" aria-live="polite" aria-busy="true"><p class="cal-notice">Kalendern hämtas …</p></div>
@@ -259,6 +278,88 @@
     </div>
   </section>
 
+  <section class="addon-section" id="addon-section" hidden aria-labelledby="addon-title">
+    <div class="addon-card">
+      <p class="eyebrow">Komplettera en befintlig bokning</p>
+      <h2 id="addon-title" tabindex="-1">Lägg till tillval till er bokning</h2>
+      <p class="addon-intro">Ange ert bokningsnummer och den e-postadress som finns på bokningen. Av säkerhetsskäl skickar vi en engångskod till bokningens registrerade adress. Först efter verifieringen visas bokningens uppgifter.</p>
+
+      <div class="addon-steps" aria-label="Steg för verifiering">
+        <span class="addon-step is-active" data-addon-step-indicator="1">1. Uppgifter</span>
+        <span class="addon-step" data-addon-step-indicator="2">2. Verifiera</span>
+        <span class="addon-step" data-addon-step-indicator="3">3. Välj tillval</span>
+      </div>
+
+      <form class="addon-form" id="addon-identify-form" novalidate>
+        <div class="addon-field">
+          <label for="addon-reference">Bokningsnummer *</label>
+          <input type="text" id="addon-reference" name="reference" autocomplete="off" maxlength="80" required placeholder="Till exempel SK-2027-AB123">
+        </div>
+        <div class="addon-field">
+          <label for="addon-email">E-postadress på bokningen *</label>
+          <input type="email" id="addon-email" name="email" autocomplete="email" maxlength="320" required>
+        </div>
+        <p class="addon-notice" id="addon-identify-notice" role="status" aria-live="polite" hidden></p>
+        <button type="submit" class="btn" id="addon-identify-submit">Skicka verifieringskod</button>
+        <p class="addon-disclaimer">Av säkerhetsskäl får ni alltid samma neutrala svar, oavsett om uppgifterna finns i vårt system. Saknar er bokning en registrerad e-postadress eller behöver ni hjälp? Kontakta <a href="mailto:skadevigard@gmail.com">skadevigard@gmail.com</a> eller <a href="tel:+46702730422">+46 70 273 04 22</a> så hjälper vi er manuellt.</p>
+      </form>
+
+      <form class="addon-form" id="addon-code-form" hidden novalidate>
+        <p class="addon-code-intro">Om uppgifterna stämmer har en sexsiffrig kod skickats till bokningens registrerade e-postadress. Koden gäller i 10 minuter.</p>
+        <div class="addon-field">
+          <label for="addon-code">Engångskod *</label>
+          <input type="text" id="addon-code" name="code" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" required placeholder="123456">
+        </div>
+        <p class="addon-notice" id="addon-code-notice" role="status" aria-live="polite" hidden></p>
+        <div class="addon-button-row">
+          <button type="submit" class="btn" id="addon-code-submit">Verifiera</button>
+          <button type="button" class="btn btn-outline" id="addon-resend">Skicka ny kod</button>
+          <button type="button" class="booking-link" id="addon-start-over">Börja om</button>
+        </div>
+      </form>
+
+      <div class="addon-session" id="addon-session" hidden>
+        <div class="addon-booking-summary" id="addon-booking-summary" aria-live="polite"></div>
+        <p class="addon-existing" id="addon-existing"></p>
+
+        <form id="addon-purchase-form" novalidate>
+          <h3>Välj nya tillval</h3>
+          <div class="addon-options" id="addon-options"></div>
+          <div class="addon-total" id="addon-total" aria-live="polite"></div>
+          <label class="addon-terms">
+            <input type="checkbox" id="addon-terms" required>
+            <span>Jag har läst och godkänner de <button type="button" class="booking-link" id="addon-open-rules">aktuella bokningsvillkoren</button> för detta tillvalsköp.</span>
+          </label>
+          <p class="addon-notice" id="addon-purchase-notice" role="alert" hidden></p>
+          <button type="submit" class="btn" id="addon-purchase-submit" disabled>Betala endast tillvalen</button>
+          <p class="addon-disclaimer">Betalningen avser endast de nya tillvalen. Er ursprungliga boendebokning och dess betalning ändras inte.</p>
+        </form>
+
+        <div class="addon-request-panel" id="addon-request-panel">
+          <h3>Tillval som kräver manuell bekräftelse</h3>
+          <p id="addon-request-only-text">Extrahus och vissa specialtillval kan inte betalas direkt. Skicka en förfrågan så återkommer Skadevi Herrgård med tillgänglighet och pris. Inget debiteras förrän vi har bekräftat.</p>
+          <form id="addon-request-form" novalidate>
+            <div class="addon-field">
+              <label for="addon-request-extrahus">Extrahus (ange antal nätter och gäster)</label>
+              <input type="text" id="addon-request-extrahus" name="extrahus" maxlength="200" placeholder="Till exempel 2 nätter, 4 gäster">
+            </div>
+            <div class="addon-field">
+              <label for="addon-request-other">Annat tillval eller önskemål</label>
+              <textarea id="addon-request-other" name="other" rows="3" maxlength="1000"></textarea>
+            </div>
+            <p class="addon-notice" id="addon-request-notice" role="status" aria-live="polite" hidden></p>
+            <button type="submit" class="btn btn-outline" id="addon-request-submit">Skicka förfrågan utan betalning</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="addon-success" id="addon-success" hidden tabindex="-1">
+        <h3>Tack för er förfrågan</h3>
+        <p id="addon-success-text">Vi har tagit emot er förfrågan. Inget har debiterats.</p>
+      </div>
+    </div>
+  </section>
+
   <dialog id="booking-rules-dialog" class="booking-rules-dialog" aria-labelledby="rules-dialog-title">
     <h3 id="rules-dialog-title">Bokningsregler – Skadevi Herrgård</h3>
     <p id="rules-dialog-notice" hidden>Bokningsreglerna publiceras inom kort.</p>
@@ -355,6 +456,7 @@
 
 <script type="module" src="/js/calendar.js"></script>
 <script type="module" src="/js/booking-form.js"></script>
+<script type="module" src="/js/addon-order.js"></script>
 <script type="module" src="/js/main.js"></script>
 </body>
 </html>

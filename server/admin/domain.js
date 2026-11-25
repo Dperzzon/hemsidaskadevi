@@ -116,7 +116,12 @@ const MAIL_TYPE_LABELS = {
   HOST_INVOICE_REQUEST: 'Värd: fakturabegäran',
   GUEST_INVOICE_REQUEST_RECEIVED: 'Gäst: fakturabegäran mottagen',
   GUEST_BOOKING_CANCELLED: 'Gäst: avbokning',
-  GUEST_PAYMENT_FAILED: 'Gäst: betalning ej genomförd'
+  GUEST_PAYMENT_FAILED: 'Gäst: betalning ej genomförd',
+  GUEST_ADDON_VERIFICATION_CODE: 'Gäst: verifieringskod för tillval',
+  GUEST_ADDON_PURCHASE_CONFIRMATION: 'Gäst: bekräftelse på tillval',
+  HOST_ADDON_PURCHASE: 'Värd: gästen har köpt tillval',
+  GUEST_ADDON_REQUEST_RECEIVED: 'Gäst: tillvalsförfrågan mottagen',
+  HOST_ADDON_REQUEST: 'Värd: ny tillvalsförfrågan'
 };
 
 const DELIVERY_LABELS = {
@@ -379,6 +384,8 @@ function normalizeBooking(record = {}, options = {}) {
       : null,
     bufferNightsMode: record.bufferNightsMode === 'auto' ? 'auto' : 'manual',
     bufferNights: Array.isArray(record.bufferNights) ? record.bufferNights.map(String) : [],
+    addonOrders: Array.isArray(record.addonOrders) ? record.addonOrders : [],
+    addonPayments: Array.isArray(record.addonPayments) ? record.addonPayments : [],
     firstName: String(record.firstName ?? ''),
     lastName: String(record.lastName ?? ''),
     guestName: [record.firstName, record.lastName].filter(Boolean).join(' ') ||

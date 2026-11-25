@@ -751,6 +751,19 @@ async function handleStripeWebhook(request, context = {}, options = {}) {
     outboxEnabled: options.outboxEnabled ?? process.env.STRIPE_OUTBOX_ENABLED === '1'
   };
 
+  // Tillvalsköp till en befintlig bokning har egen orderhantering och får
+  // aldrig gå genom direktbokningens reservationsbekräftelse.
+  const addonSource = String(session.metadata?.source ?? '');
+  if (addonSource === 'existing-booking-addons' && session.metadata?.addonOrderId) {
+    const { handleAddonStripeEvent } = require('./existing-booking-addons');
+    return handleAddonStripeEvent(
+      event,
+      session,
+      { ...eventOptions, store },
+      { warn }
+    );
+  }
+
   if (event.type === 'checkout.session.expired' || event.type === 'checkout.session.async_payment_failed') {
     const status = event.type === 'checkout.session.expired' ? 'EXPIRED' : 'FAILED';
     const action = event.type === 'checkout.session.expired'

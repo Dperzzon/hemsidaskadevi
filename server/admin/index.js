@@ -515,7 +515,15 @@ async function handleApi(req, res, url, context) {
       return;
     }
     await enrichWarnings(repository, booking, now);
-    sendJson(req, res, 200, { booking: redactPaymentLinks(booking, principal) });
+    const [addonOrders, addonRequests] = await Promise.all([
+      repository.listAddonOrders ? repository.listAddonOrders(reference).catch(() => []) : [],
+      repository.listAddonRequests ? repository.listAddonRequests(reference).catch(() => []) : []
+    ]);
+    sendJson(req, res, 200, {
+      booking: redactPaymentLinks(booking, principal),
+      addonOrders,
+      addonRequests
+    });
     return;
   }
 
@@ -1039,9 +1047,14 @@ function createAdminRequestListener(options = {}) {
           return;
         }
         const history = await repository.listHistory(reference).catch(() => []);
+        const [addonOrders, addonRequests] = await Promise.all([
+          repository.listAddonOrders ? repository.listAddonOrders(reference).catch(() => []) : [],
+          repository.listAddonRequests ? repository.listAddonRequests(reference).catch(() => []) : []
+        ]);
         await enrichWarnings(repository, booking, now);
         sendHtml(req, res, 200, renderBookingDetail({
           booking: redactPaymentLinks(booking, principal),
+          addonOrders, addonRequests,
           principal, demo, csrfToken, writesEnabled, history, today: todayKey(now),
           stripeEnabled, stripeMode, stripeSwishEnabled, outboxEnabled
         }));

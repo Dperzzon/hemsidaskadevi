@@ -90,6 +90,9 @@ param enableSwishCheckout bool = false
 @description('Aktiverar direktbokning med kort på den publika webbplatsen. Standard false: endast bokningsförfrågan/faktura. Kräver ett separat godkänt beslut om Airbnb-risk innan den slås på.')
 param enableDirectBooking bool = false
 
+@description('Aktiverar köp av tillval till en befintlig bokning. Standard false: funktionen är avstängd och alla endpoints svarar 503. Kräver uttryckligt godkännande efter godkända tester.')
+param enableExistingBookingAddons bool = false
+
 @description('Stripe-läge som visas i admin och används av den publika appen.')
 @allowed([
   'test'
@@ -197,6 +200,14 @@ var baseAppSettings = [
   {
     name: 'DIRECT_BOOKING_ALLOW_LIVE'
     value: enableDirectBooking ? '1' : '0'
+  }
+  {
+    name: 'EXISTING_BOOKING_ADDONS_ENABLED'
+    value: enableExistingBookingAddons ? '1' : '0'
+  }
+  {
+    name: 'EXISTING_BOOKING_ADDONS_ALLOW_LIVE'
+    value: enableExistingBookingAddons ? '1' : '0'
   }
 ]
 
