@@ -13,6 +13,8 @@ const {
   handleAddonCheckout,
   handleAddonRequest,
   handleAddonStripeEvent,
+  releaseExpiredAddonOrders,
+  expireAddonOrder,
   listAddonOrders,
   listAddonRequests,
   addonsAvailable
@@ -311,7 +313,7 @@ async function startCheckout(state, stripe, items, overrides = {}) {
   const result = await handleAddonCheckout(
     {
       token,
-      ip: '10.0.0.2',
+      ip: nextIp(),
       idempotencyKey: 'idem-addon-0001',
       body: {
         items,
@@ -766,4 +768,60 @@ test('avbruten Checkout kan avslutas explicit och frigör buffertnatten', async (
   assert.equal(state.calendar.has('main:2027-03-13'), false);
   const orders = await listAddonOrders(state.store, BOOKING_REFERENCE);
   assert.equal(orders[0].status, 'EXPIRED');
+});
+
+test('fördröjd eller saknad webhook återhämtas av schemalagd avstämning', async () => {
+  const paidState = createStore(booking());
+  const paidStripe = createFakeStripe();
+  const paidCheckout = await startCheckout(paidState, paidStripe, { ved: true });
+  const paidSessionId = stripeSessionIdOf(paidStripe, paidCheckout.result);
+  paidStripe.markPaid(paidSessionId);
+  const paidOrders = await listAddonOrders(paidState.store, BOOKING_REFERENCE);
+  const afterExpiry = new Date(Date.parse(paidOrders[0].expiresAt) + 60 * 1000);
+  const recovered = await releaseExpiredAddonOrders(
+    paidState.store,
+    { ...paidCheckout.options, now: afterExpiry },
+    {}
+  );
+  assert.equal(recovered.results.length, 1);
+  assert.equal(paidState.getBooking(BOOKING_REFERENCE).addons.ved, true);
+  assert.equal((await listAddonOrders(paidState.store, BOOKING_REFERENCE))[0].status, 'PAID');
+
+  const unpaidState = createStore(booking());
+  const unpaidStripe = createFakeStripe();
+  const unpaidCheckout = await startCheckout(unpaidState, unpaidStripe, { senUtcheckning: true });
+  const unpaidSessionId = stripeSessionIdOf(unpaidStripe, unpaidCheckout.result);
+  await unpaidStripe.expireCheckoutSession(unpaidSessionId);
+  const unpaidOrders = await listAddonOrders(unpaidState.store, BOOKING_REFERENCE);
+  const unpaidAfterExpiry = new Date(Date.parse(unpaidOrders[0].expiresAt) + 60 * 1000);
+  await releaseExpiredAddonOrders(
+    unpaidState.store,
+    { ...unpaidCheckout.options, now: unpaidAfterExpiry },
+    {}
+  );
+  assert.equal(unpaidState.calendar.has('main:2027-03-13'), false);
+  assert.equal((await listAddonOrders(unpaidState.store, BOOKING_REFERENCE))[0].status, 'EXPIRED');
+});
+
+test('Stripe API-fel vid avstämning frigör inga buffertar', async () => {
+  const state = createStore(booking());
+  const stripe = createFakeStripe();
+  const { result, options } = await startCheckout(state, stripe, { senUtcheckning: true });
+  const sessionId = stripeSessionIdOf(stripe, result);
+  const orders = await listAddonOrders(state.store, BOOKING_REFERENCE);
+  const brokenStripe = {
+    ...stripe,
+    retrieveCheckoutSession: async () => { throw new Error('Stripe nere'); }
+  };
+  const failed = await expireAddonOrder(
+    state.store,
+    orders[0],
+    { id: sessionId },
+    { id: 'evt_stripe_down', type: 'checkout.session.expired' },
+    { ...options, stripeClient: brokenStripe, requireStripeVerification: true },
+    {}
+  );
+  assert.equal(failed.status, 503);
+  assert.equal(state.calendar.has('main:2027-03-13'), true);
+  assert.equal((await listAddonOrders(state.store, BOOKING_REFERENCE))[0].status, 'PENDING_PAYMENT');
 });

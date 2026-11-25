@@ -7,9 +7,9 @@ const path = require('node:path');
 
 const root = path.join(__dirname, '..', '..');
 
-test('tillvalsfunktionen är uttryckligen avstängd i produktionsparametrarna', () => {
+test('tillvalsfunktionen är aktiverad i produktionsparametrarna efter Steg 15B', () => {
   const params = fs.readFileSync(path.join(root, 'infra', 'main.bicepparam'), 'utf8');
-  assert.match(params, /param\s+enableExistingBookingAddons\s*=\s*false/);
+  assert.match(params, /param\s+enableExistingBookingAddons\s*=\s*true/);
 });
 
 test('Bicep definierar en egen feature flagga med standardvärdet false', () => {

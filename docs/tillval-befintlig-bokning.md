@@ -4,7 +4,7 @@
 
 Gäster med en bekräftad bokning kan på `/boka` välja **Lägg till tillval till min bokning**. Flödet identifierar bokningen med bokningsnummer och registrerad e-postadress, verifierar med en sexsiffrig engångskod och utfärdar därefter en kortlivad, bokningsbunden session. Gästen kan sedan köpa endast de nya tillvalen. Stripe Checkout debiterar aldrig boendet igen, och den ursprungliga bokningen ändras först när en signerad webhook har verifierat betalningen.
 
-Funktionen är avstängd i produktion med `EXISTING_BOOKING_ADDONS_ENABLED=0` (Bicep-parametern `enableExistingBookingAddons = false`).
+Funktionen aktiverades i produktion 2026-11-25 (Steg 15B) med `EXISTING_BOOKING_ADDONS_ENABLED=1` och `EXISTING_BOOKING_ADDONS_ALLOW_LIVE=1` efter godkända tester och verifierad adminpublicering.
 
 ## 1. Identifiering och verifiering
 
@@ -119,26 +119,26 @@ Tillvalsordrar är visuellt och datamässigt separerade från boendebetalningen.
 
 ## 10. Feature flagga och driftsättning
 
-Produktionsvärde:
+Produktionsvärde efter Steg 15B:
 
 ```
-EXISTING_BOOKING_ADDONS_ENABLED=0
-EXISTING_BOOKING_ADDONS_ALLOW_LIVE=0
+EXISTING_BOOKING_ADDONS_ENABLED=1
+EXISTING_BOOKING_ADDONS_ALLOW_LIVE=1
 ```
 
 Bicep:
 
-- `infra/main.bicep`: `param enableExistingBookingAddons bool = false`
+- `infra/main.bicep`: `param enableExistingBookingAddons bool = false` (säker standard)
 - `infra/modules/webapp.bicep`: sätter båda miljövariablerna till `'1'` endast när parametern är true.
-- `infra/main.bicepparam`: `param enableExistingBookingAddons = false`
+- `infra/main.bicepparam`: `param enableExistingBookingAddons = true` (godkänt produktionsläge 2026-11-25)
 
-Funktionen aktiveras först efter godkända tester, granskad what-if och Skadevis uttryckliga beslut. Live-betalningar kräver dessutom att `EXISTING_BOOKING_ADDONS_ALLOW_LIVE=1` sätts medvetet.
+Aktiveringen gjordes genom att sätta båda appinställningarna till `1` och sedan verifiera `/api/booking-config`. Live-betalningar kräver dessutom att `EXISTING_BOOKING_ADDONS_ALLOW_LIVE=1` är satt.
 
 ## 11. Testning
 
 - `tests/unit/existing-booking-addons.test.js`: verifiering, neutrala svar, gissningsskydd, sessionsisolering, priser, dubbelköp, linnetak, Stripe-belopp, buffertreservation, webhook-idempotens, avstämning, Airbnb-konflikt, utgången Checkout, manuella förfrågningar och signerad webhook-dirigering.
 - `tests/unit/existing-booking-addons-server.test.js`: API-routing, same-origin-skydd, resultatsida och avstängd flagga.
-- `tests/unit/existing-booking-addons-infra.test.js`: att flaggan är false i produktion.
+- `tests/unit/existing-booking-addons-infra.test.js`: att produktionsparametern är aktiverad och att Bicep-standard är säker.
 - `tests/e2e/addons.spec.js`: desktop, tablet och mobil; ny bokning finns kvar, addon-läget döljer datumväljaren, verifiering, endast nya tillval och att checkout-body inte innehåller boendepris.
 
 Inga riktiga Stripe-, Resend- eller Azure-anrop görs i testerna.
@@ -150,3 +150,12 @@ Inga riktiga Stripe-, Resend- eller Azure-anrop görs i testerna.
 - Kodutskick kräver att utkorgen/Logic App är aktiv. Funktionen är annars verkningslös men fail-closed.
 - Äldre bokningar med manuella buffertar får endast manuell förfrågan.
 - Eventuella framtida antalsbaserade tillval måste läggas till i både central konfiguration och servervalidering innan de exponeras.
+
+## 13. Produktionsverifiering Steg 15B (2026-11-25)
+
+- Adminportalen publicerades om via `Publicera adminportal` och paketet innehöll `addonOrdersPanel`, `listAddonOrders` och `listAddonRequests`.
+- `GUEST_ADDON_VERIFICATION_CODE` verifierades mot utkorgskontraktet och den lokala Resend-simulatorn: rätt mottagare, `dispatchEligible=true`, `outboxVersion=1`, sexsiffrig kod, 10 minuters giltighet och idempotent utskick. Produktionsworkflowen filtrerar inte på `mailType`.
+- Stripe-webhooken svarar på produktions-URL:en och avvisar osignerade anrop. Metadata-branchen för `source=existing-booking-addons` är testad för lyckat köp, avbrott, dubbla webhooks, under-/överbetalning, avbokning, Airbnb-konflikt, Stripe-fel, mejlfel samt sen/saknad webhook.
+- Admin `/healthz` visar Airbnb-synk `ok`, `safetyStatus=ok`, 0 misslyckanden och färsk snapshot.
+- Live-UI verifierades i desktop och mobil: båda valen visas, datumväljaren döljs i tillvalsläget och ett påhittat bokningsnummer ger neutralt svar utan mejl.
+- Produktionsflaggor sattes till `EXISTING_BOOKING_ADDONS_ENABLED=1` och `EXISTING_BOOKING_ADDONS_ALLOW_LIVE=1`. `DIRECT_BOOKING_ALLOW_LIVE`, Stripe Live, webhook och utkorg lämnades oförändrade.

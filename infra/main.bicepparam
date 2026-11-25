@@ -76,11 +76,10 @@ param enableSwishCheckout = false
 // inte stänger av kundernas kortbetalning. Ändra endast medvetet.
 param enableDirectBooking = true
 
-// STEG 15: Köp av tillval till en befintlig bokning är AVSTÄNGT i produktion.
-// Funktionen får endast slås på efter godkända tester, granskad driftsättning
-// och Skadevis uttryckliga beslut. Värdet ska förbli false vid automatisk
-// deployment och ändras medvetet i en separat ändring.
-param enableExistingBookingAddons = false
+// STEG 15B: Köp av tillval till en befintlig bokning aktiverat 2026-11-25
+// efter godkända enhets-, E2E-, Resend- och Stripe-testkontroller samt
+// verifierad adminpublicering. Båda flaggorna måste vara 1 för live.
+param enableExistingBookingAddons = true
 
 param stripeMode = 'live'
 
