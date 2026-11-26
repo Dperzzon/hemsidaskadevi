@@ -19,6 +19,7 @@ const WARNING = {
   AIRBNB_OVERRIDE: 'airbnb.override',
   AIRBNB_OVERRIDE_STALE: 'airbnb.override_stale',
   AIRBNB_IMPORT_PENDING: 'airbnb.import_pending',
+  AIRBNB_MANUAL_VERIFIED: 'airbnb.manual_verified',
   INTERNAL_CALENDAR_CONFLICT: 'internal.calendar_conflict',
   INTERNAL_BOOKING_CONFLICT: 'internal.booking_conflict',
   INTERNAL_CALENDAR_MISSING: 'internal.calendar_missing',
@@ -54,6 +55,7 @@ const POLICIES = {
   [WARNING.AIRBNB_OVERRIDE]: { type: 'AIRBNB', severity: SEVERITY.HANDLED, dismissible: false, recheckable: true },
   [WARNING.AIRBNB_OVERRIDE_STALE]: { type: 'AIRBNB', severity: SEVERITY.ACTION, dismissible: true, recheckable: true },
   [WARNING.AIRBNB_IMPORT_PENDING]: { type: 'AIRBNB', severity: SEVERITY.VERIFY, dismissible: true, recheckable: true },
+  [WARNING.AIRBNB_MANUAL_VERIFIED]: { type: 'AIRBNB', severity: SEVERITY.HANDLED, dismissible: false, recheckable: true },
   [WARNING.INTERNAL_CALENDAR_CONFLICT]: { type: 'INTERNAL_CALENDAR', severity: SEVERITY.ACTION, dismissible: false, recheckable: false },
   [WARNING.INTERNAL_BOOKING_CONFLICT]: { type: 'INTERNAL_BOOKING', severity: SEVERITY.ACTION, dismissible: false, recheckable: false },
   [WARNING.INTERNAL_CALENDAR_MISSING]: { type: 'INTERNAL_CALENDAR', severity: SEVERITY.ACTION, dismissible: false, recheckable: false },
@@ -138,8 +140,45 @@ function normalizeAcknowledgements(booking = {}) {
       reason: String(row.reason ?? ''),
       actorId: String(row.actorId ?? ''),
       actorName: String(row.actorName ?? ''),
-      at: String(row.at ?? '')
+      at: String(row.at ?? ''),
+      method: String(row.method ?? ''),
+      evidenceKey: String(row.evidenceKey ?? ''),
+      stayFingerprint: String(row.stayFingerprint ?? ''),
+      nights: Array.isArray(row.nights) ? row.nights.map(String) : [],
+      mailKey: String(row.mailKey ?? ''),
+      mailType: String(row.mailType ?? ''),
+      resendId: String(row.resendId ?? ''),
+      verifiedEvent: String(row.verifiedEvent ?? '')
     }));
+}
+
+function latestManualAirbnbAck(booking = {}) {
+  const acks = normalizeAcknowledgements(booking)
+    .filter((ack) => ack.method === 'MANUAL_AIRBNB');
+  let found = null;
+  for (const ack of acks) {
+    if (ack.stayFingerprint !== stayFingerprint(booking)) continue;
+    if (!found || String(ack.at) > String(found.at)) found = ack;
+  }
+  return found;
+}
+
+function manualMailKeys(booking = {}) {
+  const keys = new Map();
+  for (const ack of normalizeAcknowledgements(booking)) {
+    if (ack.method !== 'MANUAL_RESEND') continue;
+    const key = `${ack.mailKey}|${ack.resendId}`;
+    if (!ack.resendId) continue;
+    const existing = keys.get(key);
+    if (!existing || String(ack.at) > String(existing.at)) keys.set(key, ack);
+  }
+  return keys;
+}
+
+function mailManuallyVerified(booking, key, level) {
+  if (!level?.resendId) return null;
+  const acks = manualMailKeys(booking);
+  return acks.get(`${key}|${level.resendId}`) ?? null;
 }
 
 function normalizeVerification(booking = {}) {
@@ -226,6 +265,27 @@ function internalNightsCovered(booking, nights, calendarRows) {
   return nights.every((night) => owned.has(night));
 }
 
+function manualAirbnbWarning(booking, nights, ack) {
+  const verifiedNights = Array.isArray(ack.nights) && ack.nights.length ? ack.nights : nights;
+  return createWarning(WARNING.AIRBNB_MANUAL_VERIFIED, {
+    title: 'Airbnb manuellt verifierad av Owner',
+    what: `Owner har manuellt kontrollerat att ${nightsText(verifiedNights)} är blockerade i Airbnb-gränssnittet.`,
+    why: 'Detta är en manuell kontroll i Airbnb, inte en automatisk verifiering av Airbnbs exporterade kalender. Exporten kan sakna manuellt importerade blockeringar.',
+    recommendation: 'Om datumen ändras eller en ny kalenderkonflikt uppstår skapas en ny varning. Använd automatisk kontroll om du vill försöka verifiera exporten igen.',
+    fingerprint: warningFingerprint(booking, WARNING.AIRBNB_MANUAL_VERIFIED, verifiedNights.join(',')),
+    details: {
+      nights: verifiedNights,
+      verifiedAt: ack.at,
+      verifiedBy: ack.actorName,
+      note: ack.reason,
+      caveat: 'Manuellt verifierad i Airbnb. Inte automatiskt verifierad via Airbnbs export.'
+    },
+    handledBy: ack.actorName,
+    handledAt: ack.at,
+    handledReason: ack.reason
+  });
+}
+
 function airbnbWarnings(booking, options = {}) {
   if (booking.statusCode !== 'CONFIRMED') return [];
   const nights = nightKeys(booking.arrival, booking.departure);
@@ -234,6 +294,7 @@ function airbnbWarnings(booking, options = {}) {
   const now = options.now instanceof Date ? options.now : new Date();
   const internalCovered = internalNightsCovered(booking, nights, options.calendarRows);
   const ageHours = confirmedAgeHours(booking, now);
+  const manualAck = latestManualAirbnbAck(booking);
 
   if (verification) {
     if (verification.fingerprint && verification.fingerprint !== stayFingerprint(booking)) {
@@ -247,13 +308,14 @@ function airbnbWarnings(booking, options = {}) {
       })];
     }
     if (verification.status === 'unavailable') {
+      if (manualAck) return [manualAirbnbWarning(booking, nights, manualAck)];
       return [createWarning(WARNING.AIRBNB_UNAVAILABLE, {
         title: 'Kalenderstatus kan inte verifieras',
         what: 'Airbnb-blockeringen är okänd eftersom Airbnbs exporterade kalender inte kunde hämtas eller tolkas.',
         why: 'Ett misslyckat dataläsningsförsök är inte samma sak som ett verifierat OK. Det säger heller inget om Airbnb har importerat Skadevis export.',
         recommendation: 'Försök igen om en stund. Kontrollera Airbnb manuellt innan du markerar varningen som hanterad.',
-        fingerprint: warningFingerprint(booking, WARNING.AIRBNB_UNAVAILABLE, verification.checkedAt),
-        details: { checkedAt: verification.checkedAt, error: verification.error }
+        fingerprint: warningFingerprint(booking, WARNING.AIRBNB_UNAVAILABLE, 'unavailable'),
+        details: { nights, checkedAt: verification.checkedAt, error: verification.error }
       })];
     }
     if (verification.status === 'blocked') {
@@ -284,22 +346,24 @@ function airbnbWarnings(booking, options = {}) {
       })];
     }
     if (internalCovered === true && ageHours !== null && ageHours < 24) {
+      if (manualAck) return [manualAirbnbWarning(booking, nights, manualAck)];
       return [createWarning(WARNING.AIRBNB_IMPORT_PENDING, {
         title: 'Airbnb-uppdatering väntar',
         what: `Skadevis interna kalender och .ics-export innehåller bokningen, men Airbnbs exporterade kalender visar ännu ingen blockering för ${nightsText(nights)}.`,
         why: 'Airbnb hämtar importerade kalendrar med fördröjning. Det kan också bero på att fel eller en gammal exportadress är importerad. Airbnbs exporterade kalender kan inte bevisa att importen lyckats.',
         recommendation: 'Kontrollera att den aktuella exportadressen är importerad i Airbnb och att datumen är blockerade där. Blockera manuellt om det är brådskande. Markera först som hanterad när du har sett blockeringen i Airbnb.',
-        fingerprint: warningFingerprint(booking, WARNING.AIRBNB_IMPORT_PENDING, verification.checkedAt),
-        details: { blockedNights: [], checkedAt: verification.checkedAt, confirmedAgeHours: ageHours }
+        fingerprint: warningFingerprint(booking, WARNING.AIRBNB_IMPORT_PENDING, nights.join(',')),
+        details: { blockedNights: [], nights, checkedAt: verification.checkedAt, confirmedAgeHours: ageHours }
       })];
     }
+    if (manualAck) return [manualAirbnbWarning(booking, nights, manualAck)];
     return [createWarning(WARNING.AIRBNB_AVAILABLE, {
       title: 'Airbnb-blockering saknas',
       what: `Airbnb-kalendern visar att inga av bokningens ${nights.length} nätter är blockerade.`,
       why: 'Bokningen är bekräftad internt, men Airbnbs exporterade kalender visar ingen blockering. Den kan inte visa om Airbnb har importerat Skadevis export. Orsaken kan vara utebliven import, fördröjd hämtning eller fel/gammal kalenderadress.',
       recommendation: 'Kontrollera att rätt exportadress är importerad i Airbnb och blockera datumen manuellt om de inte redan är blockerade. Markera som hanterad först när du har säkerställt att datumen är blockerade i Airbnb.',
-      fingerprint: warningFingerprint(booking, WARNING.AIRBNB_AVAILABLE, verification.checkedAt),
-      details: { blockedNights: [], checkedAt: verification.checkedAt, internalCovered, confirmedAgeHours: ageHours }
+      fingerprint: warningFingerprint(booking, WARNING.AIRBNB_AVAILABLE, nights.join(',')),
+      details: { blockedNights: [], nights, checkedAt: verification.checkedAt, internalCovered, confirmedAgeHours: ageHours }
     })];
   }
 
@@ -358,13 +422,14 @@ function airbnbWarnings(booking, options = {}) {
     })];
   }
 
+  if (manualAck) return [manualAirbnbWarning(booking, nights, manualAck)];
   return [createWarning(WARNING.AIRBNB_UNVERIFIED, {
     title: 'Airbnb-blockering kunde inte verifieras',
     what: 'Det finns ingen verifierad uppgift om att bokningens datum är blockerade i Airbnb.',
     why: 'Bokningen är bekräftad, men Airbnb-kalendern har inte kontrollerats eller så saknas ett sparat verifieringsresultat.',
     recommendation: 'Kontrollera att datumen är blockerade i Airbnb. Om du redan har gjort det kan du markera varningen som hanterad.',
     fingerprint: warningFingerprint(booking, WARNING.AIRBNB_UNVERIFIED, ''),
-    details: {}
+    details: { nights }
   })];
 }
 
@@ -462,9 +527,11 @@ function mailWarnings(booking) {
   const deliveredViaApi = (key) => verificationFor(key)?.status === 'delivered';
   const failedViaApi = (key) =>
     ['bounced', 'failed', 'complained'].includes(verificationFor(key)?.status);
+  const manualFor = (key, level) => mailManuallyVerified(booking, key, level);
 
-  const pending = levels.filter(({ level }) =>
-    level.pending || level.status === 'Utkorg' || level.status === 'Skickar');
+  const pending = levels.filter(({ key, level }) =>
+    !manualFor(key, level) &&
+    (level.pending || level.status === 'Utkorg' || level.status === 'Skickar'));
   const failed = levels.filter(({ key, level }) =>
     level.deliveryFailed ||
     level.status === 'Misslyckad' ||
@@ -476,6 +543,7 @@ function mailWarnings(booking) {
     !failed.some((item) => item.level === level) &&
     level.deliveryUnverified &&
     !deliveredViaApi(key) &&
+    !manualFor(key, level) &&
     !pending.some((item) => item.level === level)
   );
 

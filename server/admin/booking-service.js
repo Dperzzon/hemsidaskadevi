@@ -43,7 +43,8 @@ const {
   deriveWarnings,
   applyWarnings,
   findWarning,
-  stayFingerprint
+  stayFingerprint,
+  WARNING
 } = require('./warnings');
 const {
   PAYMENT_METHOD_CODES,
@@ -779,6 +780,228 @@ async function acknowledgeWarning(repo, principal, reference, body = {}, options
   }
 }
 
+function sameManualAirbnbScope(row, ack) {
+  return row && row.method === 'MANUAL_AIRBNB' &&
+    String(row.stayFingerprint ?? '') === ack.stayFingerprint &&
+    (Array.isArray(row.nights) ? row.nights.join(',') : '') === ack.nights.join(',');
+}
+
+function sameManualMailScope(row, ack) {
+  return row && row.method === 'MANUAL_RESEND' &&
+    String(row.mailKey ?? '') === ack.mailKey &&
+    String(row.resendId ?? '') === ack.resendId;
+}
+
+async function manualVerifyWarning(repo, principal, reference, body = {}, options = {}, context = {}) {
+  if (!principal?.roles?.includes('Owner')) {
+    return error(403, 'Endast Owner kan verifiera varningar manuellt.');
+  }
+  if (!REFERENCE_PATTERN.test(reference)) return error(404, 'Bokningen hittades inte.');
+  const kind = String(body.kind ?? '').toLowerCase();
+  if (!['airbnb', 'mail'].includes(kind)) {
+    return error(400, 'Ange vilken typ av manuell verifiering som ska sparas.', {
+      fields: { kind: 'Typ krävs.' }
+    });
+  }
+  const reason = cleanString(body.reason, 500);
+  if (reason.length < 3) {
+    return error(400, 'Ange en kort motivering till den manuella kontrollen.', {
+      fields: { reason: 'Motivering krävs.' }
+    });
+  }
+  if (body.confirm !== true) {
+    return error(400, 'Du måste bekräfta att du har gjort den manuella kontrollen.', {
+      fields: { confirm: 'Bekräftelse krävs.' }
+    });
+  }
+  const raw = await repo.getRawBooking(reference);
+  if (!raw) return error(404, 'Bokningen hittades inte.');
+  const expectedEtag = body.expectedEtag ?? options.expectedEtag;
+  if (expectedEtag && raw.etag && expectedEtag !== raw.etag) {
+    return error(409, 'Bokningen har ändrats av någon annan. Uppdatera sidan och försök igen.');
+  }
+  const now = options.now ?? new Date();
+  const record = { ...raw.record };
+  let normalized = null;
+  try { normalized = await repo.getBooking(reference, now); } catch { normalized = null; }
+  if (!normalized) normalized = normalizeBooking(record, { now });
+  const conflicts = await warningContext(repo, record, now);
+  const warnings = deriveWarnings(normalized, { now, ...conflicts });
+  const actor = actorOf(principal);
+  const existing = Array.isArray(record.warningAcknowledgements) ? [...record.warningAcknowledgements] : [];
+  const at = now.toISOString();
+
+  let acknowledgement = null;
+  let message = '';
+
+  if (kind === 'airbnb') {
+    const nights = lockedNightsFor(record);
+    const target = (body.warningId ? findWarning(warnings, String(body.warningId)) : null) ??
+      warnings.find((warning) => warning.type === 'AIRBNB' && warning.severity !== 'handled') ??
+      findWarning(warnings, WARNING.AIRBNB_MANUAL_VERIFIED);
+    if (!target || target.type !== 'AIRBNB') {
+      return error(409, 'Det finns ingen aktiv Airbnb-varning att verifiera just nu.', {
+        code: 'WARNING_NOT_FOUND'
+      });
+    }
+    acknowledgement = {
+      warningId: target.id,
+      fingerprint: target.fingerprint,
+      type: 'AIRBNB',
+      title: target.title,
+      reason,
+      actorId: actor.id,
+      actorName: actor.name,
+      at,
+      method: 'MANUAL_AIRBNB',
+      evidenceKey: String(target.details?.evidenceKey ?? target.id),
+      stayFingerprint: stayFingerprint(record),
+      nights,
+      mailKey: '',
+      mailType: '',
+      resendId: '',
+      verifiedEvent: ''
+    };
+    const duplicate = existing.some((row) => sameManualAirbnbScope(row, acknowledgement));
+    if (duplicate) {
+      return {
+        status: 200,
+        jsonBody: {
+          reference,
+          duplicate: true,
+          manualVerified: true,
+          message: 'Den manuella Airbnb-verifieringen är redan sparad för samma datum.',
+          warnings,
+          unresolved: warnings.filter((warning) => warning.severity !== 'handled').map((warning) => warning.id)
+        }
+      };
+    }
+    message = `Manuell Airbnb-verifiering sparad kl. ${stockholmTime(at)}. Datumen ${nights.join(', ')} är dokumenterade som kontrollerade i Airbnb-gränssnittet. Detta är inte en automatisk verifiering av Airbnbs export.`;
+  } else {
+    const mailKey = body.mailKey === 'host' ? 'host' : body.mailKey === 'guest' ? 'guest' : '';
+    if (!mailKey) {
+      return error(400, 'Ange vilket mejl som verifierats (gäst eller värd).', {
+        fields: { mailKey: 'Mejl krävs.' }
+      });
+    }
+    const level = normalized.mailStatus?.[mailKey];
+    if (!level || !level.resendId) {
+      return error(409, 'Mejlet saknar Resend-ID och kan inte verifieras mot Resend.', {
+        code: 'MAIL_ID_MISSING'
+      });
+    }
+    const resendId = cleanString(body.resendId, 200);
+    if (resendId && resendId !== level.resendId) {
+      return error(409, 'Resend-ID:t stämmer inte med det valda mejlet. Uppdatera sidan och försök igen.', {
+        code: 'MAIL_ID_MISMATCH'
+      });
+    }
+    acknowledgement = {
+      warningId: '',
+      fingerprint: '',
+      type: 'MAIL',
+      title: mailKey === 'guest' ? 'Gästmejl' : 'Värdmejl',
+      reason,
+      actorId: actor.id,
+      actorName: actor.name,
+      at,
+      method: 'MANUAL_RESEND',
+      evidenceKey: '',
+      stayFingerprint: '',
+      nights: [],
+      mailKey,
+      mailType: String(level.mailType ?? ''),
+      resendId: level.resendId,
+      verifiedEvent: 'Delivered'
+    };
+    const duplicate = existing.some((row) => sameManualMailScope(row, acknowledgement));
+    if (duplicate) {
+      return {
+        status: 200,
+        jsonBody: {
+          reference,
+          duplicate: true,
+          manualVerified: true,
+          message: 'Den manuella leveransverifieringen är redan sparad för det här mejlet.',
+          warnings,
+          unresolved: warnings.filter((warning) => warning.severity !== 'handled').map((warning) => warning.id)
+        }
+      };
+    }
+    const target = (body.warningId ? findWarning(warnings, String(body.warningId)) : null) ??
+      warnings.find((warning) => warning.type === 'MAIL' && warning.severity !== 'handled');
+    if (!target) {
+      return error(409, 'Det finns ingen aktiv mejlvarning att verifiera just nu.', {
+        code: 'WARNING_NOT_FOUND'
+      });
+    }
+    acknowledgement.warningId = target.id;
+    acknowledgement.fingerprint = target.fingerprint;
+    message = `Manuell leveransverifiering sparad kl. ${stockholmTime(at)} för ${acknowledgement.title.toLowerCase()} (Resend-ID ${level.resendId}), händelse Delivered. Leveransstatus i utkorgen ändrades inte.`;
+  }
+
+  const acknowledgements = existing.filter((row) =>
+    kind === 'airbnb'
+      ? !sameManualAirbnbScope(row, acknowledgement)
+      : !sameManualMailScope(row, acknowledgement)
+  );
+  acknowledgements.push(acknowledgement);
+  record.warningAcknowledgements = acknowledgements.slice(-100);
+  record.version = Number(record.version || 1) + 1;
+  record.updatedAt = at;
+  record.updatedBy = actor.name;
+
+  try {
+    const updated = await repo.updateRequest(record, { ifMatch: raw.etag });
+    await audit(repo, principal, 'WARNING_MANUALLY_VERIFIED', record, {
+      fromStatus: record.statusCode,
+      toStatus: record.statusCode,
+      reason,
+      changes: {
+        kind,
+        warningId: acknowledgement.warningId,
+        method: acknowledgement.method,
+        nights: acknowledgement.nights,
+        mailKey: acknowledgement.mailKey,
+        mailType: acknowledgement.mailType,
+        resendId: acknowledgement.resendId,
+        verifiedEvent: acknowledgement.verifiedEvent,
+        at
+      },
+      context
+    });
+    let after = null;
+    try { after = await repo.getBooking(reference, now); } catch { after = null; }
+    if (!after) after = normalizeBooking(record, { now });
+    const afterWarnings = deriveWarnings(after, { now, ...conflicts });
+    return {
+      status: 200,
+      jsonBody: {
+        reference,
+        duplicate: false,
+        manualVerified: true,
+        kind,
+        method: acknowledgement.method,
+        verifiedAt: at,
+        verifiedBy: { id: actor.id, name: actor.name },
+        nights: acknowledgement.nights,
+        mailKey: acknowledgement.mailKey,
+        mailType: acknowledgement.mailType,
+        resendId: acknowledgement.resendId,
+        verifiedEvent: acknowledgement.verifiedEvent,
+        message,
+        etag: updated.etag,
+        warnings: afterWarnings,
+        unresolved: afterWarnings.filter((warning) => warning.severity !== 'handled').map((warning) => warning.id)
+      }
+    };
+  } catch (cause) {
+    const mapped = normalizeRepoError(cause);
+    if (mapped) return mapped;
+    throw cause;
+  }
+}
+
 function stockholmTime(iso) {
   const date = new Date(iso);
   if (!Number.isFinite(date.getTime())) return '';
@@ -1150,9 +1373,12 @@ async function createManualBooking(repo, principal, body, options = {}, context 
         emailDisabled: email.disabled === true,
         emailDuplicate: email.duplicate === true,
         emailSkipped: email.skipped ?? '',
-        emailWarning: email.ok === false && !email.skipped
-          ? 'Mejlet kunde inte köas. Kontrollera historiken.'
-          : ''
+        emailManualReview: email.manualReview === true,
+        emailWarning: email.manualReview === true
+          ? 'Tillvalsuppgifterna stämmer inte. Bekräftelsemejlet skickades inte; granska bokningen.'
+          : email.ok === false && !email.skipped
+            ? 'Mejlet kunde inte köas. Kontrollera historiken.'
+            : ''
       }
     };
   } catch (cause) {
@@ -1314,9 +1540,12 @@ async function changeStatus(repo, principal, reference, action, body = {}, optio
         emailDisabled: email.disabled === true,
         emailDuplicate: email.duplicate === true,
         emailSkipped: email.skipped ?? '',
-        emailWarning: email.ok === false && !email.skipped
-          ? 'Mejlet kunde inte köas. Kontrollera historiken.'
-          : '',
+        emailManualReview: email.manualReview === true,
+        emailWarning: email.manualReview === true
+          ? 'Tillvalsuppgifterna stämmer inte. Bekräftelsemejlet skickades inte; granska bokningen.'
+          : email.ok === false && !email.skipped
+            ? 'Mejlet kunde inte köas. Kontrollera historiken.'
+            : '',
         calendarReleaseWarning: calendarRelease && (calendarRelease.failed.length || calendarRelease.listingFailed)
           ? 'En eller flera kalenderblockeringar kunde inte tas bort. Kontrollera kalendern och frigör datum manuellt.'
           : '',
@@ -2082,6 +2311,7 @@ module.exports = {
   warningContext,
   enrichWarnings,
   acknowledgeWarning,
+  manualVerifyWarning,
   recheckWarning,
   nightKeys
 };

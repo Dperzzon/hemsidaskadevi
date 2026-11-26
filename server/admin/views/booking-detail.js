@@ -51,7 +51,7 @@ function mailVerificationNote(verification) {
   return `<p class="mail-verification">Senaste kontroll ${escapeHtml(when)}: leveransstatus kunde inte verifieras (${escapeHtml(verification.status || 'okänd')}).</p>`;
 }
 
-function emailRow(label, level, verification = null) {
+function emailRow(label, key, level, verification = null, manualAck = null, booking = null) {
   const review = level.needsReview
     ? `<p class="inline-warning">${escapeHtml(level.verificationText || 'Kräver manuell kontroll')}</p>`
     : `<p class="price-note">${escapeHtml(level.verificationText || 'Ingen leveransstatus tillgänglig.')}</p>`;
@@ -67,16 +67,46 @@ function emailRow(label, level, verification = null) {
   const accepted = level.acceptedAt
     ? `<p class="mail-verification">Accepterat av Resend: ${escapeHtml(formatDateTime(level.acceptedAt))}.</p>`
     : '';
-  return `<div class="email-row">
+  const manual = manualAck
+    ? `<div class="mail-manual-verified">
+        <span class="badge badge-confirmed">Manuellt verifierad</span>
+        <p class="mail-verification mail-verification-ok">Verifierad av ${escapeHtml(manualAck.actorName || 'Owner')} ${escapeHtml(formatDateTime(manualAck.at))} som ${escapeHtml(manualAck.verifiedEvent || 'Delivered')} i Resend.</p>
+        ${manualAck.reason ? `<p class="warning-meta">Motivering: ${escapeHtml(manualAck.reason)}</p>` : ''}
+      </div>`
+    : '';
+  const canManual = !manualAck && level.resendId && level.deliveryUnverified && booking &&
+    key && booking.reference && !level.deliveryFailed;
+  const manualButton = canManual
+    ? `<button class="btn btn-secondary btn-small" type="button"
+        data-mail-manual-verify="1"
+        data-reference="${escapeHtml(booking.reference)}"
+        data-mail-key="${escapeHtml(key)}"
+        data-resend-id="${escapeHtml(level.resendId)}"
+        data-mail-type="${escapeHtml(level.mailType || '')}"
+        data-etag="${escapeHtml(booking.etag || '')}">Jag har verifierat leveransen i Resend</button>`
+    : '';
+  return `<div class="email-row" data-mail-row="${escapeHtml(key)}">
     <div><p class="card-kicker">${escapeHtml(label)}</p>
       ${type}${subject}
       <div class="badge-row">${emailBadge(level)}${deliveryBadge(level)}</div>
-      ${review}${accepted}${mailVerificationNote(verification)}${queued}
+      ${review}${accepted}${mailVerificationNote(verification)}${manual}${queued}
+      ${manualButton ? `<div class="button-row">${manualButton}</div>` : ''}
+      <div class="warning-check-result" data-mail-result="${escapeHtml(key)}" role="status" aria-live="polite" hidden></div>
     </div>
     <div class="email-id">${level.resendId
       ? `<span>Resend-ID</span><code>${escapeHtml(level.resendId)}</code>`
       : '<span class="muted">Inget Resend-ID</span>'}</div>
   </div>`;
+}
+
+function manualAckForMail(booking, key) {
+  const acks = Array.isArray(booking.warningAcknowledgements) ? booking.warningAcknowledgements : [];
+  const level = booking.mailStatus?.[key];
+  if (!level?.resendId) return null;
+  return acks
+    .filter((ack) => ack && ack.method === 'MANUAL_RESEND' &&
+      ack.mailKey === key && ack.resendId === level.resendId)
+    .sort((a, b) => String(b.at ?? '').localeCompare(String(a.at ?? '')))[0] ?? null;
 }
 
 function mailTimeline(event) {
@@ -191,6 +221,16 @@ function warningActions(warning, booking, isOwner, writesEnabled) {
     }
   }
   let lock = '';
+  if (warning.type === 'AIRBNB' && warning.dismissible && isOwner && writesEnabled) {
+    const nights = Array.isArray(warning.details?.nights) && warning.details.nights.length
+      ? warning.details.nights
+      : (Array.isArray(warning.details?.blockedNights) ? warning.details.blockedNights : []);
+    buttons.push(`<button class="btn btn-secondary btn-small" type="button"
+      data-warning-manual-airbnb="${escapeHtml(warning.id)}"
+      data-reference="${escapeHtml(booking.reference)}"
+      data-warning-nights="${escapeHtml(nights.join(','))}"
+      data-etag="${escapeHtml(booking.etag || '')}">Jag har kontrollerat att datumen är blockerade i Airbnb</button>`);
+  }
   if (warning.dismissible) {
     if (isOwner && writesEnabled) {
       buttons.push(warningButton('Markera som hanterad', 'data-warning-ack', warning, booking, 'primary'));
@@ -215,6 +255,9 @@ function warningCard(warning, booking, isOwner, writesEnabled) {
     }
     if (warning.handledReason) {
       details.push(`<p class="warning-reason"><strong>Motivering:</strong> ${escapeHtml(warning.handledReason)}</p>`);
+    }
+    if (Array.isArray(warning.details?.nights) && warning.details.nights.length) {
+      details.push(`<p class="warning-meta">Kontrollerade datum: ${escapeHtml(warning.details.nights.join(', '))}.</p>`);
     }
     if (Array.isArray(warning.details?.blockedNights) && warning.details.blockedNights.length) {
       details.push(`<p class="warning-meta">Upptagna nätter: ${escapeHtml(warning.details.blockedNights.join(', '))}.</p>`);
@@ -264,20 +307,52 @@ function warningSections(booking, isOwner, writesEnabled) {
 function warningHistory(booking) {
   const current = new Set((booking.handledWarnings ?? [])
     .map((warning) => `${warning.id}|${warning.fingerprint}`));
-  const stale = (booking.warningAcknowledgements ?? [])
-    .filter((ack) => !current.has(`${ack.warningId}|${ack.fingerprint}`));
-  if (!stale.length) return '';
-  return `<details class="warning-group warning-group-handled warning-history">
-    <summary><strong>Tidigare hanterade varningar</strong> (${stale.length})</summary>
-    <ul class="warning-history-list">
-      ${stale.slice().reverse().map((ack) => `<li>
-        <strong>${escapeHtml(ack.title || ack.warningId)}</strong>
-        <span>${escapeHtml(ack.actorName || 'Owner')} · ${escapeHtml(formatDateTime(ack.at))}</span>
-        <p>${escapeHtml(ack.reason || 'Motivering saknas')}</p>
-        <p class="warning-caveat">Gäller inte längre eftersom bokningens uppgifter har ändrats.</p>
-      </li>`).join('')}
-    </ul>
-  </details>`;
+  const acks = Array.isArray(booking.warningAcknowledgements) ? booking.warningAcknowledgements : [];
+  const manual = acks.filter((ack) => ack && (ack.method === 'MANUAL_AIRBNB' || ack.method === 'MANUAL_RESEND'));
+  const stale = acks
+    .filter((ack) => ack && !ack.method && !current.has(`${ack.warningId}|${ack.fingerprint}`));
+
+  const manualList = manual.length
+    ? `<details class="warning-group warning-group-handled warning-history" open>
+        <summary><strong>Manuella kontroller</strong> (${manual.length})</summary>
+        <ul class="warning-history-list">
+          ${manual.slice().sort((a, b) => String(b.at ?? '').localeCompare(String(a.at ?? ''))).map((ack) => {
+            if (ack.method === 'MANUAL_AIRBNB') {
+              return `<li>
+                <strong>Airbnb manuellt verifierad i gränssnittet</strong>
+                <span>${escapeHtml(ack.actorName || 'Owner')} · ${escapeHtml(formatDateTime(ack.at))}</span>
+                ${ack.nights?.length ? `<p>Datum: ${escapeHtml(ack.nights.join(', '))}</p>` : ''}
+                <p>${escapeHtml(ack.reason || 'Motivering saknas')}</p>
+                <p class="warning-caveat">Manuell kontroll i Airbnb – inte automatisk verifiering av Airbnbs export.</p>
+              </li>`;
+            }
+            return `<li>
+              <strong>${escapeHtml(ack.title || (ack.mailKey === 'guest' ? 'Gästmejl' : 'Värdmejl'))} – manuellt verifierad i Resend</strong>
+              <span>${escapeHtml(ack.actorName || 'Owner')} · ${escapeHtml(formatDateTime(ack.at))}</span>
+              <p>Resend-ID: ${escapeHtml(ack.resendId || 'saknas')} · Händelse: ${escapeHtml(ack.verifiedEvent || 'Delivered')}</p>
+              <p>${escapeHtml(ack.reason || 'Motivering saknas')}</p>
+              <p class="warning-caveat">Endast detta mejl är manuellt verifierat. Leveransstatus i utkorgen ändrades inte.</p>
+            </li>`;
+          }).join('')}
+        </ul>
+      </details>`
+    : '';
+
+  const staleList = stale.length
+    ? `<details class="warning-group warning-group-handled warning-history">
+        <summary><strong>Tidigare hanterade varningar</strong> (${stale.length})</summary>
+        <ul class="warning-history-list">
+          ${stale.slice().reverse().map((ack) => `<li>
+            <strong>${escapeHtml(ack.title || ack.warningId)}</strong>
+            <span>${escapeHtml(ack.actorName || 'Owner')} · ${escapeHtml(formatDateTime(ack.at))}</span>
+            <p>${escapeHtml(ack.reason || 'Motivering saknas')}</p>
+            <p class="warning-caveat">Gäller inte längre eftersom bokningens uppgifter har ändrats.</p>
+          </li>`).join('')}
+        </ul>
+      </details>`
+    : '';
+
+  return manualList + staleList;
 }
 
 function overridePanel(booking) {
@@ -807,8 +882,8 @@ function renderBookingDetail(options) {
 
         <section class="panel">
           <div class="panel-heading"><div><p class="eyebrow">Kommunikation</p><h2>Mejlstatus</h2></div></div>
-          ${emailRow('Värdmejl', booking.mailStatus.host, booking.mailVerification?.host)}
-          ${emailRow('Gästmejl', booking.mailStatus.guest, booking.mailVerification?.guest)}
+          ${emailRow('Värdmejl', 'host', booking.mailStatus.host, booking.mailVerification?.host, manualAckForMail(booking, 'host'), booking)}
+          ${emailRow('Gästmejl', 'guest', booking.mailStatus.guest, booking.mailVerification?.guest, manualAckForMail(booking, 'guest'), booking)}
           ${mailEventsTable(booking)}
           ${booking.statusCode === 'CONFIRMED' && booking.emailObligation &&
             [booking.emailObligation.guest?.status, booking.emailObligation.host?.status]

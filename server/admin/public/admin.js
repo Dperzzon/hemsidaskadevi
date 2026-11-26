@@ -281,14 +281,14 @@
     return document.querySelector(`[data-check-result="${String(warningId).replace(/"/g, '\\"')}"]`);
   }
 
-  function setRecheckBusy(button, busy) {
+  function setRecheckBusy(button, busy, busyLabel = 'Kontrollerar…') {
     if (busy) {
       if (button.dataset.busy === 'true') return false;
       button.dataset.busy = 'true';
       button.dataset.originalLabel = button.textContent.trim();
       button.disabled = true;
       button.setAttribute('aria-busy', 'true');
-      button.innerHTML = '<span class="spinner" aria-hidden="true"></span>Kontrollerar…';
+      button.innerHTML = `<span class="spinner" aria-hidden="true"></span>${busyLabel}`;
       return true;
     }
     button.dataset.busy = 'false';
@@ -389,6 +389,143 @@
         showToast(message);
         setRecheckBusy(button, false);
       }
+    });
+  });
+
+  function manualResultBox(selector, key) {
+    if (!selector) return null;
+    return document.querySelector(`[${selector}="${String(key).replace(/"/g, '\\"')}"]`);
+  }
+
+  async function submitManualVerification(button, payload, options = {}) {
+    const busyLabel = options.busyLabel || 'Sparar…';
+    if (!setRecheckBusy(button, true, busyLabel)) return;
+    const box = options.box;
+    if (box) {
+      box.hidden = false;
+      box.className = 'warning-check-result';
+      box.textContent = 'Sparar manuell verifiering…';
+    }
+    try {
+      const data = await api(
+        `/api/admin/bookings/${encodeURIComponent(payload.reference)}/warnings/manual-verify`,
+        { body: payload, timeoutMs: 25000 }
+      );
+      const message = data.message || 'Manuell verifiering sparad.';
+      if (box) box.textContent = message;
+      showToast(message);
+      showRecheckBanner({
+        ok: true,
+        type: payload.kind === 'airbnb' ? 'AIRBNB' : 'MAIL',
+        message,
+        checkedAt: data.verifiedAt || new Date().toISOString()
+      });
+      if (options.onSuccess) options.onSuccess(data);
+      setRecheckBusy(button, false);
+    } catch (error) {
+      const message = errorText(error);
+      if (box) {
+        box.hidden = false;
+        box.className = 'warning-check-result warning-check-result-error';
+        box.textContent = message;
+      }
+      showToast(message);
+      setRecheckBusy(button, false);
+    }
+  }
+
+  document.querySelectorAll('[data-warning-manual-airbnb]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      if (button.dataset.busy === 'true') return;
+      const nights = String(button.dataset.warningNights || '').split(',').filter(Boolean);
+      const dateText = nights.length ? nights.join(', ') : 'bokningens datum';
+      const confirmed = window.confirm(
+        `Bekräfta manuell Airbnb-kontroll\n\n` +
+        `Datum som ska vara blockerade i Airbnb: ${dateText}\n\n` +
+        'Detta registrerar en manuell kontroll som du gjort i Airbnb-gränssnittet. ' +
+        'Det är inte samma sak som en automatisk verifiering av Airbnbs exporterade kalender.'
+      );
+      if (!confirmed) return;
+      const reason = window.prompt(
+        'Kort motivering till den manuella Airbnb-kontrollen:',
+        'Kontrollerat att datumen är blockerade i Airbnb.'
+      );
+      if (reason === null) return;
+      if (reason.trim().length < 3) {
+        showToast('Ange en kort motivering (minst 3 tecken).');
+        return;
+      }
+      const warningId = button.dataset.warningManualAirbnb;
+      await submitManualVerification(button, {
+        reference: button.dataset.reference,
+        kind: 'airbnb',
+        warningId,
+        confirm: true,
+        reason: reason.trim(),
+        expectedEtag: button.dataset.etag || undefined
+      }, {
+        busyLabel: 'Sparar verifiering…',
+        box: recheckResultBox(warningId),
+        onSuccess: () => {
+          const card = button.closest('.warning-card');
+          if (card) {
+            card.classList.add('is-manually-verified');
+            card.querySelectorAll('.warning-actions .btn').forEach((item) => { item.disabled = true; });
+          }
+        }
+      });
+    });
+  });
+
+  document.querySelectorAll('[data-mail-manual-verify]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      if (button.dataset.busy === 'true') return;
+      const mailKey = button.dataset.mailKey;
+      const resendId = button.dataset.resendId;
+      const label = mailKey === 'guest' ? 'gästmejlet' : 'värdmejlet';
+      const confirmed = window.confirm(
+        `Bekräfta manuell leveranskontroll\n\n` +
+        `Mejl: ${label}\nResend-ID: ${resendId}\n\n` +
+        'Bekräfta att Resend Dashboard visar händelsen Delivered för just detta mejl. ' +
+        'Andra mejl på bokningen påverkas inte.'
+      );
+      if (!confirmed) return;
+      const reason = window.prompt(
+        'Kort motivering till den manuella leveranskontrollen:',
+        'Resend Dashboard visar Delivered för detta mejl.'
+      );
+      if (reason === null) return;
+      if (reason.trim().length < 3) {
+        showToast('Ange en kort motivering (minst 3 tecken).');
+        return;
+      }
+      const box = manualResultBox('data-mail-result', mailKey);
+      await submitManualVerification(button, {
+        reference: button.dataset.reference,
+        kind: 'mail',
+        mailKey,
+        resendId,
+        confirm: true,
+        reason: reason.trim(),
+        expectedEtag: button.dataset.etag || undefined
+      }, {
+        busyLabel: 'Sparar verifiering…',
+        box,
+        onSuccess: (data) => {
+          const row = button.closest('[data-mail-row]');
+          if (row) {
+            const badge = document.createElement('div');
+            badge.className = 'mail-manual-verified';
+            badge.innerHTML = '<span class="badge badge-confirmed">Manuellt verifierad</span>';
+            const note = document.createElement('p');
+            note.className = 'mail-verification mail-verification-ok';
+            note.textContent = `Verifierad som Delivered i Resend ${new Date(data.verifiedAt || Date.now()).toLocaleString('sv-SE')}.`;
+            badge.append(note);
+            row.querySelector('.button-row')?.replaceChildren();
+            row.querySelector('.email-row > div')?.append(badge);
+          }
+        }
+      });
     });
   });
 

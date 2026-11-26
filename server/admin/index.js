@@ -38,6 +38,7 @@ const {
   calendarRange,
   enrichWarnings,
   acknowledgeWarning,
+  manualVerifyWarning,
   recheckWarning,
   retryBookingNotifications
 } = require('./booking-service');
@@ -803,6 +804,23 @@ async function handleApi(req, res, url, context) {
       repository,
       principal,
       decodeURIComponent(recheckMatch[1]),
+      parsed.body,
+      serviceOptions(context),
+      { warn: context.warn }
+    );
+    sendJson(req, res, result.status, result.jsonBody);
+    return;
+  }
+
+  const manualVerifyMatch = /^\/api\/admin\/bookings\/([^/]+)\/warnings\/manual-verify$/.exec(pathname);
+  if (manualVerifyMatch && req.method === 'POST') {
+    if (!guardWrite(req, res, context)) return;
+    const parsed = await readBodyOrError(req, res);
+    if (!parsed) return;
+    const result = await manualVerifyWarning(
+      repository,
+      principal,
+      decodeURIComponent(manualVerifyMatch[1]),
       parsed.body,
       serviceOptions(context),
       { warn: context.warn }

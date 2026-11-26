@@ -525,3 +525,9 @@ img { max-width: 100%; display: block; }
 .mail-verification { font-size: 0.76rem; color: var(--ink-soft); margin-top: 4px; }
 .mail-verification-ok { color: var(--green, #2f7d4f); }
 .mail-verification-danger { color: var(--red); }
+
+/* Manuell verifiering */
+.warning-card.is-manually-verified { border-color: var(--green, #2f7d4f); background: #f6fbf7; }
+.warning-card.is-manually-verified .warning-actions { opacity: 0.6; }
+.mail-manual-verified { margin-top: 8px; padding: 8px 10px; border-radius: var(--radius-sm); background: #f6fbf7; border-left: 3px solid var(--green, #2f7d4f); }
+.mail-manual-verified .badge { margin-bottom: 4px; }

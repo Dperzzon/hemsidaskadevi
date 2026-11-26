@@ -681,7 +681,15 @@ function normalizeBooking(record = {}, options = {}) {
           reason: String(row.reason ?? ''),
           actorId: String(row.actorId ?? ''),
           actorName: String(row.actorName ?? ''),
-          at: String(row.at ?? '')
+          at: String(row.at ?? ''),
+          method: String(row.method ?? ''),
+          evidenceKey: String(row.evidenceKey ?? ''),
+          stayFingerprint: String(row.stayFingerprint ?? ''),
+          nights: Array.isArray(row.nights) ? row.nights.map(String) : [],
+          mailKey: String(row.mailKey ?? ''),
+          mailType: String(row.mailType ?? ''),
+          resendId: String(row.resendId ?? ''),
+          verifiedEvent: String(row.verifiedEvent ?? '')
         }))
       : [],
     overlaps: Array.isArray(record.overlaps) ? record.overlaps : [],
