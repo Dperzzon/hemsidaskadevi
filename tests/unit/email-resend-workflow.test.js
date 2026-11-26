@@ -402,6 +402,6 @@ test('Resend-webhooken är staged med Key Vault-referens och ingen hemlighet i G
   assert.match(webappBicep, /RESEND_WEBHOOK_SECRET'[\s\S]*?@Microsoft\.KeyVault/);
   assert.match(mainBicep, /param enableResendWebhook bool = false/);
   assert.match(mainBicep, /enableResendWebhook: enableResendWebhook/);
-  assert.match(params, /param enableResendWebhook = false/, 'webhooken ska vara avstängd tills hemligheten är konfigurerad');
+  assert.match(params, /param enableResendWebhook = true/, 'webhooken ska vara aktiverad i driftläget');
   assert.doesNotMatch(params, /whsec_/, 'ingen signeringshemlighet får ligga i Git');
 });

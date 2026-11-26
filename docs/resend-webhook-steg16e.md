@@ -1,4 +1,12 @@
-# Steg 16E – Automatisk Resend-leveransuppföljning
+# Steg 16E/16F – Automatisk Resend-leveransuppföljning
+
+> **Status 2026-11-26 (Steg 16F):** Webhooken är skapad i Resend
+> (`f6dd64e8-4f69-48fb-a9a1-f0b55e6be7bf`), signeringshemligheten ligger i
+> `kv-skadevi-prod/resend-webhook-secret`, `RESEND_WEBHOOK_ENABLED=1` är satt
+> via appinställning och kodifierad i `infra/main.bicepparam`. Riktig
+> `email.delivered` har verifierats end-to-end mot ett internt testmejl.
+> Den tillfälliga full-access-nyckeln och dess Key Vault-secret är återkallade
+> och purgade. Se slutet av dokumentet.
 
 ## Syfte
 
@@ -119,6 +127,25 @@ i portalen. Kör where-if före varje infra-deployment.
 4. Kontrollera att varningen för overifierad leverans försvinner och att
    historiken innehåller `EMAIL_DELIVERY_UPDATED`.
 5. Kontrollera att ingen dubblett skapas vid Resend-retry (samma `svix-id`).
+
+## Steg 16F – genomförd aktivering (2026-11-26)
+
+- Full-access-nyckeln lästes endast i processminnet från
+  `kv-skadevi-prod/resend-webhook-setup-key`.
+- `scripts/configure-resend-webhook.mjs` skapade webhooken
+  `f6dd64e8-4f69-48fb-a9a1-f0b55e6be7bf` och sparade signeringshemligheten som
+  `resend-webhook-secret`. Inget värde skrevs ut.
+- Produktionsendpointen svarade `200 {matched:false}` för en giltig signatur,
+  `401` för ogiltig signatur och `401` för utgången tidsstämpel
+  (`scripts/verify-resend-webhook.mjs`).
+- Ett riktigt testmejl till `skadevigard@gmail.com` fick `email.delivered` och
+  status `Levererat` i en isolerad utkorgspost
+  (`scripts/resend-delivery-test.mjs`). Testposten raderades efteråt.
+- `scripts/verify-resend-webhook-idempotency.mjs` verifierade att samma
+  `svix-id` gav `applied=true` första gången och `duplicate=true` andra gången.
+- Den tillfälliga Resend-nyckeln "Skadevi webhook setup" återkallades, secretet
+  `resend-webhook-setup-key` raderades och purgades, och den tillfälliga
+  tabellrollen togs bort. `resend-api-key` och `resend-webhook-secret` är kvar.
 
 ## Återställning
 

@@ -1,21 +1,21 @@
 #!/usr/bin/env node
 // Konfigurerar Resend-webhooken för Skadevis produktionsendpoint och sparar
-// signeringshemligheten i Azure Key Vault. Skriptet skriver aldrig ut
-// hemligheten och kräver en separat nyckel med full åtkomst till Resend.
+// signeringshemligheten i Azure Key Vault. Skriptet skriver aldrig ut någon
+// hemlighet. Full-access-nyckeln läses direkt från Azure Key Vault via den
+// redan autentiserade Azure-identiteten – aldrig från fil, prompt eller env.
 //
 // Den befintliga sending-nyckeln (resend-api-key) används INTE här och ska
-// inte utökas. Skapa i stället en tillfällig full-access-nyckel i Resend,
-// kör skriptet och ta bort nyckeln igen.
+// inte utökas.
 //
-// Användning (PowerShell):
-//   $env:RESEND_FULL_ACCESS_KEY = '<full-access-nyckel>'
+// Användning:
 //   node scripts/configure-resend-webhook.mjs
 //
 // Flaggor:
-//   --dry-run            Visa vad som skulle göras utan att skapa webhooken.
-//   --endpoint <url>     Annan endpoint (default: produktions-URL:en).
-//   --key-vault <namn>   Key Vault (default: kv-skadevi-prod).
-//   --secret-name <n>    Secretnamn (default: resend-webhook-secret).
+//   --dry-run                  Visa vad som skulle göras utan att skapa webhooken.
+//   --endpoint <url>           Annan endpoint (default: produktions-URL:en).
+//   --key-vault <namn>         Key Vault (default: kv-skadevi-prod).
+//   --secret-name <n>          Permanent secretnamn (default: resend-webhook-secret).
+//   --setup-secret-name <n>    Tillfällig full-access-nyckel (default: resend-webhook-setup-key).
 
 import { execFileSync } from 'node:child_process';
 import { writeFileSync, unlinkSync } from 'node:fs';
@@ -42,7 +42,26 @@ const DRY_RUN = args.includes('--dry-run');
 const ENDPOINT = arg('--endpoint', 'https://www.skadeviherrgard.com/api/webhooks/resend');
 const KEY_VAULT = arg('--key-vault', 'kv-skadevi-prod');
 const SECRET_NAME = arg('--secret-name', 'resend-webhook-secret');
-const API_KEY = process.env.RESEND_FULL_ACCESS_KEY ?? '';
+const SETUP_SECRET_NAME = arg('--setup-secret-name', 'resend-webhook-setup-key');
+
+const AZ = 'az';
+const AZ_OPTS = process.platform === 'win32' ? { shell: true } : {};
+
+function readKeyVaultSecret(name) {
+  try {
+    return execFileSync(AZ, [
+      'keyvault', 'secret', 'show',
+      '--vault-name', KEY_VAULT,
+      '--name', name,
+      '--query', 'value',
+      '--output', 'tsv'
+    ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...AZ_OPTS }).trim();
+  } catch {
+    return '';
+  }
+}
+
+const API_KEY = readKeyVaultSecret(SETUP_SECRET_NAME);
 
 function fail(message) {
   console.error(`FEL: ${message}`);
@@ -50,7 +69,7 @@ function fail(message) {
 }
 
 if (!API_KEY) {
-  fail('RESEND_FULL_ACCESS_KEY saknas. Skapa en tillfällig full-access-nyckel i Resend och sätt den i miljön.');
+  fail(`Kunde inte läsa "${SETUP_SECRET_NAME}" från ${KEY_VAULT}. Kontrollera att hemligheten finns, är aktiv och att identiteten har minst "Key Vault Secrets User".`);
 }
 
 async function resend(path, options = {}) {
@@ -116,14 +135,14 @@ async function main() {
   const tempFile = join(tmpdir(), `resend-webhook-${randomBytes(8).toString('hex')}.tmp`);
   try {
     writeFileSync(tempFile, signingSecret, { mode: 0o600 });
-    execFileSync('az', [
+    execFileSync(AZ, [
       'keyvault', 'secret', 'set',
       '--vault-name', KEY_VAULT,
       '--name', SECRET_NAME,
       '--file', tempFile,
       '--encoding', 'utf-8',
       '--output', 'none'
-    ], { stdio: ['ignore', 'inherit', 'inherit'] });
+    ], { stdio: ['ignore', 'inherit', 'inherit'], ...AZ_OPTS });
   } finally {
     try { unlinkSync(tempFile); } catch {}
   }

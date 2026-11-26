@@ -81,13 +81,12 @@ param enableDirectBooking = true
 // verifierad adminpublicering. Båda flaggorna måste vara 1 för live.
 param enableExistingBookingAddons = true
 
-// STEG 16E: Resend-leveranswebhooken är förberedd men avstängd tills
-// webhooken har skapats i Resend och dess signeringshemlighet har lagts i
-// Key Vault som 'resend-webhook-secret'. Aktivera först efter verifierad
-// signatur och ett genomfört end-to-end-test. Den befintliga
-// sending-nyckeln (resend-api-key) ändras aldrig och behöver ingen
-// läsbehörighet för webhookmottagning.
-param enableResendWebhook = false
+// STEG 16F: Resend-leveranswebhooken aktiverades 2026-11-26 efter att
+// webhooken skapats i Resend och signeringshemligheten sparats i Key Vault
+// som 'resend-webhook-secret'. Aktivera/deaktivera endast via denna parameter.
+// Den befintliga sending-nyckeln (resend-api-key) är oförändrad och behöver
+// ingen läsbehörighet för webhookmottagning.
+param enableResendWebhook = true
 
 param resendWebhookSecretName = 'resend-webhook-secret'
 

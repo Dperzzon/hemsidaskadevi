@@ -25,16 +25,18 @@ function arg(name, fallback) {
 const ENDPOINT = arg('--endpoint', 'https://www.skadeviherrgard.com/api/webhooks/resend');
 const KEY_VAULT = arg('--key-vault', 'kv-skadevi-prod');
 const SECRET_NAME = arg('--secret-name', 'resend-webhook-secret');
+const AZ = 'az';
+const AZ_OPTS = process.platform === 'win32' ? { shell: true } : {};
 
 function loadSecret() {
   try {
-    return execFileSync('az', [
+    return execFileSync(AZ, [
       'keyvault', 'secret', 'show',
       '--vault-name', KEY_VAULT,
       '--name', SECRET_NAME,
       '--query', 'value',
       '--output', 'tsv'
-    ], { encoding: 'utf8' }).trim();
+    ], { encoding: 'utf8', ...AZ_OPTS }).trim();
   } catch {
     console.error(`FEL: kunde inte läsa "${SECRET_NAME}" från ${KEY_VAULT}.`);
     process.exit(1);
