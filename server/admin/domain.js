@@ -127,14 +127,23 @@ const MAIL_TYPE_LABELS = {
 const DELIVERY_LABELS = {
   'Inväntar leveranskontroll': { label: 'Inväntar leverans', tone: 'neutral' },
   unknown: { label: 'Okänd', tone: 'neutral' },
-  accepted: { label: 'Accepterat', tone: 'confirmed' },
+  accepted: { label: 'Accepterat av Resend', tone: 'confirmed' },
+  'Accepterad av Resend – leverans ej verifierad': { label: 'Accepterat – leverans ej verifierad', tone: 'warning' },
+  'Accepterad av Resend - leverans ej verifierad': { label: 'Accepterat – leverans ej verifierad', tone: 'warning' },
+  sent: { label: 'Accepterat av Resend', tone: 'confirmed' },
   delivered: { label: 'Levererat', tone: 'confirmed' },
+  delivery_delayed: { label: 'Fördröjd leverans', tone: 'warning' },
   bounced: { label: 'Studsat', tone: 'danger' },
   failed: { label: 'Misslyckat', tone: 'danger' },
   complained: { label: 'Klagomål', tone: 'danger' },
   suppressed: { label: 'Undertryckt', tone: 'warning' },
   manual_review: { label: 'Manuell kontroll', tone: 'warning' },
   'Makulerad – bokningen ändrades': { label: 'Makulerad', tone: 'neutral' }
+};
+
+const MAIL_RECIPIENT_LABELS = {
+  HOST: 'Värd',
+  GUEST: 'Gäst'
 };
 
 function pad(value) {
@@ -239,6 +248,82 @@ function normalizeAddonLines(record = {}) {
   })).filter((line) => line.label);
 }
 
+function mailRecipientType(mailType) {
+  const type = String(mailType ?? '').toUpperCase();
+  if (type.startsWith('HOST_')) return 'HOST';
+  if (type.startsWith('GUEST_')) return 'GUEST';
+  return '';
+}
+
+function mailVerificationText({ acceptedAt, deliveredAt, bouncedAt, failedAt, complainedAt, deliveryStatus }) {
+  const status = String(deliveryStatus ?? '').toLowerCase();
+  if (bouncedAt || status === 'bounced') {
+    return 'Leverans misslyckades – mejlet studsade. Kontrollera mottagaradressen innan ett nytt försök.';
+  }
+  if (failedAt || status === 'failed') {
+    return 'Leverans misslyckades. Kontrollera leveransen i Resend innan ett nytt försök.';
+  }
+  if (complainedAt || status === 'complained') {
+    return 'Mottagaren har markerat mejlet som skräppost. Skicka inte om utan manuell kontroll.';
+  }
+  if (deliveredAt || status === 'delivered') {
+    return 'Levererat till mottagarens mejlserver enligt Resend. Detta bevisar inte att mejlet hamnat i inkorgen.';
+  }
+  if (acceptedAt) {
+    return 'Accepterat av Resend – slutlig leverans ej verifierad.';
+  }
+  return 'Mejlet har inte accepterats av Resend ännu.';
+}
+
+function buildMailTimeline(level) {
+  const created = level.createdAt;
+  const acceptedAt = level.acceptedAt || level.sentAt;
+  const deliveredAt = level.deliveredAt;
+  const failedAt = level.failedAt || level.bouncedAt || level.complainedAt;
+  return [
+    {
+      key: 'created',
+      label: 'Skapat',
+      at: created,
+      state: created ? 'done' : 'pending'
+    },
+    {
+      key: 'queued',
+      label: 'Köat',
+      at: created,
+      state: created ? 'done' : 'pending'
+    },
+    {
+      key: 'processing',
+      label: 'Under behandling',
+      at: level.attemptedAt,
+      state: level.attemptedAt || level.attemptCount > 0 ? 'done' : (level.status === 'Skickar' ? 'current' : 'pending'),
+      detail: level.attemptCount > 0 ? `Försök: ${level.attemptCount}` : ''
+    },
+    {
+      key: 'accepted',
+      label: 'Accepterat av Resend',
+      at: acceptedAt,
+      state: acceptedAt ? 'done' : 'pending',
+      detail: level.resendId ? `Resend-ID: ${level.resendId}` : ''
+    },
+    {
+      key: 'delivered',
+      label: 'Levererat till mottagarens mejlserver',
+      at: deliveredAt,
+      state: deliveredAt ? 'done' : 'unknown',
+      detail: deliveredAt ? '' : 'Slutlig leverans ej verifierad'
+    },
+    {
+      key: 'failed',
+      label: 'Misslyckat eller studsat',
+      at: failedAt,
+      state: failedAt ? 'danger' : 'pending',
+      detail: level.deliveryError || (failedAt ? 'Se senaste status och felorsak.' : '')
+    }
+  ];
+}
+
 function normalizeMailLevel(entry = {}) {
   const status = String(entry.status ?? entry.apiStatus ?? '').trim();
   const delivery = String(entry.deliveryStatus ?? entry.delivery ?? '').trim();
@@ -249,7 +334,18 @@ function normalizeMailLevel(entry = {}) {
   const deliveryInfo = DELIVERY_LABELS[delivery] ?? (
     delivery ? { label: delivery, tone: 'neutral' } : { label: 'Okänt', tone: 'neutral' }
   );
-  return {
+  const acceptedAt = String(entry.sentAt ?? entry.acceptedAt ?? '');
+  const deliveredAt = String(entry.deliveredAt ?? '');
+  const bouncedAt = String(entry.bouncedAt ?? '');
+  const failedAt = String(entry.failedAt ?? '');
+  const complainedAt = String(entry.complainedAt ?? '');
+  const lastEventAt = String(entry.lastEventAt ?? '');
+  const deliveryFailed = Boolean(bouncedAt || failedAt || complainedAt) ||
+    ['bounced', 'failed', 'complained'].includes(delivery.toLowerCase());
+  const deliveryUnverified = Boolean(acceptedAt || entry.resendId) && !deliveredAt && !deliveryFailed &&
+    delivery.toLowerCase() !== 'delivered';
+  const recipientType = mailRecipientType(entry.mailType);
+  const level = {
     apiLabel: api.api,
     apiTone: api.tone,
     deliveryLabel: deliveryInfo.label,
@@ -257,12 +353,41 @@ function normalizeMailLevel(entry = {}) {
     resendId: entry.resendId ?? '',
     needsReview: api.tone === 'warning' || api.tone === 'danger' ||
       deliveryInfo.tone === 'danger' || deliveryInfo.tone === 'warning',
-    updatedAt: entry.updatedAt ?? entry.sentAt ?? '',
+    updatedAt: entry.updatedAt ?? entry.sentAt ?? entry.lastEventAt ?? '',
     mailType: String(entry.mailType ?? ''),
     mailTypeLabel: mailTypeLabel(entry.mailType),
+    recipientType,
+    recipientLabel: MAIL_RECIPIENT_LABELS[recipientType] ?? 'Okänd mottagartyp',
+    subject: String(entry.mailSubject ?? entry.subject ?? ''),
     createdAt: String(entry.createdAt ?? ''),
-    queued: status === 'Utkorg'
+    acceptedAt,
+    attemptedAt: String(entry.attemptedAt ?? ''),
+    attemptCount: numberOr(entry.attemptCount),
+    deliveredAt,
+    bouncedAt,
+    failedAt,
+    complainedAt,
+    lastEventAt,
+    lastEventType: String(entry.lastEventType ?? ''),
+    manualReviewReason: String(entry.manualReviewReason ?? ''),
+    deliveryError: String(entry.deliveryError ?? ''),
+    deliveryFailed,
+    deliveryUnverified,
+    verifiedDelivery: Boolean(deliveredAt) || delivery.toLowerCase() === 'delivered',
+    status,
+    queued: status === 'Utkorg',
+    pending: status === 'Utkorg' || status === 'Skickar',
+    verificationText: mailVerificationText({
+      acceptedAt,
+      deliveredAt,
+      bouncedAt,
+      failedAt,
+      complainedAt,
+      deliveryStatus: delivery
+    })
   };
+  level.timeline = buildMailTimeline(level);
+  return level;
 }
 
 function mailTypeLabel(mailType) {
@@ -278,7 +403,32 @@ function emptyMailLevel() {
     deliveryTone: 'neutral',
     resendId: '',
     needsReview: false,
-    updatedAt: ''
+    updatedAt: '',
+    mailType: '',
+    mailTypeLabel: '',
+    recipientType: '',
+    recipientLabel: 'Okänd mottagartyp',
+    subject: '',
+    createdAt: '',
+    acceptedAt: '',
+    attemptedAt: '',
+    attemptCount: 0,
+    deliveredAt: '',
+    bouncedAt: '',
+    failedAt: '',
+    complainedAt: '',
+    lastEventAt: '',
+    lastEventType: '',
+    manualReviewReason: '',
+    deliveryError: '',
+    deliveryFailed: false,
+    deliveryUnverified: false,
+    verifiedDelivery: false,
+    status: '',
+    queued: false,
+    pending: false,
+    verificationText: '',
+    timeline: []
   };
 }
 
@@ -297,21 +447,22 @@ function obligationMailLevel(record = {}, kind) {
 }
 
 function normalizeEmailStatus(record = {}, outbox = []) {
-  if (record.emailStatus && typeof record.emailStatus === 'object') {
-    return {
-      host: normalizeMailLevel(record.emailStatus.host),
-      guest: normalizeMailLevel(record.emailStatus.guest)
-    };
-  }
   const rows = Array.isArray(outbox) ? outbox : [];
   const sorted = [...rows].sort((a, b) =>
     String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? ''))
   );
-  const host = sorted.find((row) => String(row.mailType ?? '').startsWith('HOST_'));
-  const guest = sorted.find((row) => String(row.mailType ?? '').startsWith('GUEST_'));
+  const embedded = record.emailStatus && typeof record.emailStatus === 'object'
+    ? record.emailStatus
+    : {};
+  const pick = (kind, prefix, obligationKind) => {
+    const row = sorted.find((item) => String(item.mailType ?? '').startsWith(prefix));
+    if (row) return normalizeMailLevel(row);
+    if (embedded[kind]) return normalizeMailLevel(embedded[kind]);
+    return obligationMailLevel(record, obligationKind) ?? emptyMailLevel();
+  };
   return {
-    host: host ? normalizeMailLevel(host) : (obligationMailLevel(record, 'host') ?? emptyMailLevel()),
-    guest: guest ? normalizeMailLevel(guest) : (obligationMailLevel(record, 'guest') ?? emptyMailLevel())
+    host: pick('host', 'HOST_', 'host'),
+    guest: pick('guest', 'GUEST_', 'guest')
   };
 }
 
@@ -689,6 +840,9 @@ module.exports = {
   normalizeBooking,
   normalizeBookings,
   normalizeEmailStatus,
+  normalizeMailLevel,
+  mailVerificationText,
+  buildMailTimeline,
   normalizeAddonLines,
   deriveActionReasons,
   filterBookings,

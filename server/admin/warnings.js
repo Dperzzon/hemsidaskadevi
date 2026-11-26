@@ -18,6 +18,7 @@ const WARNING = {
   AIRBNB_VERIFIED: 'airbnb.verified',
   AIRBNB_OVERRIDE: 'airbnb.override',
   AIRBNB_OVERRIDE_STALE: 'airbnb.override_stale',
+  AIRBNB_IMPORT_PENDING: 'airbnb.import_pending',
   INTERNAL_CALENDAR_CONFLICT: 'internal.calendar_conflict',
   INTERNAL_BOOKING_CONFLICT: 'internal.booking_conflict',
   INTERNAL_CALENDAR_MISSING: 'internal.calendar_missing',
@@ -25,6 +26,9 @@ const WARNING = {
   CALENDAR_FLAG: 'calendar.flagged',
   OVERLAP: 'request.overlap',
   MAIL_REVIEW: 'mail.review',
+  MAIL_PENDING: 'mail.pending',
+  MAIL_FAILED: 'mail.failed',
+  MAIL_UNVERIFIED: 'mail.unverified',
   PAYMENT_MISSING: 'payment.missing',
   RECONCILIATION: 'payment.reconciliation',
   REFUND_PENDING: 'payment.refund_pending',
@@ -49,6 +53,7 @@ const POLICIES = {
   [WARNING.AIRBNB_VERIFIED]: { type: 'AIRBNB', severity: SEVERITY.HANDLED, dismissible: false, recheckable: true },
   [WARNING.AIRBNB_OVERRIDE]: { type: 'AIRBNB', severity: SEVERITY.HANDLED, dismissible: false, recheckable: true },
   [WARNING.AIRBNB_OVERRIDE_STALE]: { type: 'AIRBNB', severity: SEVERITY.ACTION, dismissible: true, recheckable: true },
+  [WARNING.AIRBNB_IMPORT_PENDING]: { type: 'AIRBNB', severity: SEVERITY.VERIFY, dismissible: true, recheckable: true },
   [WARNING.INTERNAL_CALENDAR_CONFLICT]: { type: 'INTERNAL_CALENDAR', severity: SEVERITY.ACTION, dismissible: false, recheckable: false },
   [WARNING.INTERNAL_BOOKING_CONFLICT]: { type: 'INTERNAL_BOOKING', severity: SEVERITY.ACTION, dismissible: false, recheckable: false },
   [WARNING.INTERNAL_CALENDAR_MISSING]: { type: 'INTERNAL_CALENDAR', severity: SEVERITY.ACTION, dismissible: false, recheckable: false },
@@ -56,6 +61,9 @@ const POLICIES = {
   [WARNING.CALENDAR_FLAG]: { type: 'INTERNAL_CALENDAR', severity: SEVERITY.ACTION, dismissible: false, recheckable: false },
   [WARNING.OVERLAP]: { type: 'INTERNAL_BOOKING', severity: SEVERITY.ACTION, dismissible: false, recheckable: false },
   [WARNING.MAIL_REVIEW]: { type: 'MAIL', severity: SEVERITY.VERIFY, dismissible: true, recheckable: false },
+  [WARNING.MAIL_PENDING]: { type: 'MAIL', severity: SEVERITY.VERIFY, dismissible: true, recheckable: false },
+  [WARNING.MAIL_FAILED]: { type: 'MAIL', severity: SEVERITY.ACTION, dismissible: true, recheckable: false },
+  [WARNING.MAIL_UNVERIFIED]: { type: 'MAIL', severity: SEVERITY.VERIFY, dismissible: true, recheckable: false },
   [WARNING.PAYMENT_MISSING]: { type: 'PAYMENT', severity: SEVERITY.ACTION, dismissible: false, recheckable: false },
   [WARNING.RECONCILIATION]: { type: 'PAYMENT', severity: SEVERITY.ACTION, dismissible: false, recheckable: false },
   [WARNING.REFUND_PENDING]: { type: 'PAYMENT', severity: SEVERITY.ACTION, dismissible: false, recheckable: false },
@@ -204,11 +212,28 @@ function overrideCoversStay(booking, nights) {
     booking.airbnbOverrideApprovedBy);
 }
 
-function airbnbWarnings(booking) {
+function confirmedAgeHours(booking, now) {
+  const confirmed = Date.parse(String(booking.confirmedAt || booking.updatedAt || booking.createdAt || ''));
+  if (!Number.isFinite(confirmed)) return null;
+  return (now.getTime() - confirmed) / 3600000;
+}
+
+function internalNightsCovered(booking, nights, calendarRows) {
+  if (!Array.isArray(calendarRows)) return null;
+  const owned = new Set(calendarRows
+    .filter((row) => row.reference === booking.reference)
+    .map((row) => String(row.night ?? row.RowKey ?? '')));
+  return nights.every((night) => owned.has(night));
+}
+
+function airbnbWarnings(booking, options = {}) {
   if (booking.statusCode !== 'CONFIRMED') return [];
   const nights = nightKeys(booking.arrival, booking.departure);
   if (!nights.length) return [];
   const verification = normalizeVerification(booking);
+  const now = options.now instanceof Date ? options.now : new Date();
+  const internalCovered = internalNightsCovered(booking, nights, options.calendarRows);
+  const ageHours = confirmedAgeHours(booking, now);
 
   if (verification) {
     if (verification.fingerprint && verification.fingerprint !== stayFingerprint(booking)) {
@@ -223,9 +248,9 @@ function airbnbWarnings(booking) {
     }
     if (verification.status === 'unavailable') {
       return [createWarning(WARNING.AIRBNB_UNAVAILABLE, {
-        title: 'Airbnb-kalendern kunde inte läsas',
-        what: 'Airbnb-blockeringen är okänd eftersom kalendern inte kunde hämtas eller tolkas.',
-        why: 'Ett misslyckat dataläsningsförsök är inte samma sak som ett verifierat OK.',
+        title: 'Kalenderstatus kan inte verifieras',
+        what: 'Airbnb-blockeringen är okänd eftersom Airbnbs exporterade kalender inte kunde hämtas eller tolkas.',
+        why: 'Ett misslyckat dataläsningsförsök är inte samma sak som ett verifierat OK. Det säger heller inget om Airbnb har importerat Skadevis export.',
         recommendation: 'Försök igen om en stund. Kontrollera Airbnb manuellt innan du markerar varningen som hanterad.',
         fingerprint: warningFingerprint(booking, WARNING.AIRBNB_UNAVAILABLE, verification.checkedAt),
         details: { checkedAt: verification.checkedAt, error: verification.error }
@@ -258,13 +283,23 @@ function airbnbWarnings(booking) {
         details: { blockedNights: blocked, checkedAt: verification.checkedAt }
       })];
     }
+    if (internalCovered === true && ageHours !== null && ageHours < 24) {
+      return [createWarning(WARNING.AIRBNB_IMPORT_PENDING, {
+        title: 'Airbnb-uppdatering väntar',
+        what: `Skadevis interna kalender och .ics-export innehåller bokningen, men Airbnbs exporterade kalender visar ännu ingen blockering för ${nightsText(nights)}.`,
+        why: 'Airbnb hämtar importerade kalendrar med fördröjning. Det kan också bero på att fel eller en gammal exportadress är importerad. Airbnbs exporterade kalender kan inte bevisa att importen lyckats.',
+        recommendation: 'Kontrollera att den aktuella exportadressen är importerad i Airbnb och att datumen är blockerade där. Blockera manuellt om det är brådskande. Markera först som hanterad när du har sett blockeringen i Airbnb.',
+        fingerprint: warningFingerprint(booking, WARNING.AIRBNB_IMPORT_PENDING, verification.checkedAt),
+        details: { blockedNights: [], checkedAt: verification.checkedAt, confirmedAgeHours: ageHours }
+      })];
+    }
     return [createWarning(WARNING.AIRBNB_AVAILABLE, {
-      title: 'Airbnb verkar vara tillgängligt trots bekräftad bokning',
+      title: 'Airbnb-blockering saknas',
       what: `Airbnb-kalendern visar att inga av bokningens ${nights.length} nätter är blockerade.`,
-      why: 'Bokningen är bekräftad internt, men Airbnb-kalendern visar inga blockeringar för datumen. Det kan leda till dubbelbokning på Airbnb.',
-      recommendation: 'Blockera datumen i Airbnb och kontrollera igen. Markera som hanterad först när du har säkerställt att datumen är blockerade.',
+      why: 'Bokningen är bekräftad internt, men Airbnbs exporterade kalender visar ingen blockering. Den kan inte visa om Airbnb har importerat Skadevis export. Orsaken kan vara utebliven import, fördröjd hämtning eller fel/gammal kalenderadress.',
+      recommendation: 'Kontrollera att rätt exportadress är importerad i Airbnb och blockera datumen manuellt om de inte redan är blockerade. Markera som hanterad först när du har säkerställt att datumen är blockerade i Airbnb.',
       fingerprint: warningFingerprint(booking, WARNING.AIRBNB_AVAILABLE, verification.checkedAt),
-      details: { blockedNights: [], checkedAt: verification.checkedAt }
+      details: { blockedNights: [], checkedAt: verification.checkedAt, internalCovered, confirmedAgeHours: ageHours }
     })];
   }
 
@@ -416,6 +451,63 @@ function internalWarnings(booking, options = {}) {
   return warnings;
 }
 
+function mailWarnings(booking) {
+  const levels = [
+    { kind: 'värdmejl', level: booking.mailStatus?.host },
+    { kind: 'gästmejl', level: booking.mailStatus?.guest }
+  ].filter((item) => item.level);
+  if (!levels.length) return [];
+
+  const pending = levels.filter(({ level }) => level.pending || level.status === 'Utkorg' || level.status === 'Skickar');
+  const failed = levels.filter(({ level }) =>
+    level.deliveryFailed ||
+    level.status === 'Misslyckad' ||
+    level.status === 'Kräver manuell kontroll' ||
+    level.deliveryTone === 'danger'
+  );
+  const unverified = levels.filter(({ level }) =>
+    !failed.some((item) => item.level === level) &&
+    level.deliveryUnverified &&
+    !pending.some((item) => item.level === level)
+  );
+
+  if (failed.length) {
+    const parts = failed.map(({ kind, level }) =>
+      `${kind}: ${level.deliveryLabel}${level.deliveryError ? ` (${level.deliveryError})` : ''}`);
+    return [createWarning(WARNING.MAIL_FAILED, {
+      title: 'Mejlleverans misslyckades',
+      what: `Ett eller flera mejl har studsat, misslyckats eller kräver manuell kontroll (${parts.join(', ')}).`,
+      why: 'API-acceptans är inte samma sak som leverans. Ett studsat eller misslyckat mejl kan innebära att mottagaren inte fått informationen.',
+      recommendation: 'Kontrollera mejlet i Resend och hantera det manuellt. Skicka inte om innan du har kontrollerat att det inte redan levererats.',
+      fingerprint: warningFingerprint(booking, WARNING.MAIL_FAILED, parts.join(','))
+    })];
+  }
+
+  if (pending.length) {
+    const parts = pending.map(({ kind, level }) => `${kind}: ${level.apiLabel}`);
+    return [createWarning(WARNING.MAIL_PENDING, {
+      title: 'Mejl väntar på att skickas',
+      what: `Mejlstatus är fortfarande köad eller under behandling (${parts.join(', ')}).`,
+      why: 'Utkorgen eller Logic App har inte slutfört utskicket. En gammal status kan också bli kvar om bearbetningen avbröts.',
+      recommendation: 'Kontrollera utkorgen och Logic Appens senaste körningar. Skicka inte om ett mejl som redan accepterats av Resend.',
+      fingerprint: warningFingerprint(booking, WARNING.MAIL_PENDING, parts.join(','))
+    })];
+  }
+
+  if (unverified.length) {
+    const parts = unverified.map(({ kind, level }) => `${kind}: ${level.deliveryLabel}`);
+    return [createWarning(WARNING.MAIL_UNVERIFIED, {
+      title: 'Mejl accepterat – leverans ej verifierad',
+      what: `Resend har accepterat mejlet men ingen leveranshändelse finns (${parts.join(', ')}).`,
+      why: 'API-acceptans är inte samma sak som leverans till mottagarens mejlserver. Slutlig placering i inkorgen kan normalt inte verifieras.',
+      recommendation: 'Kontrollera leveransen i Resend eller be mottagaren bekräfta. Aktivera leveranswebhook för automatisk uppföljning när det är godkänt.',
+      fingerprint: warningFingerprint(booking, WARNING.MAIL_UNVERIFIED, parts.join(','))
+    })];
+  }
+
+  return [];
+}
+
 function operationalWarnings(booking, now) {
   const warnings = [];
   const today = todayKey(now);
@@ -434,18 +526,7 @@ function operationalWarnings(booking, now) {
     }));
   }
 
-  if (booking.mailStatus?.host?.needsReview || booking.mailStatus?.guest?.needsReview) {
-    const parts = [];
-    if (booking.mailStatus.host?.needsReview) parts.push(`värdmejl: ${booking.mailStatus.host.apiLabel}`);
-    if (booking.mailStatus.guest?.needsReview) parts.push(`gästmejl: ${booking.mailStatus.guest.apiLabel}`);
-    warnings.push(createWarning(WARNING.MAIL_REVIEW, {
-      title: 'Mejl kräver manuell kontroll',
-      what: `Mejlstatus behöver granskas (${parts.join(', ')}).`,
-      why: 'API-acceptans är inte samma sak som leverans, och ett misslyckat utskick kan behöva hanteras manuellt.',
-      recommendation: 'Kontrollera mejlstatus och skicka vid behov om. Markera som hanterad först när du har kontrollerat utfallet.',
-      fingerprint: warningFingerprint(booking, WARNING.MAIL_REVIEW, parts.join(','))
-    }));
-  }
+  warnings.push(...mailWarnings(booking));
 
   if (booking.statusCode === 'RECONCILIATION') {
     warnings.push(createWarning(WARNING.RECONCILIATION, {
@@ -506,7 +587,7 @@ function deriveWarnings(booking = {}, options = {}) {
   const now = options.now ?? new Date();
   const warnings = [
     ...internalWarnings(booking, options),
-    ...airbnbWarnings(booking),
+    ...airbnbWarnings(booking, options),
     ...operationalWarnings(booking, now)
   ];
   const seen = new Set();

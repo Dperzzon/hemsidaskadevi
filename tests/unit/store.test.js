@@ -342,3 +342,64 @@ test('genomförd betalning bekräftar både herrgård och extrahus', async () =>
   assert.equal(extra.length, 1);
   assert.equal(extra[0].type, 'BOOKING');
 });
+
+test('tabellagret kan slå upp och uppdatera utkorgspost via Resend-ID med ETag', async () => {
+  const calls = [];
+  const store = createTableStore({
+    accountName: 'skadevibokningar',
+    authMode: 'shared-key',
+    accountKey: Buffer.from('test-nyckel').toString('base64'),
+    fetchImpl: async (url, init) => {
+      calls.push({ url: String(url), method: init.method, headers: init.headers, body: init.body });
+      if (init.method === 'GET') {
+        return {
+          status: 200,
+          headers: new Map([['etag', 'W/"1"']]),
+          text: async () => JSON.stringify({
+            value: [{
+              PartitionKey: 'outbox',
+              RowKey: 'outbox-1-guest',
+              reference: 'SK-2026-TEST01',
+              mailType: 'GUEST_BOOKING_CONFIRMED',
+              status: 'Skickad',
+              deliveryStatus: 'Accepterad av Resend – leverans ej verifierad',
+              resendId: 'resend-1',
+              sentAt: '2026-11-26T09:00:00.000Z',
+              createdAt: '2026-11-26T08:59:00.000Z',
+              'odata.etag': 'W/"1"'
+            }]
+          })
+        };
+      }
+      return { status: 204, headers: new Map([['content-length', '0']]), text: async () => '' };
+    }
+  });
+
+  const found = await store.findOutboxByResendId('resend-1');
+  assert.equal(found.record.idempotencyKey, 'outbox-1-guest');
+  assert.equal(found.record.mailType, 'GUEST_BOOKING_CONFIRMED');
+  assert.equal(found.etag, 'W/"1"');
+  assert.match(decodeURIComponent(calls[0].url), /resendId eq 'resend-1'/);
+
+  await store.updateOutboxDelivery('outbox-1-guest', { deliveryStatus: 'delivered' }, { ifMatch: found.etag });
+  assert.equal(calls[1].method, 'PATCH');
+  assert.equal(calls[1].headers['If-Match'], 'W/"1"');
+  assert.deepEqual(JSON.parse(calls[1].body), { deliveryStatus: 'delivered' });
+});
+
+test('tabellagret behandlar webhookhändelser create-only', async () => {
+  let status = 201;
+  const store = createTableStore({
+    accountName: 'skadevibokningar',
+    authMode: 'shared-key',
+    accountKey: Buffer.from('test-nyckel').toString('base64'),
+    fetchImpl: async () => ({
+      status,
+      headers: new Map([['content-length', '0']]),
+      text: async () => ''
+    })
+  });
+  assert.deepEqual(await store.recordWebhookEvent('evt_1', { eventType: 'email.delivered' }), { duplicate: false });
+  status = 409;
+  assert.deepEqual(await store.recordWebhookEvent('evt_1', { eventType: 'email.delivered' }), { duplicate: true });
+});

@@ -13,6 +13,7 @@ const { handleCalendarExport } = require('./calendar/export');
 const { createCalendarMonitor } = require('./calendar/monitor');
 const { handleBookingRequest, createRateLimiter } = require('./booking/requests');
 const { handleStripeWebhook } = require('./booking/stripe-webhook');
+const { handleResendWebhook } = require('./booking/resend-webhook');
 const { handlePaymentPage, handlePaymentAction } = require('./booking/payment-page');
 const { handlePaymentResult } = require('./booking/payment-result');
 const {
@@ -390,6 +391,11 @@ function createRequestListener(options = {}) {
   const rulesHandler = options.rulesHandler ?? (async () => publicRules(await loadRules(options)));
   const calendarExportHandler = options.calendarExportHandler ??
     ((request, context) => handleCalendarExport(request, context, {
+      ...options,
+      store: createStore(options)
+    }));
+  const resendWebhookHandler = options.resendWebhookHandler ??
+    ((request, context) => handleResendWebhook(request, context, {
       ...options,
       store: createStore(options)
     }));
@@ -865,6 +871,27 @@ function createRequestListener(options = {}) {
         sendJson(res, result.status, result.jsonBody, result.headers);
       } catch {
         sendJson(res, 503, { error: 'Betalningen kunde inte registreras just nu.' });
+      }
+      return;
+    }
+
+    if (url.pathname === '/api/webhooks/resend' && req.method === 'POST') {
+      let rawBody;
+      try {
+        rawBody = await readRawBody(req, 256 * 1024);
+      } catch {
+        sendJson(res, 400, { error: 'Förfrågan kunde inte tolkas.' });
+        return;
+      }
+      try {
+        const result = await resendWebhookHandler(
+          { rawBody, headers: req.headers },
+          { warn },
+          {}
+        );
+        sendJson(res, result.status, result.jsonBody, result.headers);
+      } catch {
+        sendJson(res, 503, { error: 'Händelsen kunde inte behandlas.' });
       }
       return;
     }

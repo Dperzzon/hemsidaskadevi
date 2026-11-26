@@ -232,7 +232,7 @@ test('Airbnb-kalender som inte kan läsas visas som okänd status, aldrig som ve
     assert.equal(warning.severity, 'verify');
     assert.equal(after.json.booking.airbnbBlockedAt, '');
     const html = await request(port, `/admin/bookings/${encodeURIComponent(reference)}`);
-    assert.match(html.body, /Airbnb-kalendern kunde inte läsas/);
+    assert.match(html.body, /Kalenderstatus kan inte verifieras/);
     assert.match(html.body, /inte samma sak som ett verifierat OK/);
     assert.doesNotMatch(html.body, /Airbnb-blockeringen är verifierad/);
   } finally {

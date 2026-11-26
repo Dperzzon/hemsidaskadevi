@@ -35,17 +35,20 @@ function fact(label, value) {
 
 function emailRow(label, level) {
   const review = level.needsReview
-    ? `<p class="inline-warning">Kräver manuell kontroll</p>`
-    : '';
+    ? `<p class="inline-warning">${escapeHtml(level.verificationText || 'Kräver manuell kontroll')}</p>`
+    : `<p class="price-note">${escapeHtml(level.verificationText || 'Ingen leveransstatus tillgänglig.')}</p>`;
   const type = level.mailTypeLabel
-    ? `<p class="muted">${escapeHtml(level.mailTypeLabel)}</p>`
+    ? `<p class="muted">${escapeHtml(level.mailTypeLabel)} · ${escapeHtml(level.recipientLabel || 'Okänd mottagartyp')}</p>`
+    : '';
+  const subject = level.subject
+    ? `<p class="muted">Ämne: ${escapeHtml(level.subject)}</p>`
     : '';
   const queued = level.queued
     ? '<p class="price-note">Köat. Skickas först när utkorgen är aktiverad.</p>'
     : '';
   return `<div class="email-row">
     <div><p class="card-kicker">${escapeHtml(label)}</p>
-      ${type}
+      ${type}${subject}
       <div class="badge-row">${emailBadge(level)}${deliveryBadge(level)}</div>
       ${review}${queued}
     </div>
@@ -55,18 +58,40 @@ function emailRow(label, level) {
   </div>`;
 }
 
+function mailTimeline(event) {
+  const steps = Array.isArray(event.timeline) ? event.timeline : [];
+  if (!steps.length) return '';
+  return `<ol class="mail-timeline">${steps.map((step) => `
+    <li class="mail-step mail-step-${escapeHtml(step.state || 'pending')}">
+      <span class="mail-step-label">${escapeHtml(step.label)}</span>
+      <span class="mail-step-time">${step.at ? escapeHtml(formatDateTime(step.at)) : '–'}</span>
+      ${step.detail ? `<span class="mail-step-detail">${escapeHtml(step.detail)}</span>` : ''}
+    </li>`).join('')}</ol>`;
+}
+
 function mailEventsTable(booking) {
   const events = Array.isArray(booking.mailEvents) ? booking.mailEvents : [];
   if (!events.length) return '<p class="muted">Inga utkorgsposter finns ännu.</p>';
-  return `<div class="table-wrap"><table class="data-table compact">
-    <thead><tr><th>Mejl</th><th>Köstatus</th><th>Leverans</th><th>Skapat</th></tr></thead>
-    <tbody>${events.map((event) => `<tr>
-      <td data-label="Mejl">${escapeHtml(event.mailTypeLabel)}</td>
-      <td data-label="Köstatus">${escapeHtml(event.apiLabel)}</td>
-      <td data-label="Leverans">${escapeHtml(event.deliveryLabel)}</td>
-      <td data-label="Skapat">${escapeHtml(event.createdAt ? formatDateTime(event.createdAt) : '–')}</td>
-    </tr>`).join('')}</tbody>
-  </table></div>`;
+  return `<div class="mail-events">${events.map((event) => `
+    <article class="mail-event">
+      <header class="mail-event-head">
+        <div>
+          <p class="card-kicker">${escapeHtml(event.mailTypeLabel)}</p>
+          <p class="muted">${escapeHtml(event.recipientLabel || 'Okänd mottagartyp')}${event.subject ? ` · ${escapeHtml(event.subject)}` : ''}</p>
+        </div>
+        <div class="badge-row">${emailBadge(event)}${deliveryBadge(event)}</div>
+      </header>
+      <div class="fact-grid mail-facts">
+        ${fact('Skapat', escapeHtml(event.createdAt ? formatDateTime(event.createdAt) : '–'))}
+        ${fact('Senaste försök', escapeHtml(event.attemptedAt ? formatDateTime(event.attemptedAt) : '–'))}
+        ${fact('Försök', escapeHtml(String(event.attemptCount || 0)))}
+        ${fact('Resend-ID', event.resendId ? `<code>${escapeHtml(event.resendId)}</code>` : '–')}
+      </div>
+      <p class="mail-verification ${event.deliveryFailed ? 'mail-verification-danger' : (event.verifiedDelivery ? 'mail-verification-ok' : '')}">${escapeHtml(event.verificationText)}</p>
+      ${event.manualReviewReason ? `<p class="inline-warning">${escapeHtml(event.manualReviewReason)}</p>` : ''}
+      ${event.deliveryError ? `<p class="price-note">Teknisk felorsak: ${escapeHtml(event.deliveryError)}</p>` : ''}
+      ${mailTimeline(event)}
+    </article>`).join('')}</div>`;
 }
 
 function addonTable(booking) {
@@ -764,7 +789,7 @@ function renderBookingDetail(options) {
             ? `<div class="button-row"><button class="btn btn-secondary" type="button" data-retry-notifications="${escapeHtml(booking.reference)}">Köa bekräftelsemejl igen</button></div>
                <p class="notice">Minst en bekräftelse saknar spårbar utkorgspost. Knappen köar om med samma idempotensnyckel och skapar inga dubbletter.</p>`
             : ''}
-          <p class="price-note">”Accepterat av Resend” betyder att API:et tog emot mejlet, inte att det levererats till mottagaren. Köade mejl skickas först när utkorgen och Logic App är aktiverade. Leveransbekräftelse från Resend är inte aktiverad ännu.</p>
+          <p class="price-note">”Accepterat av Resend” betyder att API:et tog emot mejlet, inte att det levererats till mottagaren. Leveransspårning via Resend-webhook är förberedd i koden men inte aktiverad i produktion. Tills den aktiveras visas slutlig leverans som ej verifierad.</p>
         </section>
 
         <section class="panel">

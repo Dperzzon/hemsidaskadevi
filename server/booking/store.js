@@ -1099,6 +1099,77 @@ function createTableStore(options = {}) {
       }
       return { record, etag: result.etag ?? '' };
     },
+    // Leveransuppföljning (Resend-webhook). Slår upp utkorgsposten via
+    // leverantörens meddelande-ID och uppdaterar endast leveransfälten med
+    // ETag-skydd. Mejlets innehåll och mottagaradress ändras aldrig här.
+    async findOutboxByResendId(resendId) {
+      const safe = escapeOData(resendId);
+      if (!safe) return null;
+      const rows = await tableRequest({
+        accountName, method: 'GET', table,
+        query: [['$filter', `PartitionKey eq 'outbox' and resendId eq '${safe}'`]],
+        fetchImpl: options.fetchImpl, auth
+      });
+      if (rows.status !== 200 || !Array.isArray(rows.json?.value) || !rows.json.value.length) {
+        return null;
+      }
+      const row = rows.json.value[0];
+      return { record: fromOutboxEntity(row), etag: row['odata.etag'] ?? row.etag ?? '' };
+    },
+    async updateOutboxDelivery(rowKey, patch = {}, { ifMatch } = {}) {
+      const result = await tableRequest({
+        accountName, method: 'PATCH', table,
+        target: rowTarget('outbox', rowKey),
+        body: patch,
+        ifMatch: ifMatch ?? '*',
+        fetchImpl: options.fetchImpl, auth
+      });
+      if (result.status === 412 || result.status === 409) {
+        const conflict = new Error('Utkorgsposten har ändrats av någon annan');
+        conflict.status = 409;
+        throw conflict;
+      }
+      if (result.status === 404) {
+        const missing = new Error('Utkorgsposten hittades inte');
+        missing.status = 404;
+        throw missing;
+      }
+      if (![200, 204].includes(result.status)) {
+        throw new Error(`Utkorgsposten kunde inte uppdateras (${result.status})`);
+      }
+      return { record: { ...patch, idempotencyKey: rowKey }, etag: result.etag ?? '' };
+    },
+    // Idempotens för leveranshändelser. RowKey är leverantörens event-ID.
+    // Create-only innebär att en upprepad eller samtidig webhook avvisas utan
+    // att posten skrivs två gånger.
+    async getWebhookEvent(eventId) {
+      const rowKey = String(eventId ?? '').trim();
+      if (!rowKey || rowKey.length > 200) return null;
+      return this.getAux('webhookevent', rowKey);
+    },
+    async recordWebhookEvent(eventId, data = {}) {
+      const rowKey = String(eventId ?? '').trim();
+      if (!rowKey || rowKey.length > 200) throw new Error('Webhookhändelsen saknar giltigt ID');
+      const result = await tableRequest({
+        accountName, method: 'POST', table,
+        body: {
+          PartitionKey: 'webhookevent',
+          RowKey: rowKey,
+          receivedAt: data.receivedAt ?? new Date().toISOString(),
+          eventType: String(data.eventType ?? '').slice(0, 80),
+          emailId: String(data.emailId ?? '').slice(0, 200),
+          data: JSON.stringify({
+            receivedAt: data.receivedAt ?? new Date().toISOString(),
+            eventType: String(data.eventType ?? '').slice(0, 80),
+            emailId: String(data.emailId ?? '').slice(0, 200)
+          })
+        },
+        fetchImpl: options.fetchImpl, auth
+      });
+      if (result.status === 201) return { duplicate: false };
+      if (result.status === 409) return { duplicate: true };
+      throw new Error(`Webhookhändelsen kunde inte sparas (${result.status})`);
+    },
     async appendHistory(entry) {
       const result = await tableRequest({
         accountName, method: 'POST', table,
@@ -1182,6 +1253,7 @@ function createLocalStore(options = {}) {
   const records = new Map();
   const calendar = new Map();
   const aux = new Map();
+  const webhookEvents = new Map();
   const calendarKey = (resource, night) => `${resource === 'extrahus' ? 'extrahus' : 'main'}:${night}`;
   const directBooking = new Map();
   let syncStatus = null;
@@ -1432,6 +1504,50 @@ function createLocalStore(options = {}) {
       await fsp.mkdir(path.dirname(historyFile), { recursive: true });
       await fsp.appendFile(historyFile, `${JSON.stringify(entry)}\n`, 'utf8');
     },
+    async findOutboxByResendId(resendId) {
+      await loadOnce();
+      const value = String(resendId ?? '');
+      if (!value) return null;
+      const record = [...records.values()].find((item) =>
+        item.partition === 'outbox' && item.resendId === value
+      );
+      return record ? { record: { ...record }, etag: etagFor(record) } : null;
+    },
+    async updateOutboxDelivery(rowKey, patch = {}, { ifMatch } = {}) {
+      await loadOnce();
+      const current = records.get(rowKey);
+      if (!current) {
+        const missing = new Error('Utkorgsposten hittades inte');
+        missing.status = 404;
+        throw missing;
+      }
+      if (ifMatch && ifMatch !== '*' && ifMatch !== etagFor(current)) {
+        const conflict = new Error('Utkorgsposten har ändrats av någon annan');
+        conflict.status = 409;
+        throw conflict;
+      }
+      const stored = { ...current, ...patch };
+      records.set(rowKey, stored);
+      await fsp.mkdir(path.dirname(file), { recursive: true });
+      await fsp.appendFile(file, `${JSON.stringify(stored)}\n`, 'utf8');
+      return { record: stored, etag: etagFor(stored) };
+    },
+    async recordWebhookEvent(eventId, data = {}) {
+      const rowKey = String(eventId ?? '').trim();
+      if (!rowKey) throw new Error('Webhookhändelsen saknar giltigt ID');
+      if (webhookEvents.has(rowKey)) return { duplicate: true };
+      webhookEvents.set(rowKey, {
+        eventId: rowKey,
+        receivedAt: data.receivedAt ?? new Date().toISOString(),
+        eventType: String(data.eventType ?? ''),
+        emailId: String(data.emailId ?? '')
+      });
+      return { duplicate: false };
+    },
+    async getWebhookEvent(eventId) {
+      const rowKey = String(eventId ?? '').trim();
+      return rowKey && webhookEvents.has(rowKey) ? { ...webhookEvents.get(rowKey) } : null;
+    },
     async listPending() {
       await loadOnce();
       return [...records.values()].filter((record) => record.status === 'Inväntar godkännande');
@@ -1486,6 +1602,15 @@ function toOutboxEntity(record) {
     attemptCount: Number(record.attemptCount ?? 0),
     attemptedAt: record.attemptedAt ?? '',
     sentAt: record.sentAt ?? '',
+    deliveredAt: record.deliveredAt ?? '',
+    bouncedAt: record.bouncedAt ?? '',
+    failedAt: record.failedAt ?? '',
+    complainedAt: record.complainedAt ?? '',
+    lastEventAt: record.lastEventAt ?? '',
+    lastEventType: record.lastEventType ?? '',
+    manualReviewReason: record.manualReviewReason ?? '',
+    deliveryError: record.deliveryError ?? '',
+    updatedAt: record.updatedAt ?? '',
     createdAt: record.createdAt
   };
 }
@@ -1507,6 +1632,15 @@ function fromOutboxEntity(entity) {
     attemptCount: Number(entity.attemptCount ?? 0),
     attemptedAt: entity.attemptedAt ?? '',
     sentAt: entity.sentAt ?? '',
+    deliveredAt: entity.deliveredAt ?? '',
+    bouncedAt: entity.bouncedAt ?? '',
+    failedAt: entity.failedAt ?? '',
+    complainedAt: entity.complainedAt ?? '',
+    lastEventAt: entity.lastEventAt ?? '',
+    lastEventType: entity.lastEventType ?? '',
+    manualReviewReason: entity.manualReviewReason ?? '',
+    deliveryError: entity.deliveryError ?? '',
+    updatedAt: entity.updatedAt ?? '',
     createdAt: entity.createdAt
   };
 }

@@ -34,6 +34,12 @@ const {
 
 const DEFAULT_TABLE = 'bookingrequests';
 const MAX_ROWS = 1000;
+const OUTBOX_SELECT = [
+  'reference', 'mailType', 'mailSubject', 'status', 'deliveryStatus', 'resendId',
+  'sentAt', 'createdAt', 'updatedAt', 'attemptCount', 'attemptedAt',
+  'deliveredAt', 'bouncedAt', 'failedAt', 'complainedAt',
+  'lastEventAt', 'lastEventType', 'manualReviewReason', 'deliveryError'
+].join(',');
 
 function escapeOData(value) {
   return String(value).replaceAll("'", "''");
@@ -104,10 +110,7 @@ function createTableAdminRepository(options = {}) {
   }
 
   async function loadOutboxRows() {
-    return query(
-      "PartitionKey eq 'outbox'",
-      'reference,mailType,status,deliveryStatus,resendId,sentAt,createdAt'
-    );
+    return query("PartitionKey eq 'outbox'", OUTBOX_SELECT);
   }
 
   async function loadAddonRows(partition, reference) {
@@ -162,7 +165,7 @@ function createTableAdminRepository(options = {}) {
       if (!raw) return null;
       const outbox = await query(
         `PartitionKey eq 'outbox' and reference eq '${escapeOData(reference)}'`,
-        'reference,mailType,status,deliveryStatus,resendId,sentAt,createdAt'
+        OUTBOX_SELECT
       );
       return normalizeBooking(raw.record, { outbox, etag: raw.etag });
     },
