@@ -128,9 +128,6 @@ function eventTime(event, now) {
 
 function shouldApply(current, incoming, at) {
   const currentStatus = String(current?.deliveryStatus ?? '').toLowerCase();
-  if (incoming.terminal && currentStatus === 'delivered' && incoming.deliveryStatus !== 'delivered') {
-    return false;
-  }
   if (TERMINAL_STATUSES.has(currentStatus) && !incoming.terminal) return false;
   const currentAt = Date.parse(String(current?.lastEventAt ?? ''));
   if (Number.isFinite(currentAt)) {
@@ -154,17 +151,23 @@ function patchForEvent(event, info, at, now) {
   const timestamp = at.toISOString();
   if (info.deliveryStatus === 'delivered') {
     patch.deliveredAt = timestamp;
+    patch.bouncedAt = '';
+    patch.failedAt = '';
+    patch.complainedAt = '';
     patch.manualReviewReason = '';
     patch.deliveryError = '';
   } else if (info.deliveryStatus === 'bounced') {
+    patch.deliveredAt = '';
     patch.bouncedAt = timestamp;
     patch.manualReviewReason = 'Resend rapporterade att mejlet studsade. Kontrollera mottagaradressen innan ett nytt försök.';
     patch.deliveryError = safeBounceCode(event.data);
   } else if (info.deliveryStatus === 'failed') {
+    patch.deliveredAt = '';
     patch.failedAt = timestamp;
     patch.manualReviewReason = 'Resend rapporterade att leveransen misslyckades. Kontrollera leveransen innan ett nytt försök.';
     patch.deliveryError = safeBounceCode(event.data);
   } else if (info.deliveryStatus === 'complained') {
+    patch.deliveredAt = '';
     patch.complainedAt = timestamp;
     patch.manualReviewReason = 'Mottagaren har markerat mejlet som skräppost. Skicka inte om utan manuell kontroll.';
     patch.deliveryError = safeBounceCode(event.data);

@@ -286,8 +286,8 @@ test('fördröjd leverans följs av delivered utan att tappa historiken', async 
   assert.equal(store.state.history.length, 2);
 });
 
-test('en studs efter redan levererat mejl nedgraderar inte leveransstatus', async () => {
-  const store = fakeStore({
+test('en senare studs efter levererat mejl registreras, men en äldre ignoreras', async () => {
+  const baseRow = {
     idempotencyKey: 'outbox-1-guest',
     reference: 'SK-2026-TEST01',
     mailType: 'GUEST_BOOKING_CONFIRMED',
@@ -297,16 +297,28 @@ test('en studs efter redan levererat mejl nedgraderar inte leveransstatus', asyn
     deliveredAt: '2026-11-26T09:58:00.000Z',
     lastEventAt: '2026-11-26T09:58:00.000Z',
     lastEventType: 'email.delivered'
+  };
+
+  const laterStore = fakeStore({ ...baseRow });
+  const laterBounce = event('email.bounced');
+  laterBounce.created_at = '2026-11-26T10:00:00.000Z';
+  const applied = await handleResendWebhook(requestFor(laterBounce, { id: 'evt_late_bounce' }), {}, {
+    enabled: true, secret: SECRET, store: laterStore, now: NOW
   });
-  const bounce = event('email.bounced');
-  bounce.created_at = '2026-11-26T10:00:00.000Z';
-  const response = await handleResendWebhook(requestFor(bounce, { id: 'evt_late_bounce' }), {}, {
-    enabled: true, secret: SECRET, store, now: NOW
+  assert.equal(applied.status, 200);
+  assert.equal(applied.jsonBody.applied, true);
+  assert.equal(laterStore.state.updates[0].patch.deliveryStatus, 'bounced');
+
+  const olderStore = fakeStore({ ...baseRow });
+  const olderBounce = event('email.bounced');
+  olderBounce.created_at = '2026-11-26T09:50:00.000Z';
+  const ignored = await handleResendWebhook(requestFor(olderBounce, { id: 'evt_old_bounce' }), {}, {
+    enabled: true, secret: SECRET, store: olderStore, now: NOW
   });
-  assert.equal(response.status, 200);
-  assert.equal(response.jsonBody.applied, false);
-  assert.equal(store.state.updates.length, 0);
-  assert.equal(store.state.row.deliveryStatus, 'delivered');
+  assert.equal(ignored.status, 200);
+  assert.equal(ignored.jsonBody.applied, false);
+  assert.equal(olderStore.state.updates.length, 0);
+  assert.equal(olderStore.state.row.deliveryStatus, 'delivered');
 });
 
 test('okänd händelsetyp kvitteras utan att röra utkorgen', async () => {
@@ -350,6 +362,33 @@ test('samtidig ETag-konflikt läses om och appliceras en gång', async () => {
   assert.equal(response.status, 200);
   assert.equal(response.jsonBody.applied, true);
   assert.equal(base.state.updates.length, 1);
+});
+
+test('en senare delivered efter studs rensar felstatus så admin inte visar falskt fel', async () => {
+  const store = fakeStore({
+    idempotencyKey: 'outbox-1-guest',
+    reference: 'SK-2026-TEST01',
+    mailType: 'GUEST_BOOKING_CONFIRMED',
+    resendId: 'resend-message-1',
+    status: 'Skickad',
+    deliveryStatus: 'bounced',
+    bouncedAt: '2026-11-26T09:55:00.000Z',
+    manualReviewReason: 'studs',
+    deliveryError: 'Permanent/General',
+    lastEventAt: '2026-11-26T09:55:00.000Z',
+    lastEventType: 'email.bounced'
+  });
+  const delivered = event('email.delivered');
+  delivered.created_at = '2026-11-26T10:00:00.000Z';
+  const response = await handleResendWebhook(requestFor(delivered, { id: 'evt_after_bounce' }), {}, {
+    enabled: true, secret: SECRET, store, now: NOW
+  });
+  assert.equal(response.status, 200);
+  const patch = store.state.updates[0].patch;
+  assert.equal(patch.deliveryStatus, 'delivered');
+  assert.equal(patch.bouncedAt, '');
+  assert.equal(patch.deliveryError, '');
+  assert.equal(patch.manualReviewReason, '');
 });
 
 test('en ny handlerinstans (serveromstart) behandlar samma Svix-ID idempotent', async () => {
