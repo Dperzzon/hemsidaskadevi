@@ -290,6 +290,10 @@ function airbnbWarnings(booking, options = {}) {
   if (booking.statusCode !== 'CONFIRMED') return [];
   const nights = nightKeys(booking.arrival, booking.departure);
   if (!nights.length) return [];
+  const lockedNights = [...new Set([
+    ...nights,
+    ...(Array.isArray(booking.bufferNights) ? booking.bufferNights.filter(validDateKey) : [])
+  ])].sort();
   const verification = normalizeVerification(booking);
   const now = options.now instanceof Date ? options.now : new Date();
   const internalCovered = internalNightsCovered(booking, nights, options.calendarRows);
@@ -315,7 +319,7 @@ function airbnbWarnings(booking, options = {}) {
         why: 'Ett misslyckat dataläsningsförsök är inte samma sak som ett verifierat OK. Det säger heller inget om Airbnb har importerat Skadevis export.',
         recommendation: 'Försök igen om en stund. Kontrollera Airbnb manuellt innan du markerar varningen som hanterad.',
         fingerprint: warningFingerprint(booking, WARNING.AIRBNB_UNAVAILABLE, 'unavailable'),
-        details: { nights, checkedAt: verification.checkedAt, error: verification.error }
+        details: { nights: lockedNights, checkedAt: verification.checkedAt, error: verification.error }
       })];
     }
     if (verification.status === 'blocked') {
@@ -353,7 +357,7 @@ function airbnbWarnings(booking, options = {}) {
         why: 'Airbnb hämtar importerade kalendrar med fördröjning. Det kan också bero på att fel eller en gammal exportadress är importerad. Airbnbs exporterade kalender kan inte bevisa att importen lyckats.',
         recommendation: 'Kontrollera att den aktuella exportadressen är importerad i Airbnb och att datumen är blockerade där. Blockera manuellt om det är brådskande. Markera först som hanterad när du har sett blockeringen i Airbnb.',
         fingerprint: warningFingerprint(booking, WARNING.AIRBNB_IMPORT_PENDING, nights.join(',')),
-        details: { blockedNights: [], nights, checkedAt: verification.checkedAt, confirmedAgeHours: ageHours }
+        details: { blockedNights: [], nights: lockedNights, checkedAt: verification.checkedAt, confirmedAgeHours: ageHours }
       })];
     }
     if (manualAck) return [manualAirbnbWarning(booking, nights, manualAck)];
@@ -363,7 +367,7 @@ function airbnbWarnings(booking, options = {}) {
       why: 'Bokningen är bekräftad internt, men Airbnbs exporterade kalender visar ingen blockering. Den kan inte visa om Airbnb har importerat Skadevis export. Orsaken kan vara utebliven import, fördröjd hämtning eller fel/gammal kalenderadress.',
       recommendation: 'Kontrollera att rätt exportadress är importerad i Airbnb och blockera datumen manuellt om de inte redan är blockerade. Markera som hanterad först när du har säkerställt att datumen är blockerade i Airbnb.',
       fingerprint: warningFingerprint(booking, WARNING.AIRBNB_AVAILABLE, nights.join(',')),
-      details: { blockedNights: [], nights, checkedAt: verification.checkedAt, internalCovered, confirmedAgeHours: ageHours }
+      details: { blockedNights: [], nights: lockedNights, checkedAt: verification.checkedAt, internalCovered, confirmedAgeHours: ageHours }
     })];
   }
 
@@ -429,7 +433,7 @@ function airbnbWarnings(booking, options = {}) {
     why: 'Bokningen är bekräftad, men Airbnb-kalendern har inte kontrollerats eller så saknas ett sparat verifieringsresultat.',
     recommendation: 'Kontrollera att datumen är blockerade i Airbnb. Om du redan har gjort det kan du markera varningen som hanterad.',
     fingerprint: warningFingerprint(booking, WARNING.AIRBNB_UNVERIFIED, ''),
-    details: { nights }
+    details: { nights: lockedNights }
   })];
 }
 
