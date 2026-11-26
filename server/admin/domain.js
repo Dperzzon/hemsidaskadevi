@@ -395,6 +395,19 @@ function mailTypeLabel(mailType) {
   return MAIL_TYPE_LABELS[type] ?? (type || 'Okänd mejltyp');
 }
 
+function normalizeMailVerification(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return {
+    status: String(value.status ?? ''),
+    checkedAt: String(value.checkedAt ?? ''),
+    resendId: String(value.resendId ?? ''),
+    lastEvent: String(value.lastEvent ?? ''),
+    httpStatus: value.httpStatus === undefined ? null : numberOr(value.httpStatus),
+    error: String(value.error ?? ''),
+    source: String(value.source ?? '')
+  };
+}
+
 function emptyMailLevel() {
   return {
     apiLabel: 'Ingen uppgift',
@@ -649,6 +662,12 @@ function normalizeBooking(record = {}, options = {}) {
         fingerprint: String(record.airbnbVerification.fingerprint ?? ''),
         source: String(record.airbnbVerification.source ?? ''),
         error: String(record.airbnbVerification.error ?? '')
+      }
+      : null,
+    mailVerification: record.mailVerification && typeof record.mailVerification === 'object'
+      ? {
+        host: normalizeMailVerification(record.mailVerification.host),
+        guest: normalizeMailVerification(record.mailVerification.guest)
       }
       : null,
     warningAcknowledgements: Array.isArray(record.warningAcknowledgements)

@@ -33,7 +33,25 @@ function fact(label, value) {
   return `<div class="fact"><span>${escapeHtml(label)}</span><strong>${value}</strong></div>`;
 }
 
-function emailRow(label, level) {
+function mailVerificationNote(verification) {
+  if (!verification) return '';
+  const when = verification.checkedAt ? formatDateTime(verification.checkedAt) : '';
+  if (verification.status === 'delivered') {
+    return `<p class="mail-verification mail-verification-ok">Resend bekräftar leverans. Kontrollerat ${escapeHtml(when)}.</p>`;
+  }
+  if (verification.status === 'permission_denied') {
+    return `<p class="mail-verification">Senaste kontroll ${escapeHtml(when)}: Resend-nyckeln saknar behörighet att läsa leveransstatus. Ingen automatisk leveransverifiering är möjlig.</p>`;
+  }
+  if (verification.status === 'not_configured') {
+    return `<p class="mail-verification">Senaste kontroll ${escapeHtml(when)}: automatisk leveransläsning är inte aktiverad. Statusen är fortfarande ej verifierad.</p>`;
+  }
+  if (['bounced', 'failed', 'complained'].includes(verification.status)) {
+    return `<p class="mail-verification mail-verification-danger">Senaste kontroll ${escapeHtml(when)}: Resend rapporterar ${escapeHtml(verification.status)}.</p>`;
+  }
+  return `<p class="mail-verification">Senaste kontroll ${escapeHtml(when)}: leveransstatus kunde inte verifieras (${escapeHtml(verification.status || 'okänd')}).</p>`;
+}
+
+function emailRow(label, level, verification = null) {
   const review = level.needsReview
     ? `<p class="inline-warning">${escapeHtml(level.verificationText || 'Kräver manuell kontroll')}</p>`
     : `<p class="price-note">${escapeHtml(level.verificationText || 'Ingen leveransstatus tillgänglig.')}</p>`;
@@ -46,11 +64,14 @@ function emailRow(label, level) {
   const queued = level.queued
     ? '<p class="price-note">Köat. Skickas först när utkorgen är aktiverad.</p>'
     : '';
+  const accepted = level.acceptedAt
+    ? `<p class="mail-verification">Accepterat av Resend: ${escapeHtml(formatDateTime(level.acceptedAt))}.</p>`
+    : '';
   return `<div class="email-row">
     <div><p class="card-kicker">${escapeHtml(label)}</p>
       ${type}${subject}
       <div class="badge-row">${emailBadge(level)}${deliveryBadge(level)}</div>
-      ${review}${queued}
+      ${review}${accepted}${mailVerificationNote(verification)}${queued}
     </div>
     <div class="email-id">${level.resendId
       ? `<span>Resend-ID</span><code>${escapeHtml(level.resendId)}</code>`
@@ -162,10 +183,12 @@ function warningActions(warning, booking, isOwner, writesEnabled) {
       : '';
   }
   const buttons = [];
-  if (warning.recheckable && isOwner && writesEnabled) {
-    buttons.push(warningButton('Kontrollera igen', 'data-warning-recheck', warning, booking));
-  } else {
-    buttons.push(`<a class="btn btn-secondary btn-small" href="/admin/bookings/${encodeURIComponent(booking.reference)}">Kontrollera igen</a>`);
+  if (warning.recheckable) {
+    if (isOwner && writesEnabled) {
+      buttons.push(warningButton('Kontrollera igen', 'data-warning-recheck', warning, booking));
+    } else {
+      buttons.push(`<a class="btn btn-secondary btn-small" href="/admin/bookings/${encodeURIComponent(booking.reference)}">Kontrollera igen</a>`);
+    }
   }
   let lock = '';
   if (warning.dismissible) {
@@ -183,6 +206,9 @@ function warningActions(warning, booking, isOwner, writesEnabled) {
 function warningCard(warning, booking, isOwner, writesEnabled) {
   const handled = warning.severity === 'handled';
   const details = [];
+  if (warning.details?.checkedAt) {
+    details.push(`<p class="warning-meta">Senast kontrollerad: ${escapeHtml(formatDateTime(warning.details.checkedAt))}.</p>`);
+  }
   if (handled) {
     if (warning.handledAt) {
       details.push(`<p class="warning-meta">Hanterad av ${escapeHtml(warning.handledBy || 'Owner')} den ${escapeHtml(formatDateTime(warning.handledAt))}.</p>`);
@@ -205,6 +231,7 @@ function warningCard(warning, booking, isOwner, writesEnabled) {
       ? details.join('')
       : `<p class="warning-recommendation"><strong>Rekommendation:</strong> ${escapeHtml(warning.recommendation)}</p>`}
     ${warningActions(warning, booking, isOwner, writesEnabled)}
+    <div class="warning-check-result" data-check-result="${escapeHtml(warning.id)}" role="status" aria-live="polite" hidden></div>
   </article>`;
 }
 
@@ -780,8 +807,8 @@ function renderBookingDetail(options) {
 
         <section class="panel">
           <div class="panel-heading"><div><p class="eyebrow">Kommunikation</p><h2>Mejlstatus</h2></div></div>
-          ${emailRow('Värdmejl', booking.mailStatus.host)}
-          ${emailRow('Gästmejl', booking.mailStatus.guest)}
+          ${emailRow('Värdmejl', booking.mailStatus.host, booking.mailVerification?.host)}
+          ${emailRow('Gästmejl', booking.mailStatus.guest, booking.mailVerification?.guest)}
           ${mailEventsTable(booking)}
           ${booking.statusCode === 'CONFIRMED' && booking.emailObligation &&
             [booking.emailObligation.guest?.status, booking.emailObligation.host?.status]
@@ -790,6 +817,15 @@ function renderBookingDetail(options) {
                <p class="notice">Minst en bekräftelse saknar spårbar utkorgspost. Knappen köar om med samma idempotensnyckel och skapar inga dubbletter.</p>`
             : ''}
           <p class="price-note">”Accepterat av Resend” betyder att API:et tog emot mejlet, inte att det levererats till mottagaren. Leveransspårning via Resend-webhook är förberedd i koden men inte aktiverad i produktion. Tills den aktiveras visas slutlig leverans som ej verifierad.</p>
+          <details class="mail-manual-help">
+            <summary>Manuell leveranskontroll i Resend</summary>
+            <ol class="mail-help-list">
+              <li>Öppna Resend → Emails och sök på Resend-ID:t ovan.</li>
+              <li>Kontrollera händelsen <code>Delivered</code> och tiden för leverans.</li>
+              <li>Om leveransen är bekräftad: använd ”Markera som hanterad” på mejlvarningen och skriv in vad du såg i Resend.</li>
+              <li>Automatisk kontroll kräver att API-nyckeln får läsa mejlstatus samt att leveranswebhook aktiveras. Detta är inte aktiverat och ändras inte av portalen.</li>
+            </ol>
+          </details>
         </section>
 
         <section class="panel">

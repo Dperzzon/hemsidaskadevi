@@ -60,10 +60,10 @@ const POLICIES = {
   [WARNING.INTERNAL_CALENDAR_UNAVAILABLE]: { type: 'INTERNAL_CALENDAR', severity: SEVERITY.VERIFY, dismissible: false, recheckable: false },
   [WARNING.CALENDAR_FLAG]: { type: 'INTERNAL_CALENDAR', severity: SEVERITY.ACTION, dismissible: false, recheckable: false },
   [WARNING.OVERLAP]: { type: 'INTERNAL_BOOKING', severity: SEVERITY.ACTION, dismissible: false, recheckable: false },
-  [WARNING.MAIL_REVIEW]: { type: 'MAIL', severity: SEVERITY.VERIFY, dismissible: true, recheckable: false },
-  [WARNING.MAIL_PENDING]: { type: 'MAIL', severity: SEVERITY.VERIFY, dismissible: true, recheckable: false },
-  [WARNING.MAIL_FAILED]: { type: 'MAIL', severity: SEVERITY.ACTION, dismissible: true, recheckable: false },
-  [WARNING.MAIL_UNVERIFIED]: { type: 'MAIL', severity: SEVERITY.VERIFY, dismissible: true, recheckable: false },
+  [WARNING.MAIL_REVIEW]: { type: 'MAIL', severity: SEVERITY.VERIFY, dismissible: true, recheckable: true },
+  [WARNING.MAIL_PENDING]: { type: 'MAIL', severity: SEVERITY.VERIFY, dismissible: true, recheckable: true },
+  [WARNING.MAIL_FAILED]: { type: 'MAIL', severity: SEVERITY.ACTION, dismissible: true, recheckable: true },
+  [WARNING.MAIL_UNVERIFIED]: { type: 'MAIL', severity: SEVERITY.VERIFY, dismissible: true, recheckable: true },
   [WARNING.PAYMENT_MISSING]: { type: 'PAYMENT', severity: SEVERITY.ACTION, dismissible: false, recheckable: false },
   [WARNING.RECONCILIATION]: { type: 'PAYMENT', severity: SEVERITY.ACTION, dismissible: false, recheckable: false },
   [WARNING.REFUND_PENDING]: { type: 'PAYMENT', severity: SEVERITY.ACTION, dismissible: false, recheckable: false },
@@ -453,21 +453,29 @@ function internalWarnings(booking, options = {}) {
 
 function mailWarnings(booking) {
   const levels = [
-    { kind: 'värdmejl', level: booking.mailStatus?.host },
-    { kind: 'gästmejl', level: booking.mailStatus?.guest }
+    { key: 'host', kind: 'värdmejl', level: booking.mailStatus?.host },
+    { key: 'guest', kind: 'gästmejl', level: booking.mailStatus?.guest }
   ].filter((item) => item.level);
   if (!levels.length) return [];
 
-  const pending = levels.filter(({ level }) => level.pending || level.status === 'Utkorg' || level.status === 'Skickar');
-  const failed = levels.filter(({ level }) =>
+  const verificationFor = (key) => booking.mailVerification?.[key] ?? null;
+  const deliveredViaApi = (key) => verificationFor(key)?.status === 'delivered';
+  const failedViaApi = (key) =>
+    ['bounced', 'failed', 'complained'].includes(verificationFor(key)?.status);
+
+  const pending = levels.filter(({ level }) =>
+    level.pending || level.status === 'Utkorg' || level.status === 'Skickar');
+  const failed = levels.filter(({ key, level }) =>
     level.deliveryFailed ||
     level.status === 'Misslyckad' ||
     level.status === 'Kräver manuell kontroll' ||
-    level.deliveryTone === 'danger'
+    level.deliveryTone === 'danger' ||
+    failedViaApi(key)
   );
-  const unverified = levels.filter(({ level }) =>
+  const unverified = levels.filter(({ key, level }) =>
     !failed.some((item) => item.level === level) &&
     level.deliveryUnverified &&
+    !deliveredViaApi(key) &&
     !pending.some((item) => item.level === level)
   );
 

@@ -490,3 +490,38 @@ img { max-width: 100%; display: block; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
 }
+
+/* Synlig återkoppling för "Kontrollera igen" */
+.btn.is-loading,
+.btn[aria-busy="true"] { display: inline-flex; align-items: center; gap: 8px; cursor: progress; }
+.spinner {
+  width: 0.9em;
+  height: 0.9em;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  display: inline-block;
+  animation: admin-spin 0.7s linear infinite;
+  flex: 0 0 auto;
+}
+@keyframes admin-spin { to { transform: rotate(360deg); } }
+.warning-check-result {
+  margin-top: 10px;
+  padding: 9px 11px;
+  border-radius: var(--radius-sm);
+  background: var(--canvas);
+  border-left: 3px solid var(--gold);
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+.warning-check-result-error { border-left-color: var(--red); color: var(--red); background: var(--red-soft); }
+.recheck-result { margin-bottom: 16px; }
+.recheck-result-ok { border-left: 4px solid var(--green, #2f7d4f); }
+.recheck-result-warning { border-left: 4px solid var(--amber, #b7791f); }
+.mail-manual-help { margin-top: 10px; }
+.mail-manual-help > summary { cursor: pointer; font-size: 0.78rem; color: var(--ink-soft); }
+.mail-help-list { margin: 8px 0 0 18px; padding: 0; font-size: 0.78rem; color: var(--ink-soft); }
+.mail-help-list li { margin-bottom: 5px; }
+.mail-verification { font-size: 0.76rem; color: var(--ink-soft); margin-top: 4px; }
+.mail-verification-ok { color: var(--green, #2f7d4f); }
+.mail-verification-danger { color: var(--red); }

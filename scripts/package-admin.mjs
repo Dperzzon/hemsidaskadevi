@@ -42,6 +42,7 @@ const required = [
   'server/admin/index.js',
   'server/admin/auth.js',
   'server/admin/booking-service.js',
+  'server/admin/resend-delivery.js',
   'server/admin/public/admin.css',
   'server/admin/public/admin.js',
   'server/calendar/availability.js',

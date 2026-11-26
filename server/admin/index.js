@@ -182,7 +182,9 @@ async function serveAsset(req, res, pathname) {
   res.writeHead(200, {
     ...securityHeaders(req),
     'Content-Type': MIME_TYPES[ext] ?? 'application/octet-stream',
-    'Cache-Control': 'private, max-age=300',
+    // Adminportalens skript och stilar får inte fastna i webbläsarens cache
+    // efter en publicering. Innehållet är litet och kan alltid revalideras.
+    'Cache-Control': 'no-cache, no-store, must-revalidate',
     'Content-Length': data.length
   });
   res.end(req.method === 'HEAD' ? undefined : data);
@@ -281,7 +283,8 @@ function serviceOptions(context) {
     stripeEnabled: context.stripeEnabled,
     stripeMode: context.stripeMode,
     paymentLinkTtlMs: context.paymentLinkTtlMs,
-    publicBaseUrl: context.publicBaseUrl
+    publicBaseUrl: context.publicBaseUrl,
+    resendDelivery: context.resendDelivery
   };
 }
 
@@ -957,6 +960,7 @@ function createAdminRequestListener(options = {}) {
           publicBaseUrl: options.publicBaseUrl,
           availabilityHandler: options.availabilityHandler,
           availability: options.availability,
+          resendDelivery: options.resendDelivery,
           rules: options.rules,
           warn
         });

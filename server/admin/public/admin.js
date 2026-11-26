@@ -8,9 +8,10 @@
   const menuButton = document.querySelector('.menu-button');
   const sidebar = document.getElementById('sidebar');
   const toast = document.getElementById('toast');
-  const csrf = body.dataset.csrf || '';
+  let csrf = body.dataset.csrf || '';
   const roles = String(body.dataset.roles || '').split(',').filter(Boolean);
   let toastTimer = null;
+  const RECHECK_RESULT_KEY = 'skadeviAdminRecheckResult';
 
   function setNav(open) {
     body.classList.toggle('nav-open', open);
@@ -39,7 +40,26 @@
     }, 6200);
   }
 
-  async function api(path, options = {}) {
+  async function refreshCsrfToken() {
+    try {
+      const response = await fetch('/api/admin/session', {
+        method: 'GET',
+        cache: 'no-store',
+        credentials: 'same-origin',
+        headers: { Accept: 'application/json' }
+      });
+      if (!response.ok) return false;
+      const data = await response.json().catch(() => null);
+      if (!data || typeof data.csrfToken !== 'string' || !data.csrfToken) return false;
+      csrf = data.csrfToken;
+      body.dataset.csrf = csrf;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function api(path, options = {}, allowTokenRetry = true) {
     const headers = {
       'X-CSRF-Token': csrf,
       ...(options.headers || {})
@@ -49,15 +69,44 @@
       headers['Content-Type'] = 'application/json';
       requestBody = JSON.stringify(options.body);
     }
-    const response = await fetch(path, {
-      method: options.method || 'POST',
-      cache: 'no-store',
-      credentials: 'same-origin',
-      // Easy Auth kräver same-origin Referer för skrivande anrop.
-      referrerPolicy: 'same-origin',
-      headers,
-      body: requestBody
-    });
+    const controller = new AbortController();
+    const timeoutMs = Number(options.timeoutMs ?? 25000);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let response;
+    try {
+      response = await fetch(path, {
+        method: options.method || 'POST',
+        cache: 'no-store',
+        credentials: 'same-origin',
+        // Easy Auth kräver same-origin Referer för skrivande anrop.
+        referrerPolicy: 'same-origin',
+        headers,
+        body: requestBody,
+        signal: controller.signal
+      });
+    } catch (cause) {
+      if (cause && cause.name === 'AbortError') {
+        const error = new Error(
+          'Kontrollen tog för lång tid. Servern svarade inte inom rimlig tid. Försök igen om en stund.'
+        );
+        error.code = 'TIMEOUT';
+        throw error;
+      }
+      const error = new Error('Kunde inte nå servern. Kontrollera anslutningen och försök igen.');
+      error.code = 'NETWORK';
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+
+    // En token kan bli ogiltig efter omstart eller vid utskalning. Hämta en
+    // färsk token från sessionen och försök exakt en gång till – CSRF är
+    // fortfarande påslaget och något skydd sänks aldrig.
+    if (response.status === 403 && allowTokenRetry) {
+      const refreshed = await refreshCsrfToken();
+      if (refreshed) return api(path, options, false);
+    }
+
     const contentType = response.headers.get('content-type') || '';
     if (!contentType.includes('application/json')) {
       const error = new Error(
@@ -228,23 +277,122 @@
     });
   });
 
+  function recheckResultBox(warningId) {
+    return document.querySelector(`[data-check-result="${String(warningId).replace(/"/g, '\\"')}"]`);
+  }
+
+  function setRecheckBusy(button, busy) {
+    if (busy) {
+      if (button.dataset.busy === 'true') return false;
+      button.dataset.busy = 'true';
+      button.dataset.originalLabel = button.textContent.trim();
+      button.disabled = true;
+      button.setAttribute('aria-busy', 'true');
+      button.innerHTML = '<span class="spinner" aria-hidden="true"></span>Kontrollerar…';
+      return true;
+    }
+    button.dataset.busy = 'false';
+    button.disabled = false;
+    button.removeAttribute('aria-busy');
+    button.textContent = button.dataset.originalLabel || 'Kontrollera igen';
+    return true;
+  }
+
+  function showRecheckBanner(result) {
+    const main = document.querySelector('.main-content');
+    if (!main) return;
+    const existing = document.getElementById('recheck-result-banner');
+    if (existing) existing.remove();
+    const banner = document.createElement('div');
+    banner.id = 'recheck-result-banner';
+    banner.className = `notice recheck-result recheck-result-${result.ok ? 'ok' : 'warning'}`;
+    const heading = document.createElement('strong');
+    heading.textContent = result.type === 'MAIL' ? 'Resultat av mejlkontroll' : 'Resultat av Airbnb-kontroll';
+    const text = document.createElement('p');
+    text.textContent = result.message;
+    const when = document.createElement('p');
+    when.className = 'warning-meta';
+    when.textContent = result.checkedAt
+      ? `Kontrollen utfördes ${new Date(result.checkedAt).toLocaleString('sv-SE')}.`
+      : '';
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'btn btn-ghost btn-small';
+    close.textContent = 'Stäng';
+    close.addEventListener('click', () => banner.remove());
+    banner.append(heading, text);
+    if (when.textContent) banner.append(when);
+    banner.append(close);
+    main.prepend(banner);
+    banner.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function renderStoredRecheckResult() {
+    let stored = null;
+    try {
+      stored = JSON.parse(sessionStorage.getItem(RECHECK_RESULT_KEY) || 'null');
+      sessionStorage.removeItem(RECHECK_RESULT_KEY);
+    } catch {
+      stored = null;
+    }
+    if (!stored || !stored.message) return;
+    showToast(stored.message);
+    showRecheckBanner(stored);
+    const box = recheckResultBox(stored.warningId);
+    if (box) {
+      box.hidden = false;
+      box.textContent = stored.message;
+    }
+  }
+
   document.querySelectorAll('[data-warning-recheck]').forEach((button) => {
     button.addEventListener('click', async () => {
-      button.disabled = true;
+      if (!setRecheckBusy(button, true)) return;
+      const warningId = button.dataset.warningRecheck;
+      const box = recheckResultBox(warningId);
+      if (box) {
+        box.hidden = false;
+        box.textContent = 'Kontrollerar mot servern…';
+      }
       try {
-        await api(`/api/admin/bookings/${encodeURIComponent(button.dataset.reference)}/warnings/recheck`, {
-          body: {
-            warningId: button.dataset.warningRecheck,
-            expectedEtag: button.dataset.etag || undefined
+        const data = await api(
+          `/api/admin/bookings/${encodeURIComponent(button.dataset.reference)}/warnings/recheck`,
+          {
+            body: {
+              warningId,
+              expectedEtag: button.dataset.etag || undefined
+            },
+            timeoutMs: 25000
           }
-        });
-        window.location.reload();
+        );
+        const result = data?.result ?? {};
+        const message = result.message || 'Kontrollen genomfördes.';
+        const stored = {
+          reference: button.dataset.reference,
+          warningId,
+          type: result.type || '',
+          message,
+          checkedAt: result.checkedAt || new Date().toISOString(),
+          ok: ['blocked', 'delivered'].includes(result.status)
+        };
+        try { sessionStorage.setItem(RECHECK_RESULT_KEY, JSON.stringify(stored)); } catch { /* ignoreras */ }
+        if (box) box.textContent = message;
+        showToast(message);
+        setTimeout(() => window.location.reload(), 900);
       } catch (error) {
-        showToast(errorText(error));
-        button.disabled = false;
+        const message = errorText(error);
+        if (box) {
+          box.hidden = false;
+          box.className = 'warning-check-result warning-check-result-error';
+          box.textContent = message;
+        }
+        showToast(message);
+        setRecheckBusy(button, false);
       }
     });
   });
+
+  renderStoredRecheckResult();
 
   document.querySelectorAll('[data-warning-ack]').forEach((button) => {
     button.addEventListener('click', async () => {

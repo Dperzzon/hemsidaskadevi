@@ -52,6 +52,7 @@ const {
   openingBalanceOreFor,
   computePaymentSummary
 } = require('./payments');
+const { checkResendDelivery } = require('./resend-delivery');
 
 const MAX_GUESTS = 24;
 const MAX_NIGHTS = 93;
@@ -778,6 +779,50 @@ async function acknowledgeWarning(repo, principal, reference, body = {}, options
   }
 }
 
+function stockholmTime(iso) {
+  const date = new Date(iso);
+  if (!Number.isFinite(date.getTime())) return '';
+  return new Intl.DateTimeFormat('sv-SE', {
+    timeZone: 'Europe/Stockholm', hour: '2-digit', minute: '2-digit'
+  }).format(date);
+}
+
+function airbnbRecheckMessage(status, blockedNights, nights, checkedAt) {
+  const time = stockholmTime(checkedAt);
+  if (status === 'blocked') {
+    return `Kalendern kontrollerad kl. ${time}. Blockeringen är verifierad i Airbnbs exporterade kalender.`;
+  }
+  if (status === 'partial') {
+    return `Kalendern kontrollerad kl. ${time}. Endast ${blockedNights.length} av ${nights.length} nätter kunde verifieras i Airbnbs exporterade kalender.`;
+  }
+  if (status === 'available') {
+    return `Kalendern kontrollerad kl. ${time}. Airbnbs exporterade kalender visar ingen blockering för bokningens nätter. Det kan bero på att Airbnb ännu inte hämtat den importerade kalendern, eller att importerade blockeringar inte syns i Airbnbs export. Kontrollera Airbnb manuellt.`;
+  }
+  return `Kontrollen kl. ${time} kunde inte läsa Airbnbs exporterade kalender. Status är därför okänd och ingen blockering kan verifieras automatiskt.`;
+}
+
+function mailVerificationMessage(results, checkedAt) {
+  const time = stockholmTime(checkedAt);
+  const entries = Object.entries(results);
+  if (!entries.length) {
+    return 'Ingen mejlpost med Resend-ID hittades i utkorgen. Leveransen kan därför inte kontrolleras automatiskt.';
+  }
+  const delivered = entries.filter(([, value]) => value.status === 'delivered');
+  if (delivered.length === entries.length) {
+    return `Resend bekräftar leverans. Kontrollerat kl. ${time}.`;
+  }
+  if (entries.some(([, value]) => value.status === 'permission_denied')) {
+    return `Resend-nyckeln saknar behörighet att läsa leveransstatus (Sending access). Leveransen kan därför inte verifieras automatiskt. Kontrollera mejlet manuellt i Resend med angivet Resend-ID.`;
+  }
+  if (entries.some(([, value]) => value.status === 'not_configured')) {
+    return `Automatisk leveranskontroll är inte aktiverad. API-nyckeln har Sending access och någon leveranswebhook är inte aktiverad. Mejlet accepterades av Resend men senare leveransstatus kan inte läsas via API. Kontrollera manuellt i Resend.`;
+  }
+  if (entries.some(([, value]) => ['bounced', 'failed', 'complained'].includes(value.status))) {
+    return `Resend rapporterar att leveransen misslyckades. Kontrollerat kl. ${time}. Hantera mejlet manuellt.`;
+  }
+  return `Resend kunde inte lämna en slutlig leveransstatus. Kontrollerat kl. ${time}. Leveransen är fortfarande ej verifierad.`;
+}
+
 async function recheckWarning(repo, principal, reference, body = {}, options = {}, context = {}) {
   if (!principal?.roles?.includes('Owner')) {
     return error(403, 'Endast Owner kan kontrollera varningar igen.');
@@ -807,51 +852,85 @@ async function recheckWarning(repo, principal, reference, body = {}, options = {
   if (!target.recheckable) {
     return error(409, 'Den här varningen kan inte kontrolleras igen.', { code: 'WARNING_NOT_RECHECKABLE' });
   }
-  if (target.type !== 'AIRBNB') {
-    return error(422, 'Endast Airbnb-varningar kan kontrolleras igen just nu.', { code: 'RECHECK_UNSUPPORTED' });
-  }
-
-  const nights = nightKeys(record.arrival, record.departure);
-  let status = 'unavailable';
-  let blockedNights = [];
-  let checkError = 'unavailable';
-  try {
-    const handler = options.availabilityHandler ?? handleAvailability;
-    const query = new URLSearchParams({ start: record.arrival, end: record.departure });
-    const result = await handler({ query }, context, options.availability ?? {});
-    if (result.status === 200 && Array.isArray(result.jsonBody?.blocked)) {
-      blockedNights = nights.filter((night) => result.jsonBody.blocked.includes(night));
-      status = blockedNights.length === 0
-        ? 'available'
-        : (blockedNights.length === nights.length ? 'blocked' : 'partial');
-      checkError = '';
-    }
-  } catch {
-    status = 'unavailable';
-    checkError = 'exception';
+  if (!['AIRBNB', 'MAIL'].includes(target.type)) {
+    return error(422, 'Den här varningstypen kan inte kontrolleras igen.', { code: 'RECHECK_UNSUPPORTED' });
   }
 
   const checkedAt = now.toISOString();
   const actor = actorOf(principal);
-  record.airbnbVerification = {
-    status,
-    blockedNights,
-    checkedAt,
-    checkedBy: actor.name,
-    fingerprint: stayFingerprint(record),
-    source: 'ical',
-    error: checkError
-  };
-  // Endast en lyckad läsning som visar att alla nätter är blockerade får
-  // sätta det verifierade blockdatet. Okänd eller tillgänglig kalender får
-  // aldrig se ut som ett verifierat OK.
-  if (status === 'blocked') {
-    record.airbnbBlockedAt = checkedAt;
-    record.actionFlags = { ...(record.actionFlags ?? {}), airbnbBlocked: true };
+  let verification = null;
+  let message = '';
+  let outcome = '';
+
+  if (target.type === 'AIRBNB') {
+    const nights = nightKeys(record.arrival, record.departure);
+    let status = 'unavailable';
+    let blockedNights = [];
+    let checkError = 'unavailable';
+    try {
+      const handler = options.availabilityHandler ?? handleAvailability;
+      const query = new URLSearchParams({ start: record.arrival, end: record.departure });
+      const result = await handler({ query }, context, options.availability ?? {});
+      if (result.status === 200 && Array.isArray(result.jsonBody?.blocked)) {
+        blockedNights = nights.filter((night) => result.jsonBody.blocked.includes(night));
+        status = blockedNights.length === 0
+          ? 'available'
+          : (blockedNights.length === nights.length ? 'blocked' : 'partial');
+        checkError = '';
+      }
+    } catch {
+      status = 'unavailable';
+      checkError = 'exception';
+    }
+
+    record.airbnbVerification = {
+      status,
+      blockedNights,
+      checkedAt,
+      checkedBy: actor.name,
+      fingerprint: stayFingerprint(record),
+      source: 'ical',
+      error: checkError
+    };
+    // Endast en lyckad läsning som visar att alla nätter är blockerade får
+    // sätta det verifierade blockdatet. Okänd eller tillgänglig kalender får
+    // aldrig se ut som ett verifierat OK.
+    if (status === 'blocked') {
+      record.airbnbBlockedAt = checkedAt;
+      record.actionFlags = { ...(record.actionFlags ?? {}), airbnbBlocked: true };
+    } else {
+      record.airbnbBlockedAt = '';
+      record.actionFlags = { ...(record.actionFlags ?? {}), airbnbBlocked: false };
+    }
+    verification = record.airbnbVerification;
+    outcome = status;
+    message = airbnbRecheckMessage(status, blockedNights, nights, checkedAt);
   } else {
-    record.airbnbBlockedAt = '';
-    record.actionFlags = { ...(record.actionFlags ?? {}), airbnbBlocked: false };
+    // Mejlkontroll: läs befintlig utkorg och försök bara läsa leveransstatus
+    // från Resend om rätt behörighet uttryckligen aktiverats. Ett 401/403
+    // upprepas aldrig i onödan och påverkar aldrig bokningen.
+    const levels = [
+      { key: 'host', level: normalized.mailStatus?.host },
+      { key: 'guest', level: normalized.mailStatus?.guest }
+    ].filter(({ level }) => level && level.resendId &&
+      (level.deliveryUnverified || level.deliveryFailed || level.pending));
+
+    const results = { ...(record.mailVerification ?? {}) };
+    for (const { key, level } of levels) {
+      results[key] = await checkResendDelivery({
+        ...(options.resendDelivery ?? {}),
+        resendId: level.resendId
+      });
+    }
+    record.mailVerification = results;
+    verification = results;
+    outcome = Object.values(results).map((value) => value?.status).filter(Boolean).join(',') || 'unavailable';
+    message = mailVerificationMessage(
+      Object.fromEntries(levels.map(({ key }) => [key, results[key]])),
+      checkedAt
+    );
   }
+
   record.version = Number(record.version || 1) + 1;
   record.updatedAt = checkedAt;
   record.updatedBy = actor.name;
@@ -862,7 +941,7 @@ async function recheckWarning(repo, principal, reference, body = {}, options = {
       fromStatus: record.statusCode,
       toStatus: record.statusCode,
       reason: cleanString(body.reason, 500),
-      changes: { warningId, status, blockedNights, checkedAt },
+      changes: { warningId, type: target.type, outcome, checkedAt },
       context
     });
     let after = null;
@@ -874,7 +953,14 @@ async function recheckWarning(repo, principal, reference, body = {}, options = {
       jsonBody: {
         reference,
         warningId,
-        verification: record.airbnbVerification,
+        type: target.type,
+        verification,
+        result: {
+          type: target.type,
+          status: outcome,
+          checkedAt,
+          message
+        },
         etag: updated.etag,
         warnings: afterWarnings,
         unresolved: afterWarnings.filter((warning) => warning.severity !== 'handled').map((warning) => warning.id)
