@@ -8,6 +8,11 @@
 
 const DAY = 86400000;
 
+// Ett mejl som endast accepterats av Resend får inte larma direkt. Normal
+// leverans sker oftast inom några sekunder, men tillfälliga köer hos
+// mottagaren kan ta några minuter. Först efter denna tid krävs uppmärksamhet.
+const MAIL_UNVERIFIED_ALERT_MINUTES = 60;
+
 const WARNING = {
   AIRBNB_UNVERIFIED: 'airbnb.unverified',
   AIRBNB_UNAVAILABLE: 'airbnb.unavailable',
@@ -522,12 +527,26 @@ function internalWarnings(booking, options = {}) {
   return warnings;
 }
 
-function mailWarnings(booking) {
+function mailWarnings(booking, options = {}) {
   const levels = [
     { key: 'host', kind: 'värdmejl', level: booking.mailStatus?.host },
     { key: 'guest', kind: 'gästmejl', level: booking.mailStatus?.guest }
   ].filter((item) => item.level);
   if (!levels.length) return [];
+
+  const now = options.now instanceof Date ? options.now : new Date();
+  const alertMinutes = Number.isFinite(Number(options.unverifiedAlertMinutes))
+    ? Math.max(0, Number(options.unverifiedAlertMinutes))
+    : MAIL_UNVERIFIED_ALERT_MINUTES;
+  const acceptedAgeMinutes = (level) => {
+    const reference = Date.parse(String(
+      level.acceptedAt || level.lastEventAt || level.updatedAt || level.createdAt || ''
+    ));
+    // Saknas en trovärdig tid kan färskheten inte styrkas. Då krävs kontroll
+    // hellre än att en gammal overifierad leverans döljs.
+    if (!Number.isFinite(reference)) return Infinity;
+    return (now.getTime() - reference) / 60000;
+  };
 
   const verificationFor = (key) => booking.mailVerification?.[key] ?? null;
   const deliveredViaApi = (key) => verificationFor(key)?.status === 'delivered';
@@ -550,7 +569,8 @@ function mailWarnings(booking) {
     level.deliveryUnverified &&
     !deliveredViaApi(key) &&
     !manualFor(key, level) &&
-    !pending.some((item) => item.level === level)
+    !pending.some((item) => item.level === level) &&
+    acceptedAgeMinutes(level) >= alertMinutes
   );
 
   if (failed.length) {
@@ -583,6 +603,7 @@ function mailWarnings(booking) {
       what: `Resend har accepterat mejlet men ingen leveranshändelse finns (${parts.join(', ')}).`,
       why: 'API-acceptans är inte samma sak som leverans till mottagarens mejlserver. Slutlig placering i inkorgen kan normalt inte verifieras.',
       recommendation: 'Kontrollera leveransen i Resend eller be mottagaren bekräfta. Aktivera leveranswebhook för automatisk uppföljning när det är godkänt.',
+      details: { alertAfterMinutes: alertMinutes },
       fingerprint: warningFingerprint(booking, WARNING.MAIL_UNVERIFIED, parts.join(','))
     })];
   }
@@ -590,7 +611,7 @@ function mailWarnings(booking) {
   return [];
 }
 
-function operationalWarnings(booking, now) {
+function operationalWarnings(booking, now, options = {}) {
   const warnings = [];
   const today = todayKey(now);
   const created = booking.createdAt ? new Date(booking.createdAt) : null;
@@ -608,7 +629,7 @@ function operationalWarnings(booking, now) {
     }));
   }
 
-  warnings.push(...mailWarnings(booking));
+  warnings.push(...mailWarnings(booking, { ...options, now }));
 
   if (booking.statusCode === 'CONFIRMED' && booking.addonValidation?.ok === false) {
     const issues = Array.isArray(booking.addonValidation.issues) ? booking.addonValidation.issues : [];
@@ -682,7 +703,7 @@ function deriveWarnings(booking = {}, options = {}) {
   const warnings = [
     ...internalWarnings(booking, options),
     ...airbnbWarnings(booking, options),
-    ...operationalWarnings(booking, now)
+    ...operationalWarnings(booking, now, options)
   ];
   const seen = new Set();
   const unique = warnings.filter((warning) => {
@@ -720,5 +741,6 @@ module.exports = {
   normalizeVerification,
   deriveWarnings,
   applyWarnings,
-  findWarning
+  findWarning,
+  MAIL_UNVERIFIED_ALERT_MINUTES
 };

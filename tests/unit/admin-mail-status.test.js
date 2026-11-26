@@ -140,6 +140,59 @@ test('mejlväntan, leveransfel och accepterad men overifierad leverans ger olika
   assert.match(warning.recommendation, /leveranswebhook/);
 });
 
+test('kort väntetid efter Resend-acceptans ger ingen varning – först efter tidsgränsen', () => {
+  const recent = deriveWarnings(booking({
+    emailStatus: {
+      guest: {
+        mailType: 'GUEST_BOOKING_CONFIRMED',
+        status: 'Skickad',
+        deliveryStatus: 'accepted',
+        resendId: 'r-recent',
+        sentAt: '2026-11-26T09:50:00.000Z',
+        createdAt: '2026-11-26T09:49:00.000Z'
+      }
+    }
+  }), { now: new Date('2026-11-26T10:00:00.000Z') });
+  assert.equal(recent.some((item) => item.id === WARNING.MAIL_UNVERIFIED), false);
+
+  const old = deriveWarnings(booking({
+    emailStatus: {
+      guest: {
+        mailType: 'GUEST_BOOKING_CONFIRMED',
+        status: 'Skickad',
+        deliveryStatus: 'accepted',
+        resendId: 'r-old',
+        sentAt: '2026-11-26T08:30:00.000Z',
+        createdAt: '2026-11-26T08:29:00.000Z'
+      }
+    }
+  }), { now: new Date('2026-11-26T10:00:00.000Z') });
+  const warning = old.find((item) => item.id === WARNING.MAIL_UNVERIFIED);
+  assert.ok(warning);
+  assert.equal(warning.details.alertAfterMinutes, 60);
+});
+
+test('leveranshändelse tar bort varningen om overifierad leverans automatiskt', () => {
+  const record = booking({
+    emailStatus: {
+      guest: {
+        mailType: 'GUEST_BOOKING_CONFIRMED',
+        status: 'Skickad',
+        deliveryStatus: 'delivered',
+        resendId: 'r-delivered',
+        sentAt: '2026-11-26T08:50:00.000Z',
+        deliveredAt: '2026-11-26T09:10:00.000Z',
+        lastEventType: 'email.delivered',
+        createdAt: '2026-11-26T08:49:00.000Z'
+      }
+    }
+  });
+  assert.equal(record.mailStatus.guest.deliveryLabel, 'Levererat');
+  const warnings = deriveWarnings(record, { now: new Date('2026-11-26T10:00:00.000Z') });
+  assert.equal(warnings.some((item) => item.id === WARNING.MAIL_UNVERIFIED), false);
+  assert.equal(warnings.some((item) => item.id === WARNING.MAIL_FAILED), false);
+});
+
 test('detaljvyn visar tidslinje och aldrig Levererat vid enbart API-acceptans', () => {
   const record = normalizeBooking({
     idempotencyKey: 'mail-test-view',

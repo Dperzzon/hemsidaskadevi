@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.49.2.45890",
-      "templateHash": "2866168765345082724"
+      "templateHash": "17773682136316736266"
     }
   },
   "parameters": {
@@ -75,6 +75,43 @@
         "description": "Namn på Key Vault-sekretens för kalenderadressen."
       }
     },
+    "calendarExportSecretName": {
+      "type": "string",
+      "defaultValue": "calendar-export-token",
+      "metadata": {
+        "description": "Namn på Key Vault-sekretens för den hemliga token i Skadevis publika iCal-export. Värdet sätts aldrig via Bicep."
+      }
+    },
+    "analyticsTransactionSecretName": {
+      "type": "string",
+      "defaultValue": "analytics-transaction-secret",
+      "metadata": {
+        "description": "Namn på Key Vault-sekretens för HMAC-hemligheten som gör GA4-transaktions-ID:n stabila men icke-reversibla. Värdet sätts aldrig via Bicep."
+      }
+    },
+    "doorCodeSecretName": {
+      "type": "string",
+      "defaultValue": "door-code",
+      "metadata": {
+        "description": "Namn på Key Vault-sekretet med dörrkoden. Värdet sätts aldrig via Bicep eller frontend och lämnas endast i bekräftelsemejl till bekräftade gäster."
+      }
+    },
+    "bookingTableName": {
+      "type": "string",
+      "defaultValue": "bookingrequests",
+      "metadata": {
+        "description": "Tabellnamn för bokningsdata. Namnet är ingen hemlighet."
+      }
+    },
+    "stripeReconcileIntervalMinutes": {
+      "type": "int",
+      "defaultValue": 5,
+      "minValue": 1,
+      "maxValue": 60,
+      "metadata": {
+        "description": "Intervall i minuter för schemalagd Stripe-avstämning av betalningar som saknar webhook."
+      }
+    },
     "customDomain": {
       "type": "string",
       "metadata": {
@@ -113,6 +150,108 @@
       "defaultValue": "",
       "metadata": {
         "description": "Namn på lagringskontot för bokningsförfrågningar. Tomt = ingen bokningslagring aktiverad ännu (se infra/modules/storage-tables.bicep)."
+      }
+    },
+    "enableStripeWebhook": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Aktiverar Stripe-webhooken. false = /api/stripe/webhook svarar 503 och inga betalningar registreras."
+      }
+    },
+    "enableBookingRequests": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Aktiverar bokningsförfrågningar i formuläret. Sätts uttryckligen per miljö så att en infra-deployment inte ändrar driftsläget av misstag."
+      }
+    },
+    "enableStripeOutbox": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Köar betalnings-, faktura- och betalningslänksmejl till utkorgen. Logic App måste också vara aktiverad för leverans."
+      }
+    },
+    "enableCardCheckout": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Aktiverar kortbetalningar på gästens betalningssida. false = endast faktura."
+      }
+    },
+    "enableSwishCheckout": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Aktiverar Swish-betalningar på gästens betalningssida. false = endast kort och faktura."
+      }
+    },
+    "enableDirectBooking": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Aktiverar direktbokning med kort på den publika webbplatsen. Standard false: endast bokningsförfrågan/faktura. Kräver ett separat godkänt beslut om Airbnb-risk innan den slås på."
+      }
+    },
+    "enableExistingBookingAddons": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Aktiverar köp av tillval till en befintlig bokning. Standard false: funktionen är avstängd och alla endpoints svarar 503. Kräver uttryckligt godkännande efter godkända tester."
+      }
+    },
+    "enableResendWebhook": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Aktiverar Resend-leveranswebhooken. Sätts först när webhookens signeringshemlighet finns i Key Vault och signaturverifieringen är testad. false = /api/webhooks/resend svarar 404."
+      }
+    },
+    "resendWebhookSecretName": {
+      "type": "string",
+      "defaultValue": "resend-webhook-secret",
+      "metadata": {
+        "description": "Namn på Key Vault-secretet med Resend-webhookens signeringshemlighet. Värdet sätts aldrig via Bicep eller i Git."
+      }
+    },
+    "resendWebhookSecretUri": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Fullständig SecretUri till Resend-webhookens signeringshemlighet, utan versionsnummer. Tomt = ingen referens (webhooken fail-closar)."
+      }
+    },
+    "stripeMode": {
+      "type": "string",
+      "defaultValue": "test",
+      "allowedValues": [
+        "test",
+        "live"
+      ],
+      "metadata": {
+        "description": "Stripe-läge som visas i admin och används av den publika appen."
+      }
+    },
+    "allowStripeLive": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Tillåter live-nyckel. Standard false: live-nycklar blockeras."
+      }
+    },
+    "stripeSecretUri": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Fullständig SecretUri till Stripes hemliga nyckel, utan versionsnummer. Krävs för Swish. Tomt = fail-closed."
+      }
+    },
+    "stripeWebhookSecretUri": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Fullständig SecretUri till Stripe-webhookens hemlighet, utan versionsnummer. Tomt = webhooken saknar hemlighet och fail-closed."
       }
     }
   },
@@ -179,7 +318,7 @@
           "minTlsVersion": "1.2",
           "ftpsState": "Disabled",
           "healthCheckPath": "/robots.txt",
-          "appSettings": "[concat(createArray(createObject('name', 'NODE_ENV', 'value', 'production'), createObject('name', 'AIRBNB_ICAL_URL', 'value', format('@Microsoft.KeyVault(SecretUri={0}secrets/{1})', reference(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), '2023-07-01').vaultUri, parameters('keyVaultSecretName'))), createObject('name', 'BOOKING_REQUESTS_ENABLED', 'value', '0')), variables('bookingSettings'))]"
+          "appSettings": "[concat(createArray(createObject('name', 'NODE_ENV', 'value', 'production'), createObject('name', 'AIRBNB_ICAL_URL', 'value', format('@Microsoft.KeyVault(SecretUri={0}secrets/{1})', reference(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), '2023-07-01').vaultUri, parameters('keyVaultSecretName'))), createObject('name', 'CALENDAR_EXPORT_TOKEN', 'value', format('@Microsoft.KeyVault(SecretUri={0}secrets/{1})', reference(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), '2023-07-01').vaultUri, parameters('calendarExportSecretName'))), createObject('name', 'ANALYTICS_TRANSACTION_SECRET', 'value', format('@Microsoft.KeyVault(SecretUri={0}secrets/{1})', reference(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), '2023-07-01').vaultUri, parameters('analyticsTransactionSecretName'))), createObject('name', 'DOOR_CODE', 'value', format('@Microsoft.KeyVault(SecretUri={0}secrets/{1})', reference(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), '2023-07-01').vaultUri, parameters('doorCodeSecretName'))), createObject('name', 'AZURE_TABLE_NAME', 'value', parameters('bookingTableName')), createObject('name', 'STRIPE_RECONCILE_INTERVAL_MINUTES', 'value', string(parameters('stripeReconcileIntervalMinutes'))), createObject('name', 'CALENDAR_SYNC_MONITOR_MINUTES', 'value', '15'), createObject('name', 'DIRECT_BOOKING_MIN_LEAD_HOURS', 'value', '0'), createObject('name', 'BOOKING_REQUESTS_ENABLED', 'value', if(parameters('enableBookingRequests'), '1', '0')), createObject('name', 'PUBLIC_BASE_URL', 'value', format('https://{0}', parameters('customDomain'))), createObject('name', 'STRIPE_WEBHOOK_ENABLED', 'value', if(parameters('enableStripeWebhook'), '1', '0')), createObject('name', 'STRIPE_ENABLED', 'value', if(or(parameters('enableCardCheckout'), parameters('enableSwishCheckout')), '1', '0')), createObject('name', 'STRIPE_CARD_ENABLED', 'value', if(parameters('enableCardCheckout'), '1', '0')), createObject('name', 'STRIPE_SWISH_ENABLED', 'value', if(parameters('enableSwishCheckout'), '1', '0')), createObject('name', 'STRIPE_MODE', 'value', parameters('stripeMode')), createObject('name', 'STRIPE_ALLOW_LIVE', 'value', if(parameters('allowStripeLive'), '1', '0')), createObject('name', 'STRIPE_OUTBOX_ENABLED', 'value', if(parameters('enableStripeOutbox'), '1', '0')), createObject('name', 'DIRECT_BOOKING_ENABLED', 'value', if(parameters('enableDirectBooking'), '1', '0')), createObject('name', 'DIRECT_BOOKING_ALLOW_LIVE', 'value', if(parameters('enableDirectBooking'), '1', '0')), createObject('name', 'EXISTING_BOOKING_ADDONS_ENABLED', 'value', if(parameters('enableExistingBookingAddons'), '1', '0')), createObject('name', 'EXISTING_BOOKING_ADDONS_ALLOW_LIVE', 'value', if(parameters('enableExistingBookingAddons'), '1', '0')), createObject('name', 'RESEND_WEBHOOK_ENABLED', 'value', if(parameters('enableResendWebhook'), '1', '0'))), variables('bookingSettings'), if(and(parameters('enableResendWebhook'), not(empty(parameters('resendWebhookSecretUri')))), createArray(createObject('name', 'RESEND_WEBHOOK_SECRET', 'value', format('@Microsoft.KeyVault(SecretUri={0})', parameters('resendWebhookSecretUri')))), if(parameters('enableResendWebhook'), createArray(createObject('name', 'RESEND_WEBHOOK_SECRET', 'value', format('@Microsoft.KeyVault(SecretUri={0}secrets/{1})', reference(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), '2023-07-01').vaultUri, parameters('resendWebhookSecretName')))), createArray())), if(and(parameters('enableStripeWebhook'), not(empty(parameters('stripeWebhookSecretUri')))), createArray(createObject('name', 'STRIPE_WEBHOOK_SECRET', 'value', format('@Microsoft.KeyVault(SecretUri={0})', parameters('stripeWebhookSecretUri')))), createArray()), if(and(or(parameters('enableCardCheckout'), parameters('enableSwishCheckout')), not(empty(parameters('stripeSecretUri')))), createArray(createObject('name', 'STRIPE_SECRET_KEY', 'value', format('@Microsoft.KeyVault(SecretUri={0})', parameters('stripeSecretUri')))), createArray()))]"
         }
       },
       "dependsOn": [

@@ -96,6 +96,15 @@ param enableDirectBooking bool = false
 @description('Aktiverar köp av tillval till en befintlig bokning. Standard false: funktionen är avstängd och alla endpoints svarar 503. Kräver uttryckligt godkännande efter godkända tester.')
 param enableExistingBookingAddons bool = false
 
+@description('Aktiverar Resend-leveranswebhooken. Sätts först när webhookens signeringshemlighet finns i Key Vault och signaturverifieringen är testad. false = /api/webhooks/resend svarar 404.')
+param enableResendWebhook bool = false
+
+@description('Namn på Key Vault-secretet med Resend-webhookens signeringshemlighet. Värdet sätts aldrig via Bicep eller i Git.')
+param resendWebhookSecretName string = 'resend-webhook-secret'
+
+@description('Fullständig SecretUri till Resend-webhookens signeringshemlighet, utan versionsnummer. Tomt = ingen referens (webhooken fail-closar).')
+param resendWebhookSecretUri string = ''
+
 @description('Stripe-läge som visas i admin och används av den publika appen.')
 @allowed([
   'test'
@@ -216,6 +225,10 @@ var baseAppSettings = [
     name: 'EXISTING_BOOKING_ADDONS_ALLOW_LIVE'
     value: enableExistingBookingAddons ? '1' : '0'
   }
+  {
+    name: 'RESEND_WEBHOOK_ENABLED'
+    value: enableResendWebhook ? '1' : '0'
+  }
 ]
 
 // Lagringskontots NAMN är ingen hemlighet — autentisering sker med webbappens
@@ -232,6 +245,17 @@ var bookingSettings = !empty(bookingStorageAccountName)
 var appSettings = concat(
   baseAppSettings,
   bookingSettings,
+  enableResendWebhook && !empty(resendWebhookSecretUri) ? [
+    {
+      name: 'RESEND_WEBHOOK_SECRET'
+      value: '@Microsoft.KeyVault(SecretUri=${resendWebhookSecretUri})'
+    }
+  ] : enableResendWebhook ? [
+    {
+      name: 'RESEND_WEBHOOK_SECRET'
+      value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/${resendWebhookSecretName})'
+    }
+  ] : [],
   enableStripeWebhook && !empty(stripeWebhookSecretUri) ? [
     {
       name: 'STRIPE_WEBHOOK_SECRET'

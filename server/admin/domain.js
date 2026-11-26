@@ -138,7 +138,7 @@ const DELIVERY_LABELS = {
   delivery_delayed: { label: 'Fördröjd leverans', tone: 'warning' },
   bounced: { label: 'Studsat', tone: 'danger' },
   failed: { label: 'Misslyckat', tone: 'danger' },
-  complained: { label: 'Klagomål', tone: 'danger' },
+  complained: { label: 'Spamklagomål', tone: 'danger' },
   suppressed: { label: 'Undertryckt', tone: 'warning' },
   manual_review: { label: 'Manuell kontroll', tone: 'warning' },
   'Makulerad – bokningen ändrades': { label: 'Makulerad', tone: 'neutral' }

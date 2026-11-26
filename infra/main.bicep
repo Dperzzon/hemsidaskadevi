@@ -90,6 +90,15 @@ param enableDirectBooking bool = false
 @description('Aktiverar köp av tillval till en befintlig bokning. Standard false. Funktionen får endast aktiveras efter godkända tester och uttryckligt beslut.')
 param enableExistingBookingAddons bool = false
 
+@description('Aktiverar Resend-leveranswebhooken. Sätts först när signeringshemligheten finns i Key Vault och signaturverifieringen är testad.')
+param enableResendWebhook bool = false
+
+@description('Namn på Key Vault-secretet med Resend-webhookens signeringshemlighet. Värdet anges aldrig i Git.')
+param resendWebhookSecretName string = 'resend-webhook-secret'
+
+@description('SecretUri till Resend-webhookens signeringshemlighet. Tomt = härleds från Key Vault och secretnamnet. Innehåller ingen hemlighet.')
+param resendWebhookSecretUri string = ''
+
 @description('Stripe-läge som visas i admin och används av den publika appen.')
 @allowed([
   'test'
@@ -160,6 +169,9 @@ module webapp 'modules/webapp.bicep' = {
     enableSwishCheckout: enableSwishCheckout
     enableDirectBooking: enableDirectBooking
     enableExistingBookingAddons: enableExistingBookingAddons
+    enableResendWebhook: enableResendWebhook
+    resendWebhookSecretName: resendWebhookSecretName
+    resendWebhookSecretUri: resendWebhookSecretUri
     stripeMode: stripeMode
     allowStripeLive: allowStripeLive
     stripeSecretUri: stripeSecretUri

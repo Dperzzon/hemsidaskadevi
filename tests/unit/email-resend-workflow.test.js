@@ -388,3 +388,20 @@ test('Main-mallen: BOOKING_REQUESTS_ENABLED är parameteriserad och Logic App ä
   assert.match(params, /param enableStripeOutbox = true/, 'utkorgen ska matcha aktiverat produktionsläge');
   assert.match(params, /param enableDirectBooking = true/, 'direktbokning ska matcha det aktiverade produktionsläget');
 });
+
+test('Resend-webhooken är staged med Key Vault-referens och ingen hemlighet i Git', () => {
+  const webappBicep = fs.readFileSync(path.join(__dirname, '../../infra/modules/webapp.bicep'), 'utf8');
+  const mainBicep = fs.readFileSync(path.join(__dirname, '../../infra/main.bicep'), 'utf8');
+  const params = fs.readFileSync(path.join(__dirname, '../../infra/main.bicepparam'), 'utf8');
+
+  assert.match(webappBicep, /param enableResendWebhook bool = false/);
+  assert.match(
+    webappBicep,
+    /RESEND_WEBHOOK_ENABLED'[\s\S]*?value: enableResendWebhook \? '1' : '0'/
+  );
+  assert.match(webappBicep, /RESEND_WEBHOOK_SECRET'[\s\S]*?@Microsoft\.KeyVault/);
+  assert.match(mainBicep, /param enableResendWebhook bool = false/);
+  assert.match(mainBicep, /enableResendWebhook: enableResendWebhook/);
+  assert.match(params, /param enableResendWebhook = false/, 'webhooken ska vara avstängd tills hemligheten är konfigurerad');
+  assert.doesNotMatch(params, /whsec_/, 'ingen signeringshemlighet får ligga i Git');
+});

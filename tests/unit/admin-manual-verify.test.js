@@ -142,16 +142,16 @@ async function seedTwoUnverifiedMails(repository, reference) {
         status: 'Skickad',
         deliveryStatus: 'Accepterad av Resend – leverans ej verifierad',
         resendId: 're_host_123',
-        sentAt: '2026-11-26T09:10:00.000Z',
-        createdAt: '2026-11-26T09:09:00.000Z'
+        sentAt: '2026-11-26T08:45:00.000Z',
+        createdAt: '2026-11-26T08:44:00.000Z'
       },
       guest: {
         mailType: 'GUEST_BOOKING_CONFIRMED',
         status: 'Skickad',
         deliveryStatus: 'Accepterad av Resend – leverans ej verifierad',
         resendId: 're_guest_123',
-        sentAt: '2026-11-26T09:00:00.000Z',
-        createdAt: '2026-11-26T08:59:00.000Z'
+        sentAt: '2026-11-26T08:55:00.000Z',
+        createdAt: '2026-11-26T08:54:00.000Z'
       }
     }
   }, { ifMatch: raw.etag });

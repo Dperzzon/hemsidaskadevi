@@ -20,6 +20,9 @@ const crypto = require('node:crypto');
 const DEFAULT_TOLERANCE_SECONDS = 300;
 const MAX_EVENT_ID = 200;
 const MAX_EMAIL_ID = 200;
+// Svix-ID och Resend-ID består av begränsade tecken. Att avvisa allt annat
+// innan det når lagringsfiltret skyddar mot OData-injektion och skräpdata.
+const SAFE_ID = /^[A-Za-z0-9_.:-]{1,200}$/;
 
 const EVENT_RANK = {
   'email.sent': 1,
@@ -212,7 +215,7 @@ async function handleResendWebhook(request = {}, context = {}, options = {}) {
     ? request.rawBody.toString('utf8')
     : String(request.rawBody ?? '');
 
-  if (!id || id.length > MAX_EVENT_ID) return result(400, { error: 'Ogiltig händelse.' });
+  if (!id || id.length > MAX_EVENT_ID || !SAFE_ID.test(id)) return result(400, { error: 'Ogiltig händelse.' });
   if (!verifySignature({
     id,
     timestamp,
@@ -233,7 +236,7 @@ async function handleResendWebhook(request = {}, context = {}, options = {}) {
   }
   const type = String(event?.type ?? '');
   const emailId = String(event?.data?.email_id ?? '');
-  if (!type || !emailId || emailId.length > MAX_EMAIL_ID) {
+  if (!type || !emailId || emailId.length > MAX_EMAIL_ID || !SAFE_ID.test(emailId)) {
     return result(400, { error: 'Ogiltig händelse.' });
   }
   const info = classifyEvent(type);
