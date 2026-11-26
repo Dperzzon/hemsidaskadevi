@@ -18,8 +18,10 @@ const {
   contactBlockHtml,
   contactBlockText,
   addonLines,
-  stayLines
+  stayLines,
+  PRACTICAL_INFO
 } = require('./mail-templates');
+const { resolveConfirmationAddons, confirmationDataError } = require('./confirmation-addons');
 
 function summaryFor(record, summary) {
   if (summary) return summary;
@@ -61,7 +63,38 @@ function receiptKind(record, payment, summary) {
   return 'Betalning';
 }
 
+function doorAccess(record, options = {}) {
+  if (record?.statusCode !== 'CONFIRMED') return null;
+  const code = String(options.doorCode ?? process.env.DOOR_CODE ?? '').trim().slice(0, 40);
+  if (!code) return null;
+  const instructions = String(
+    options.doorInstructions ?? PRACTICAL_INFO.doorInstructions ?? ''
+  ).trim().slice(0, 300);
+  return { code, instructions };
+}
+
+function doorAccessHtml(record, options = {}) {
+  const access = doorAccess(record, options);
+  if (!access) return '';
+  return `<div style="margin:18px 0 0;padding:16px 18px;background:${MAIL_BRAND.background};border:1px solid ${MAIL_BRAND.border};border-left:3px solid ${MAIL_BRAND.gold};">
+<p style="margin:0 0 6px;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:${MAIL_BRAND.muted};">Dörrkod</p>
+<p style="margin:0 0 8px;font-family:Georgia,'Times New Roman',serif;font-size:30px;line-height:1.2;letter-spacing:8px;color:${MAIL_BRAND.ink};">${escapeHtml(access.code)}</p>
+${access.instructions ? `<p style="margin:0;font-size:14px;line-height:1.6;color:${MAIL_BRAND.dark};">${escapeHtml(access.instructions)}</p>` : ''}
+</div>`;
+}
+
+function doorAccessText(record, options = {}) {
+  const access = doorAccess(record, options);
+  if (!access) return '';
+  return `Dörrkod: ${access.code}${access.instructions ? `\n${access.instructions}` : ''}`;
+}
+
 function buildBookingConfirmation(record, options = {}) {
+  const addonResolution = resolveConfirmationAddons(record, options);
+  if (!addonResolution.ok && options.allowInvalidAddons !== true) {
+    throw confirmationDataError(addonResolution);
+  }
+  const emailRecord = { ...record, addonLines: addonResolution.lines };
   const summary = summaryFor(record, options.summary);
   const firstName = String(record.firstName ?? '').trim();
   const greeting = firstName ? `Hej ${firstName},` : 'Hej,';
@@ -78,7 +111,7 @@ function buildBookingConfirmation(record, options = {}) {
   if (record.extrahus?.enabled) {
     stayRows.push(['Extrahus', `${record.extrahus.nights} nätter, ${record.extrahus.guests} gäster`]);
   }
-  stayRows.push(['Tillval', addonLines(record).join(', ')]);
+  stayRows.push(['Tillval', addonLines(emailRecord).join(', ')]);
 
   const paymentRowsData = [
     ['Totalt bokningsbelopp inklusive moms', formatOre(summary.totalOre)],
@@ -96,6 +129,7 @@ function buildBookingConfirmation(record, options = {}) {
     : `Bokningen är bekräftad men inte fullbetald. Kvar att betala är ${formatOre(Math.max(0, summary.remainingOre))}.`;
   const calloutBackground = isPaid ? '#eef7ee' : '#fff8e6';
   const calloutBorder = isPaid ? '#4f7f4f' : MAIL_BRAND.gold;
+  const doorText = doorAccessText(record, options);
 
   const content = `<p style="margin:0 0 6px;text-align:center;font-size:15px;color:${MAIL_BRAND.muted};">${escapeHtml(greeting)}</p>
 <p style="margin:0 0 18px;text-align:center;font-size:15px;line-height:1.7;">${escapeHtml(intro)}</p>
@@ -106,6 +140,7 @@ ${paymentRowsData.map(([label, value]) => detailRow(label, value)).join('')}
 <div style="background:${calloutBackground};border-left:3px solid ${calloutBorder};padding:14px 16px;margin:16px 0 0;font-size:15px;line-height:1.55;"><strong>${escapeHtml(paymentText)}</strong></div>
 ${sectionTitle('Inför er vistelse')}
 ${practicalInfoHtml()}
+${doorAccessHtml(record, options)}
 <p style="margin:24px 0 0;font-size:15px;">Har ni frågor inför er vistelse är ni alltid välkomna att kontakta oss.</p>
 <p style="margin:18px 0 0;font-size:15px;">Vänliga hälsningar,<br><strong style="font-family:Georgia,'Times New Roman',serif;font-weight:normal;font-size:17px;">Skadevi Herrgård</strong></p>
 ${contactBlockHtml()}`;
@@ -126,7 +161,7 @@ ${contactBlockHtml()}`;
     paymentText,
     '',
     practicalInfoText(),
-    '',
+    ...(doorText ? [doorText, ''] : []),
     'Har ni frågor inför er vistelse är ni alltid välkomna att kontakta oss.',
     '',
     'Vänliga hälsningar,',

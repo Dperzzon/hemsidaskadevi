@@ -42,6 +42,9 @@ param calendarExportSecretName string = 'calendar-export-token'
 @description('Namn på Key Vault-sekretens för HMAC-hemligheten som gör GA4-transaktions-ID:n stabila men icke-reversibla. Värdet sätts aldrig via Bicep.')
 param analyticsTransactionSecretName string = 'analytics-transaction-secret'
 
+@description('Namn på Key Vault-sekretet med dörrkoden. Värdet sätts aldrig via Bicep eller frontend och lämnas endast i bekräftelsemejl till bekräftade gäster.')
+param doorCodeSecretName string = 'door-code'
+
 @description('Tabellnamn för bokningsdata. Namnet är ingen hemlighet.')
 param bookingTableName string = 'bookingrequests'
 
@@ -140,6 +143,10 @@ var baseAppSettings = [
   {
     name: 'ANALYTICS_TRANSACTION_SECRET'
     value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/${analyticsTransactionSecretName})'
+  }
+  {
+    name: 'DOOR_CODE'
+    value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/${doorCodeSecretName})'
   }
   {
     name: 'AZURE_TABLE_NAME'

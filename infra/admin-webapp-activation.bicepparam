@@ -24,3 +24,4 @@ param adminTrustEasyAuth = '1'
 param githubDeployPrincipalId = 'ee380faf-83af-489d-82bb-ea48eab13ad5'
 param enableBookingWrites = true
 param airbnbIcalSecretUri = 'https://kv-skadevi-prod.vault.azure.net/secrets/airbnb-ical-url/'
+param doorCodeSecretUri = 'https://kv-skadevi-prod.vault.azure.net/secrets/door-code/'

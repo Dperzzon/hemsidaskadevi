@@ -170,6 +170,7 @@ function buildEmailObligation(options = {}) {
 function obligationStatusFor(result) {
   if (!result) return null;
   if (result.disabled === true) return 'DISABLED';
+  if (result.manualReview === true) return 'MANUAL_REVIEW';
   return result.ok === true ? 'QUEUED' : 'FAILED';
 }
 

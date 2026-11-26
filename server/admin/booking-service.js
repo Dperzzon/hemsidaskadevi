@@ -2145,7 +2145,23 @@ async function queueGuestConfirmation(repo, record, options, context) {
     return { ok: false, queued: false, skipped: 'not_confirmed' };
   }
   if (options.outboxEnabled !== true) return { ok: true, queued: false, disabled: true };
-  const notification = buildGuestConfirmation(record);
+  let notification;
+  try {
+    notification = buildGuestConfirmation(record);
+  } catch (error) {
+    if (error?.code === 'CONFIRMATION_DATA_CONFLICT') {
+      context.warn?.(`Bekräftelsemejl blockerades för ${record.reference}: tillvalsuppgifterna stämmer inte.`);
+      return {
+        ok: false,
+        queued: false,
+        manualReview: true,
+        skipped: 'addon_conflict',
+        error,
+        validation: error.resolution
+      };
+    }
+    throw error;
+  }
   const outboxContext = {
     ...context,
     appendHistory: typeof repo.appendHistory === 'function'

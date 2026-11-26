@@ -92,6 +92,23 @@ async function queueConfirmation(store, record, options, context) {
     return { ok: false, queued: false, skipped: 'not_confirmed' };
   }
   if (options.outboxEnabled !== true) return { ok: true, queued: false, disabled: true };
+  let notification;
+  try {
+    notification = buildBookingConfirmation(record);
+  } catch (error) {
+    if (error?.code === 'CONFIRMATION_DATA_CONFLICT') {
+      context.warn?.(`Bekräftelsemejl blockerades för ${record.reference}: tillvalsuppgifterna stämmer inte.`);
+      return {
+        ok: false,
+        queued: false,
+        manualReview: true,
+        skipped: 'addon_conflict',
+        error,
+        validation: error.resolution
+      };
+    }
+    throw error;
+  }
   const outboxContext = {
     ...context,
     appendHistory: typeof store.appendHistory === 'function'
@@ -103,7 +120,7 @@ async function queueConfirmation(store, record, options, context) {
     {
       idempotencyKey: confirmationOutboxKey(record),
       reference: record.reference,
-      notification: buildBookingConfirmation(record),
+      notification,
       createdAt: (options.now ?? new Date()).toISOString(),
       context: outboxContext
     }
@@ -666,7 +683,11 @@ async function finalizePaidCheckoutSession(store, reference, session, event, opt
       warn(`Direktbokning: e-postkvittens kunde inte sparas för ${reference}.`);
       return result(503, { error: 'Bokningen är bekräftad men mejlkvittensen kunde inte sparas.' });
     }
-    if (options.outboxEnabled === true && (guest.ok !== true || host.ok !== true)) {
+    if (guest.manualReview === true) {
+      warn(`Direktbokning: bekräftelsemejlet kräver manuell granskning för ${reference}.`);
+    }
+    const guestFailed = guest.ok !== true && guest.manualReview !== true;
+    if (options.outboxEnabled === true && (guestFailed || host.ok !== true)) {
       warn(`Direktbokning: ett eller flera bekräftelsemejl kunde inte köas för ${reference}.`);
       return result(503, { error: 'Bokningen är bekräftad men mejlen kunde inte köas.' });
     }

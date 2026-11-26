@@ -2,13 +2,16 @@
 
 // Gemensam domänlogik för bokningsportalen. Allt här är read-only: modulen
 // normaliserar befintliga bokningsposter, statusar, prissnapshot och
-// mejlstatus för visning. Den räknar aldrig om priser och skriver aldrig.
+// mejlstatus för visning. Den ändrar aldrig bokningen. Saknade tillvalsrader
+// kan rekonstrueras för visning från sparade tillvalsval och prisversion;
+// avvikelser flaggas i addonValidation.
 
 const { deriveWarnings, applyWarnings } = require('./warnings');
 const { computePaymentSummary, normalizePaymentRequests, latestPaymentRequest } = require('./payments');
 const { normalizeInvoiceRequests, activeInvoiceRequest } = require('../booking/invoice-requests');
 const { paymentAccessState } = require('../booking/payment-access');
 const { calculateRefund } = require('../booking/refunds');
+const { resolveConfirmationAddons } = require('../booking/confirmation-addons');
 
 const STATUS_META = {
   PENDING: {
@@ -235,9 +238,9 @@ function statusMeta(code) {
   return STATUS_META[code] ?? STATUS_META.PENDING;
 }
 
-function normalizeAddonLines(record = {}) {
+function normalizeAddonLines(record = {}, resolvedLines = null) {
   const pricing = parseJson(record.pricing, null);
-  const lines = record.addonLines ?? pricing?.addonLines ?? [];
+  const lines = resolvedLines ?? record.addonLines ?? pricing?.addonLines ?? [];
   if (!Array.isArray(lines)) return [];
   return lines.map((line) => ({
     id: String(line.id ?? ''),
@@ -449,7 +452,7 @@ function obligationMailLevel(record = {}, kind) {
   const obligation = record?.emailObligation?.[kind];
   if (!obligation || typeof obligation !== 'object') return null;
   const status = String(obligation.status ?? '').toUpperCase();
-  if (status !== 'PENDING' && status !== 'FAILED') return null;
+  if (status !== 'PENDING' && status !== 'FAILED' && status !== 'MANUAL_REVIEW') return null;
   return normalizeMailLevel({
     status: status === 'FAILED' ? 'Misslyckad' : 'Kräver manuell kontroll',
     deliveryStatus: 'manual_review',
@@ -488,7 +491,8 @@ function deriveActionReasons(booking, now = new Date()) {
 function normalizeBooking(record = {}, options = {}) {
   const now = options.now ?? new Date();
   const pricing = parseJson(record.pricing, null);
-  const addonLines = normalizeAddonLines(record);
+  const addonResolution = resolveConfirmationAddons(record, { checkBuffers: true });
+  const addonLines = normalizeAddonLines(record, addonResolution.lines);
   const statusCode = normalizeStatus(record);
   const meta = statusMeta(statusCode);
   const discount = parseJson(record.discount, null);
@@ -582,6 +586,18 @@ function normalizeBooking(record = {}, options = {}) {
     priceAdjustmentReason: String(record.priceAdjustmentReason ?? ''),
     priceVersion: String(record.priceVersion ?? ''),
     addonLines,
+    addonValidation: {
+      ok: addonResolution.ok,
+      source: addonResolution.source,
+      issues: addonResolution.issues.map((issue) => ({
+        code: String(issue.code ?? ''),
+        message: String(issue.message ?? '')
+      })),
+      warnings: addonResolution.warnings.map((warning) => ({
+        code: String(warning.code ?? ''),
+        message: String(warning.message ?? '')
+      }))
+    },
     pricing,
     paymentStatus: paymentSummary.paymentStatus,
     paymentLabel: paymentSummary.paymentLabel,

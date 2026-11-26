@@ -50,6 +50,12 @@ param airbnbSecretName string = 'airbnb-ical-url'
 @description('Fullständig SecretUri till airbnb-ical-url, utan versionsnummer. Sätts först vid aktivering och innehåller ingen hemlighet i sig.')
 param airbnbIcalSecretUri string = ''
 
+@description('Namn på Key Vault-secretet med dörrkoden. Värdet får aldrig läggas i Git.')
+param doorCodeSecretName string = 'door-code'
+
+@description('Fullständig SecretUri till door-code, utan versionsnummer. Innehåller ingen hemlighet i sig.')
+param doorCodeSecretUri string = ''
+
 @description('Aktiverar betalningslänkar i adminportalen. false = API och UI visar att betalningar är inaktiva.')
 param enableStripePayments bool = false
 
@@ -95,6 +101,11 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
 resource airbnbSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' existing = {
   parent: keyVault
   name: airbnbSecretName
+}
+
+resource doorCodeSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' existing = {
+  parent: keyVault
+  name: doorCodeSecretName
 }
 
 resource adminApp 'Microsoft.Web/sites@2024-11-01' = {
@@ -177,6 +188,11 @@ resource adminApp 'Microsoft.Web/sites@2024-11-01' = {
           name: 'AIRBNB_ICAL_URL'
           value: '@Microsoft.KeyVault(SecretUri=${airbnbIcalSecretUri})'
         }
+      ] : [], enableBookingWrites && !empty(doorCodeSecretUri) ? [
+        {
+          name: 'DOOR_CODE'
+          value: '@Microsoft.KeyVault(SecretUri=${doorCodeSecretUri})'
+        }
       ] : [])
     }
   }
@@ -221,6 +237,17 @@ resource airbnbSecretUser 'Microsoft.Authorization/roleAssignments@2022-04-01' =
   }
 }
 
+// Endast getSecret pÃ¥ dÃ¶rrkodens secret, inte hela valvet.
+resource doorCodeSecretUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (enableBookingWrites) {
+  name: guid(doorCodeSecret.id, 'admin-kv-secret-user')
+  scope: doorCodeSecret
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', keyVaultSecretsUserRoleId)
+    principalId: adminApp.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
 // Ger GitHub Actions-identiteten rätt att deploya endast till den nya
 // adminappen. Den publika appens befintliga roll och workflow påverkas inte.
 // Roll-ID = inbyggda "Website Contributor".
@@ -243,4 +270,5 @@ output adminAppPrincipalId string = adminApp.identity.principalId
 output tableReaderRoleAssignmentId string = enableBookingWrites ? '' : tableReader.id
 output tableContributorRoleAssignmentId string = enableBookingWrites ? tableContributor.id : ''
 output airbnbSecretUserRoleAssignmentId string = enableBookingWrites ? airbnbSecretUser.id : ''
+output doorCodeSecretUserRoleAssignmentId string = enableBookingWrites ? doorCodeSecretUser.id : ''
 output githubDeployPrincipalId string = githubDeployPrincipalId

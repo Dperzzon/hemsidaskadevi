@@ -321,6 +321,50 @@ test('direktbokning efter verifierad betalning skickar en kombinerad bekräftels
   assert.match(host.mailHtml, /Totalt bokningsbelopp:/);
 });
 
+test('automatisk direktbokning med tillval visar rätt tillval i bekräftelsen', async () => {
+  const addonLines = [
+    { id: 'slutstad', label: 'Slutstädning (exklusive kök)', quantity: 1, unitPrice: 2500, amount: 2500 },
+    { id: 'lakan', label: 'Lakan och handdukar', quantity: 5, unitPrice: 200, amount: 1000 },
+    { id: 'ved', label: 'Ved', quantity: 1, unitPrice: 350, amount: 350 },
+    { id: 'tidigIncheckning', label: 'Tidig incheckning', quantity: 1, unitPrice: 500, amount: 500 },
+    { id: 'senUtcheckning', label: 'Sen utcheckning', quantity: 1, unitPrice: 500, amount: 500 }
+  ];
+  const base = directRecord({
+    total: 11850,
+    totalAddons: 4850,
+    guests: 5,
+    lodgingBase: 7000,
+    lodgingAfterDiscount: 7000,
+    addons: {
+      slutstad: true,
+      extrahus: false,
+      extrahusNights: 0,
+      extrahusGuests: 0,
+      lakan: true,
+      linenCount: 5,
+      ved: true,
+      tidigIncheckning: true,
+      senUtcheckning: true
+    },
+    addonLines
+  });
+  const request = { ...base.paymentRequest, amountOre: 1185000 };
+  const record = { ...base, paymentRequests: [request], paymentRequest: request };
+  const store = createDirectStore(record);
+  const response = await callWebhook(store, event('checkout.session.completed', session({
+    amount_total: 1185000,
+    metadata: { reference: 'SK-2026-DIRECT1' }
+  })));
+  assert.equal(response.status, 200);
+  const confirmation = store.outbox.find((row) => row.mailType === 'GUEST_BOOKING_CONFIRMED');
+  assert.ok(confirmation);
+  assert.doesNotMatch(confirmation.mailHtml, /Inga tillval/);
+  assert.match(confirmation.mailHtml, /Slutstädning/);
+  assert.match(confirmation.mailHtml, /Lakan och handdukar/);
+  assert.match(confirmation.mailHtml, /5 × 200 kr = 1[\s\u00a0]000 kr/);
+  assert.match(confirmation.mailHtml, /11[\s\u00a0]850 kr/);
+});
+
 test('dubbel direktbokningswebhook ger aldrig dubbla bekräftelser', async () => {
   const store = createDirectStore(directRecord());
   const first = await callWebhook(store, event());
@@ -418,6 +462,45 @@ test('en obekräftad bokning kan aldrig få ett bekräftelsemejl', async () => {
   assert.equal(result.queued, false);
   assert.equal(result.skipped, 'not_confirmed');
   assert.equal(outbox.length, 0);
+});
+
+test('manuell bekräftelse med tillvalskonflikt flaggas och köas inte', async () => {
+  const outbox = [];
+  const warnings = [];
+  const result = await queueGuestConfirmation({
+    async saveOutbox(entry) { outbox.push(entry); },
+    async appendHistory() {}
+  }, {
+    reference: 'SK-2026-CONFLICT',
+    statusCode: 'CONFIRMED',
+    version: 1,
+    email: 'gast@example.se',
+    arrival: '2027-05-01',
+    departure: '2027-05-03',
+    nights: 2,
+    guests: 2,
+    total: 5000,
+    totalAddons: 2500,
+    lodgingBase: 2500,
+    lodgingAfterDiscount: 2500,
+    priceVersion: '2026-01-01.0',
+    addons: {
+      slutstad: true,
+      lakan: false,
+      linenCount: 0,
+      ved: false,
+      tidigIncheckning: false,
+      senUtcheckning: false
+    },
+    addonLines: []
+  }, { outboxEnabled: true }, { warn: (message) => warnings.push(message) });
+  assert.equal(result.ok, false);
+  assert.equal(result.queued, false);
+  assert.equal(result.manualReview, true);
+  assert.equal(result.skipped, 'addon_conflict');
+  assert.equal(outbox.length, 0);
+  assert.ok(result.validation.issues.length > 0);
+  assert.match(warnings[0], /blockerades/);
 });
 
 test('ogiltig mottagaradress stoppar inte bokningen men loggas som köfel', async () => {

@@ -204,7 +204,7 @@ function toEntity(record, partition) {
       peakNights: record.peakNights ?? 0,
       peakBase: record.peakBase ?? 0,
       discountAmount: record.discountAmount ?? 0,
-      addonLines: record.addonLines ?? []
+      addonLines: record.addonLines ?? record.pricing?.addonLines ?? []
     }),
     originalPricing: record.originalPricing ? JSON.stringify(record.originalPricing) : '',
     rulesVersion: record.rulesVersion,
@@ -336,6 +336,7 @@ function fromEntity(entity) {
     if (!value) return fallback;
     try { return JSON.parse(value); } catch { return fallback; }
   };
+  const pricing = parse(entity.pricing, null);
   return {
     idempotencyKey: entity.RowKey,
     rowKey: entity.RowKey,
@@ -369,7 +370,12 @@ function fromEntity(entity) {
     agreedTotal: entity.agreedTotal === '' || entity.agreedTotal === undefined ? null : Number(entity.agreedTotal),
     priceAdjustmentReason: entity.priceAdjustmentReason ?? '',
     priceVersion: entity.priceVersion ?? '',
-    pricing: parse(entity.pricing, null),
+    pricing,
+    // addonLines lagras i prissnapshoten. De måste också exponeras på
+    // toppnivå, annars tappas de vid en läs- och återskrivningsrunda och
+    // bekräftelsemejlet visar felaktigt "Inga tillval".
+    addonLines: Array.isArray(pricing?.addonLines) ? pricing.addonLines : [],
+    nightlyBreakdown: Array.isArray(pricing?.nightlyBreakdown) ? pricing.nightlyBreakdown : [],
     originalPricing: parse(entity.originalPricing, null),
     rulesVersion: entity.rulesVersion,
     consentContact: entity.consentContact === 'true',

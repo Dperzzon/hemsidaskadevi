@@ -1079,7 +1079,10 @@ test('Owner kan skapa manuell bokning med extrahus och få rätt pris och kalend
 
     const detail = await request(port, `/api/admin/bookings/${created.json.reference}`);
     assert.match(detail.body, /Extrahus/);
+    assert.match(detail.body, /Lakan och handdukar/);
     assert.match(detail.body, /2027-02-10/);
+    assert.match(detail.body, /"totalAddons":4600/);
+    assert.match(detail.body, /"total":28600/);
 
     const extrahusRows = await repository.listCalendarByResource('extrahus', '2027-02-10', '2027-02-13');
     assert.equal(extrahusRows.length, 2);

@@ -3,5 +3,6 @@
   "checkInTime": "14.00",
   "checkOutTime": "11.00",
   "earlyCheckInTime": "09.00",
-  "lateCheckOutTime": "16.00"
+  "lateCheckOutTime": "16.00",
+  "doorInstructions": "Dörren med kodlåset är på höger sida av huset."
 }

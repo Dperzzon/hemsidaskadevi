@@ -168,13 +168,24 @@ function contactBlockText() {
 }
 
 function addonLines(record = {}) {
-  const rows = Array.isArray(record.addonLines) ? record.addonLines : [];
+  let rows = Array.isArray(record.addonLines) ? record.addonLines : [];
+  if (!rows.length && record.pricing) {
+    let pricing = record.pricing;
+    if (typeof pricing === 'string') {
+      try { pricing = JSON.parse(pricing); } catch { pricing = null; }
+    }
+    if (pricing && Array.isArray(pricing.addonLines)) rows = pricing.addonLines;
+  }
   if (!rows.length) return ['Inga tillval'];
   return rows.map((line) => {
     const quantity = Number(line?.quantity);
+    const unitPrice = Number(line?.unitPrice);
     const amount = formatSek(line?.amount);
     const label = String(line?.label ?? 'Tillval');
-    return quantity > 1 ? `${label}: ${quantity} ×, ${amount}` : `${label}: ${amount}`;
+    if (quantity > 1 && Number.isFinite(unitPrice) && unitPrice >= 0) {
+      return `${label}: ${quantity} × ${formatSek(unitPrice)} = ${amount}`;
+    }
+    return quantity > 1 ? `${label}: ${quantity} st, ${amount}` : `${label}: ${amount}`;
   });
 }
 

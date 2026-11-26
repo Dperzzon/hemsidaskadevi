@@ -33,6 +33,7 @@ const WARNING = {
   PAYMENT_MISSING: 'payment.missing',
   RECONCILIATION: 'payment.reconciliation',
   REFUND_PENDING: 'payment.refund_pending',
+  ADDON_DATA_CONFLICT: 'addon.data_conflict',
   REQUEST_STALE: 'request.stale'
 };
 
@@ -69,6 +70,7 @@ const POLICIES = {
   [WARNING.PAYMENT_MISSING]: { type: 'PAYMENT', severity: SEVERITY.ACTION, dismissible: false, recheckable: false },
   [WARNING.RECONCILIATION]: { type: 'PAYMENT', severity: SEVERITY.ACTION, dismissible: false, recheckable: false },
   [WARNING.REFUND_PENDING]: { type: 'PAYMENT', severity: SEVERITY.ACTION, dismissible: false, recheckable: false },
+  [WARNING.ADDON_DATA_CONFLICT]: { type: 'ADDON', severity: SEVERITY.ACTION, dismissible: false, recheckable: false },
   [WARNING.REQUEST_STALE]: { type: 'REQUEST', severity: SEVERITY.ACTION, dismissible: false, recheckable: false }
 };
 
@@ -607,6 +609,18 @@ function operationalWarnings(booking, now) {
   }
 
   warnings.push(...mailWarnings(booking));
+
+  if (booking.statusCode === 'CONFIRMED' && booking.addonValidation?.ok === false) {
+    const issues = Array.isArray(booking.addonValidation.issues) ? booking.addonValidation.issues : [];
+    const summary = issues.map((issue) => issue.message).filter(Boolean).join(' ');
+    warnings.push(createWarning(WARNING.ADDON_DATA_CONFLICT, {
+      title: 'Tillvalsuppgifterna behöver granskas',
+      what: summary || 'Bokningen har tillvalsuppgifter som inte stämmer med sparat prisunderlag eller kalenderbuffertar.',
+      why: 'Ett bekräftelsemejl med felaktiga eller saknade tillval får inte skickas automatiskt.',
+      recommendation: 'Rätta tillvalsuppgifterna och skicka bekräftelsen först efter kontroll. Varningen kan inte markeras som hanterad.',
+      fingerprint: warningFingerprint(booking, WARNING.ADDON_DATA_CONFLICT, issues.map((issue) => issue.code).join(','))
+    }));
+  }
 
   if (booking.statusCode === 'RECONCILIATION') {
     warnings.push(createWarning(WARNING.RECONCILIATION, {
